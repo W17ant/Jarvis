@@ -7,6 +7,8 @@
                         MEDIA          we live and breathe automotive
 ```
 
+**Built by [Antony O'Neill](https://aoneill.co.uk) · [aoneill.co.uk](https://aoneill.co.uk) · [antony@aoneill.co.uk](mailto:antony@aoneill.co.uk)**
+
 A complete on-prem AI assistant: local Qwen brain, local Whisper STT, local Kokoro TTS, no cloud round-trip for inference, no client work leaving your machine. Stark-style HUD on a 27"+ display. 76+ tools spanning vision, video editing, Premiere automation, Lightroom XMP, Frame.io review, Apple Mail / Calendar, persistent memory, MCP server, and a phone-as-mic live shoot mode.
 
 ---

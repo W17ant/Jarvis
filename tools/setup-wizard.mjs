@@ -469,7 +469,23 @@ async function main() {
   console.log(`    ./launch.sh kiosk     # start in fullscreen`);
   console.log(`    ./launch.sh           # windowed test\n`);
 
+  await printAuthorCredit();
   rl.close();
+}
+
+/** Print the AONeill ASCII signature in red — same render pattern as the
+ *  install + uninstall scripts so the developer credit is consistent across
+ *  every operator-facing surface. Skips on narrow terminals where the ASCII
+ *  art would wrap and lose its shape. */
+async function printAuthorCredit() {
+  const banner = path.join(PROJECT_DIR, "assets", "aoneill-ascii.txt");
+  if (!existsSync(banner)) return;
+  if ((process.stdout.columns || 80) < 60) return;
+  try {
+    const txt = await readFile(banner, "utf8");
+    process.stdout.write(`${C.red}${txt}${C.reset}`);
+    process.stdout.write(`  ${C.dim}aoneill.co.uk · antony@aoneill.co.uk${C.reset}\n\n`);
+  } catch { /* missing file — skip silently */ }
 }
 
 main().catch(e => { console.error(`\n${C.red}✗${C.reset} ${e.message}\n${e.stack}`); rl.close(); process.exit(1); });

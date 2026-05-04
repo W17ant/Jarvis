@@ -324,3 +324,11 @@ if [[ -f "$HERE/data/memory.db" ]] || [[ -d "$HERE/.venv" ]] || [[ -d "$HERE/nod
   echo
   warn "Some artifacts were intentionally kept. Re-run with --purge to wipe everything."
 fi
+
+echo
+if [[ -f "$HERE/assets/aoneill-ascii.txt" ]] && [[ "$(tput cols 2>/dev/null || echo 80)" -ge 60 ]]; then
+  printf '\033[31m'
+  cat "$HERE/assets/aoneill-ascii.txt"
+  printf '\033[0m'
+  printf "  ${C_DIM}aoneill.co.uk · antony@aoneill.co.uk${C_RESET}\n\n"
+fi

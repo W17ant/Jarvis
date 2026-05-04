@@ -686,6 +686,11 @@
     import * as BridgeStatus from "./bridge-status.js";
     window.addEventListener("DOMContentLoaded", () => BridgeStatus.init());
 
+    /* Console developer-credit easter egg — prints the AONeill ASCII signature
+     * + dev-globals reference into devtools. One-shot per browser session. */
+    import * as ConsoleCredit from "./console-credit.js";
+    window.addEventListener("DOMContentLoaded", () => ConsoleCredit.init());
+
     /* Usage telemetry overlay — VIEW USAGE button in settings opens it. Read-only
      * snapshot of audit log: dispatches, errors, top tools, fal call count. */
     import * as Usage from "./usage.js";

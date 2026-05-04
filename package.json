@@ -3,6 +3,18 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
+  "description": "Voice-driven AI kiosk for an automotive PR & content agency. Local Qwen + Whisper + Kokoro. 76+ tools, MCP server.",
+  "author": {
+    "name": "Antony O'Neill",
+    "email": "antony@aoneill.co.uk",
+    "url": "https://aoneill.co.uk"
+  },
+  "homepage": "https://github.com/W17ANT/Jarvis",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/W17ANT/Jarvis.git"
+  },
+  "license": "MIT",
   "scripts": {
     "bridge": "node bridge/server.mjs",
     "kokoro": "python3 bridge/kokoro_server.py",

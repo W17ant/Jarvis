@@ -399,3 +399,13 @@ cat <<EOF
   └──────────────────────────────────────────────────────────────┘
 
 EOF
+
+# Developer credit — printed at the end so the operator's last visual is the
+# author signature. Same render pattern as the FOM brand banner at install
+# start, but in the brand red so it visually closes the bookend.
+if [[ -f "$HERE/assets/aoneill-ascii.txt" ]] && [[ "$(tput cols 2>/dev/null || echo 80)" -ge 60 ]]; then
+  printf '\033[31m'
+  cat "$HERE/assets/aoneill-ascii.txt"
+  printf '\033[0m'
+  printf '  \033[2maoneill.co.uk · antony@aoneill.co.uk\033[0m\n\n'
+fi
