@@ -53,7 +53,7 @@ The wizard asks for:
 - Agent name + wake phrase + voice (any of Kokoro's 50+ voices)
 - Agency name, tagline, brand colours, logo
 - Hardware tier (auto-picks model sizes that fit your chip — M5 Max gets 32b/32b, M1 Max gets 14b/7b)
-- Optional API keys (FAL.ai for image-to-video, Frame.io for review workflow, SerpAPI for press radar, Hunter.io for outreach)
+- Optional API keys (Frame.io for review workflow, SerpAPI for press radar, Hunter.io for outreach)
 - Shoots + output folder roots (point at a NAS / external SSD if you want)
 
 Done. Launch:
@@ -93,11 +93,11 @@ The HUD opens in Chrome's `--app` mode (no browser chrome). Say "hey [agent name
               │  76+ tool dispatch · MCP server         │
               │  Sentence-level LLM streaming · Audit   │
               │  Tasks · Undo · Memory · Notifications  │
-              └─┬──────┬──────┬──────┬──────┬──────────┘
-                │      │      │      │      │
-            Ollama  Whisper Kokoro  fal.ai  AppleScript
-            (Qwen   (STT)   (TTS)   (i2v)   (Mail · Calendar
-             14b/                            · Premiere · Lightroom)
+              └─┬──────┬──────┬──────┬──────────┘
+                │      │      │      │
+            Ollama  Whisper Kokoro  AppleScript
+            (Qwen   (STT)   (TTS)   (Mail · Calendar
+             14b/                    · Premiere · Lightroom)
              32b
              VL)
 ```
@@ -137,7 +137,7 @@ The 🚀 features are agency-flavoured, not generic kiosk demos. The bridge know
 - **Audit log** — every tool dispatch with operator id + result + duration is appended to `data/audit/YYYY-MM.jsonl`. View via the HUD's `VIEW AUDIT LOG` button.
 - **Path-traversal guards** — all file-system tools resolve through `paths.mjs#isWithinAllowedRoots` (PROJECT_DIR / shoots / output) and refuse anything outside.
 - **Optional Tailscale opt-in** during install for remote access from your phone or another machine, without exposing the kiosk publicly.
-- **Local-only by default** — no telemetry, no analytics, no remote update server. The bridge speaks only to localhost services + the explicit external APIs you opted into via `.env` (fal.ai, Frame.io, SerpAPI, Hunter.io). All four are independently revocable.
+- **Local-only by default** — no telemetry, no analytics, no remote update server. The bridge speaks only to localhost services + the explicit external APIs you opted into via `.env` (Frame.io, SerpAPI, Hunter.io). Each is independently revocable.
 
 ---
 
