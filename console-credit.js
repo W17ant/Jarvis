@@ -32,18 +32,18 @@ export function init() {
     "%c║  ██║  ██║╚██████╔╝██║ ╚████║███████╗██║███████╗███████╗       ║\n" +
     "%c║  ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝╚═╝╚══════╝╚══════╝       ║\n" +
     "%c║                                                               ║\n" +
-    "%c║                 A. O N E I L L                                ║\n" +
+    "%c║                   A O N E I L L . C O . U K                  ║\n" +
     "%c║                                                               ║\n" +
     "╠═══════════════════════════════════════════════════════════════╣\n" +
     "║                                                               ║\n" +
-    "%c║  AI & ML Developer | Software Engineer                        ║\n" +
-    "║  Manchester, UK                                               ║\n" +
+    "%c║  JARVIS · Voice-driven AI kiosk for an automotive agency      ║\n" +
+    "║  Built by AI & ML Developer · Manchester, UK                  ║\n" +
     "%c║                                                               ║\n" +
-    "%c║  Built with: Next.js · Python · TypeScript · ML               ║\n" +
-    "║  Focus: AI · Data · Performance · Systems                     ║\n" +
+    "%c║  Stack: Node · Ollama · Qwen 2.5 · Whisper · Kokoro · ffmpeg  ║\n" +
+    "║  Focus: Local-first AI · Voice · Privacy · Studio ops         ║\n" +
     "%c║                                                               ║\n" +
-    "%c║  github.com/W17ANT                                            ║\n" +
-    "%c║                                                               ║\n" +
+    "%c║  github.com/W17ANT/Jarvis                                     ║\n" +
+    "%c║  aoneill.co.uk                                                ║\n" +
     "╚═══════════════════════════════════════════════════════════════╝\n\n" +
     "%c  Looking to hire? Let's talk: Antony@aoneill.co.uk\n",
     cyan, pink, purple, blue, cyan, teal, green, cyan, yellow, cyan, white, cyan, dim, cyan, blue, cyan, green
