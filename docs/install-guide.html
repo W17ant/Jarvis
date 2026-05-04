@@ -467,6 +467,43 @@
     background: var(--accent);
   }
 
+  /* ─── FAQ row ─── used on diagnosis pages.
+   * Each row is a single problem + cause + fix triple. The Q line uses display
+   * type so the operator can scan the page; the body is sans for legibility on
+   * a printed page held at arm's length. */
+  .faq-row {
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--stroke);
+  }
+  .faq-row:last-child { border-bottom: none; }
+  .faq-q {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .faq-q::before {
+    content: "Q.";
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    margin-right: 8px;
+  }
+  .faq-body { font-size: 12.5px; line-height: 1.55; color: var(--ink-secondary); }
+  .faq-body p { margin: 0 0 4px; }
+  .faq-body .cause { color: var(--ink-muted); font-style: italic; }
+  .faq-body .fix { color: var(--ink); }
+  .faq-body .fix::before {
+    content: "→";
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 6px;
+  }
+
   /* ─── Print refinements ─── */
   @media print {
     body { background: #fff; }
@@ -496,6 +533,7 @@
         <span class="lbl">Hardware</span> 64 GB+ RAM recommended (32 GB works on smaller tier)<br>
         <span class="lbl">Setup</span> ~30 minutes, mostly model download time<br>
         <span class="lbl">Steps</span> 5 — Terminal, clone, install, wizard, launch<br>
+        <span class="lbl">Support</span> Antony@aoneill.co.uk &middot; <code>./tools/diagnose.sh</code><br>
         <span class="lbl">Repo</span> github.com/W17ANT/Jarvis<br>
         <span class="lbl">Prepared</span> 4 May 2026<br>
         <span class="lbl">Author</span> Antony O&rsquo;Neill
@@ -667,7 +705,7 @@
       </ul>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 5</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 6</span></div>
 </div></div>
 
 <!-- ============ FEATURES PAGE 1 — VOICE + VISION ============ -->
@@ -709,7 +747,7 @@
       </div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 6</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 7</span></div>
 </div></div>
 
 <!-- ============ FEATURES PAGE 2 — EDITING ============ -->
@@ -751,7 +789,7 @@
       </div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 7</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 8</span></div>
 </div></div>
 
 <!-- ============ FEATURES PAGE 3 — COMMS + STUDIO ============ -->
@@ -793,7 +831,7 @@
       </div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 8</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 9</span></div>
 </div></div>
 
 <!-- ============ FEATURES PAGE 4 — POWER ============ -->
@@ -835,7 +873,7 @@
       </div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 9</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 10</span></div>
 </div></div>
 
 <!-- ============ UNINSTALL ============ -->
@@ -878,7 +916,128 @@
       <div class="code" style="margin-top: 10px;"><span class="prompt">$</span> ./tools/uninstall-wizard.sh --purge</div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 10</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 11</span></div>
+</div></div>
+
+<!-- ============ FAQ 01 — VOICE & CAMERA ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Diagnosis</span>
+    <img src="ao-monogram.png" alt="AO">
+  </div>
+  <div class="pg-content">
+    <div class="section-band">
+      <span class="num">FAQ 01</span>
+      <h2>Voice &amp; camera</h2>
+    </div>
+    <p class="step-lede">Mic and camera issues account for ~90% of real-world problems on a kiosk Mac. Run through these before logging a ticket.</p>
+
+    <div class="faq-row">
+      <div class="faq-q">I say &ldquo;hey Flat-Out&rdquo; and nothing happens</div>
+      <div class="faq-body">
+        <p class="cause">Most common cause: MacBook lid is closed and you&rsquo;re running off an external monitor &mdash; macOS disables the built-in mic in clamshell mode.</p>
+        <p class="fix">Plug in a USB / 3.5&nbsp;mm mic, <em>or</em> use an iPhone via Continuity (see below). Then open <strong>System Settings &rarr; Sound &rarr; Input</strong> and confirm the level meter moves while you speak.</p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">Mic input meter is dead in System Settings</div>
+      <div class="faq-body">
+        <p class="cause">Wrong input device selected, or Chrome doesn&rsquo;t have mic permission.</p>
+        <p class="fix">In <strong>System Settings &rarr; Sound &rarr; Input</strong>, click each device and watch the meter. Whichever moves is your live mic &mdash; pick that one. Then in Chrome, visit <code>chrome://settings/content/microphone</code> and confirm <em>localhost:8765</em> is allowed.</p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">Continuity Camera (using iPhone as webcam) isn&rsquo;t showing up</div>
+      <div class="faq-body">
+        <p class="cause">iPhone needs to be near the Mac, unlocked, on the same Apple ID, and Continuity Camera must be enabled.</p>
+        <p class="fix">On iPhone: <strong>Settings &rarr; General &rarr; AirPlay &amp; Continuity &rarr; Continuity Camera &rarr; ON</strong>. Both devices must share Wi-Fi + Bluetooth. Re-open the kiosk; the iPhone now appears in <strong>System Settings &rarr; Sound &rarr; Input</strong> and as a video source.</p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">Voice replies are very quiet</div>
+      <div class="faq-body">
+        <p class="cause">Output device is the wrong speaker (HDMI display, AirPods that walked away, etc.).</p>
+        <p class="fix">Hold <code>Option</code> and click the volume / sound icon in the menu bar &rarr; pick the right output device. The HUD&rsquo;s volume control is also live in the settings panel.</p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">It hears me but mishears the wake phrase</div>
+      <div class="faq-body">
+        <p class="cause">Background noise is louder than the spoken wake phrase, or the threshold is too tight.</p>
+        <p class="fix">Re-run <code>node tools/setup-wizard.mjs</code> and tweak the wake phrase &mdash; shorter, more distinctive phrases get caught more reliably. Or move the mic closer.</p>
+      </div>
+    </div>
+
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 12</span></div>
+</div></div>
+
+<!-- ============ FAQ 02 — BRIDGE & DIAGNOSTICS ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Diagnosis</span>
+    <img src="ao-monogram.png" alt="AO">
+  </div>
+  <div class="pg-content">
+    <div class="section-band">
+      <span class="num">FAQ 02</span>
+      <h2>Bridge, services &amp; sending diagnostics</h2>
+    </div>
+    <p class="step-lede">Get back online &mdash; or hand Antony exactly what he needs to fix it remotely.</p>
+
+    <div class="faq-row">
+      <div class="faq-q">HUD shows a red bridge dot / &ldquo;connection refused&rdquo;</div>
+      <div class="faq-body">
+        <p class="cause">One or more local services (bridge, Kokoro, Whisper, static) have died.</p>
+        <p class="fix">In Terminal: <code>cd ~/Desktop/Jarvis &amp;&amp; ./launch.sh restart</code>. That kills every running instance and starts them fresh. Then refresh the kiosk with <code>⌘ Cmd + R</code>.</p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">Bridge won&rsquo;t start at all (kept failing after restart)</div>
+      <div class="faq-body">
+        <p class="cause">Usually a Node version drift &mdash; Homebrew updated <code>node</code> after install, breaking a compiled binding.</p>
+        <p class="fix">Already handled: <code>./launch.sh restart</code> auto-detects this and rebuilds the binding silently. If it still fails, run <code>npm rebuild better-sqlite3</code> in the Jarvis folder, then <code>./launch.sh restart</code> again.</p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">How do I copy what&rsquo;s in the browser console?</div>
+      <div class="faq-body">
+        <p class="cause">Antony often needs the live console output to diagnose UI / voice / fetch errors.</p>
+        <p class="fix"><strong>Right-click anywhere in the HUD &rarr; Inspect</strong> &rarr; click the <em>Console</em> tab. Right-click in the console area &rarr; <em>Save as&hellip;</em> (saves a <code>.log</code> file). Or select all (<code>⌘ A</code>) &rarr; copy &rarr; paste into the email body.</p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">One command to bundle everything and email Antony</div>
+      <div class="faq-body">
+        <p class="cause">Logs live in <code>/tmp/flat-out-*.log</code> &mdash; bundling them and the system snapshot is fiddly by hand.</p>
+        <p class="fix">In Terminal:
+          <div class="code" style="margin-top: 6px;"><span class="prompt">$</span> ./tools/diagnose.sh</div>
+          That writes a tarball to <code>~/Desktop/flat-out-diag-*.tgz</code> (logs + system snapshot + <code>brand.json</code>, no secrets) and opens an email draft to <strong>Antony@aoneill.co.uk</strong> with it attached. Add a sentence about what broke, hit Send.
+        </p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">Where do the logs live if I want to read them myself?</div>
+      <div class="faq-body">
+        <p class="fix"><code>tail -f /tmp/flat-out-bridge.log</code> &mdash; the most useful one. Others: <code>kokoro.log</code>, <code>whisper.log</code>, <code>static.log</code>, <code>rebuild.log</code> (all under <code>/tmp/flat-out-</code>). Logs reset every reboot &mdash; capture them with <code>./tools/diagnose.sh</code> before you restart if you want to keep them.</p>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>Still stuck?</strong>
+      Email <strong>Antony@aoneill.co.uk</strong> &mdash; ideally with the <code>./tools/diagnose.sh</code> bundle attached. Reply usually within a working day.
+    </div>
+
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 13</span></div>
 </div></div>
 
 <!-- ============ END ============ -->
@@ -896,10 +1055,11 @@
       <span class="lbl">Repo</span> github.com/W17ANT/Jarvis<br>
       <span class="lbl">Setup</span> <code>./install.sh</code> &middot; <code>./launch.sh kiosk</code><br>
       <span class="lbl">Help</span> README.md in the project root<br>
+      <span class="lbl">Support</span> Antony@aoneill.co.uk &middot; <code>./tools/diagnose.sh</code><br>
       <span class="lbl">Author</span> Antony O&rsquo;Neill &middot; aoneill.co.uk
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 11</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 14</span></div>
 </div></div>
 
 </body>

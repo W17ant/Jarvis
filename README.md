@@ -71,6 +71,22 @@ The HUD opens in Chrome's `--app` mode (no browser chrome). Say "hey [agent name
 
 ---
 
+## 🆘 Something broken? Send a diagnostic
+
+```bash
+./tools/diagnose.sh
+```
+
+Bundles every relevant log (`/tmp/flat-out-*.log`), a system snapshot (Mac model, RAM, Node version, healthz output, port bindings), and `config/brand.json` into a tarball on your Desktop. On macOS it also opens a pre-filled Mail draft to **Antony@aoneill.co.uk** with the bundle attached. No secrets — `.env` is excluded.
+
+Common gotchas (full FAQ in `docs/install-guide.html` pages 11–13):
+
+- **Mic dead?** Check System Settings → Sound → Input. If the MacBook lid is closed and you're on an external monitor, the built-in mic is disabled — use a USB mic or pair an iPhone via Continuity Camera.
+- **Red bridge dot?** `./launch.sh restart` — kills every running instance and starts them fresh. Self-heals native binding mismatches automatically (Homebrew Node upgrades).
+- **Bug report?** Right-click in the HUD → Inspect → Console tab → `⌘ A` → copy → paste into your email, then attach the diagnose bundle above.
+
+---
+
 ## 🧹 Uninstall
 
 ```bash
