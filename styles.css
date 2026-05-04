@@ -1,0 +1,3027 @@
+/** styles.css - Flat-Out HUD. Brand-true: Oswald + Rubik, #E10600 with #8F0003 accents. */
+
+:root {
+  /* Why: brand red lifted from FOM logo files (bright) + their CSS rgba(143,0,3,.9) (deep). Pair, don't blend. */
+  --fom-red: #E10600;
+  --fom-red-deep: #8F0003;
+  --fom-red-glow: rgba(225, 6, 0, 0.55);
+  --fom-red-tint: rgba(225, 6, 0, 0.06);
+
+  --ink-0: #000;
+  --ink-1: #0a0a0a;
+  --ink-2: #141414;
+  --line: rgba(255, 255, 255, 0.18);
+  --line-soft: rgba(255, 255, 255, 0.08);
+  --text: #f4f4f4;
+  --text-dim: rgba(244, 244, 244, 0.55);
+
+  /* Why: Oswald + Rubik are the exact pair loaded by flatoutmedia.org */
+  --font-display: "Oswald", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Rubik", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --line-w: 1.5px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--ink-0);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+/* ---------- BACKDROP ---------- */
+.grid-bg {
+  position: fixed; inset: 0;
+  background-image:
+    linear-gradient(rgba(225, 6, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(225, 6, 0, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+  animation: gridDrift 18s linear infinite;
+  z-index: 0;
+}
+@keyframes gridDrift {
+  from { background-position: 0 0, 0 0; }
+  to   { background-position: 48px 48px, 48px 48px; }
+}
+
+.scanline {
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2px,
+    rgba(255, 255, 255, 0.012) 3px,
+    transparent 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: screen;
+}
+
+/* ---------- LAYOUT ----------
+ * Why: scaled the whole grid ~10% tighter (rows shorter, gap + padding reduced, telemetry
+ * row from 80px → 64px) so the page fits a 14"/15" MacBook Pro screen without the bottom
+ * panels overflowing past the viewport. Right rail is 1.4fr so the LAUNCH panel has room
+ * for a 2-column grid of launchers; centre stays 1.6fr so the speedo dominates. */
+.hud {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.6fr 1fr 1.4fr;
+  grid-template-rows: 48px 0.95fr 1.3fr 0.95fr 64px;
+  gap: 10px;
+  padding: 10px 14px;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ---------- CALENDAR STRIP ---------- */
+.calendar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex; align-items: center; gap: 24px;
+  border-bottom: var(--line-w) solid var(--line);
+  padding: 0 6px 8px;
+}
+
+/* ────────── Service health pips ──────────
+ *  Sits at the right edge of the calendar strip. Four pips: bridge / AI (Ollama) /
+ *  TTS (Kokoro) / STT (Whisper). Each is a small dot + 2-3 char label. Status
+ *  classes: .is-up (green), .is-down (red), .is-unknown (dim). No-op when not
+ *  rendering (label=display:none until hover) so it stays unobtrusive. */
+.health {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.25em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  padding-right: 4px;
+}
+.health__pip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: help;
+}
+.health__dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.health__pip.is-up .health__dot {
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+}
+.health__pip.is-down .health__dot {
+  background: var(--fom-red);
+  box-shadow: 0 0 8px var(--fom-red-glow);
+  animation: health-pulse 1.4s ease-in-out infinite;
+}
+.health__pip.is-up .health__label { color: var(--text); }
+.health__pip.is-down .health__label { color: var(--fom-red); }
+@keyframes health-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .health__pip.is-down .health__dot { animation: none; }
+}
+.calendar__days {
+  display: flex; gap: 6px; flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.calendar__days span {
+  display: inline-block;
+  min-width: 22px; text-align: center;
+  padding: 4px 6px;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+}
+.calendar__days span.is-today {
+  color: var(--ink-0);
+  background: var(--fom-red);
+  border-color: var(--fom-red);
+  box-shadow: 0 0 12px var(--fom-red-glow);
+  font-weight: 700;
+}
+.calendar__brand {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+  white-space: nowrap;
+}
+.calendar__brand-mark {
+  /* Legacy PNG fallback for white-label installs that still ship a wordmark image.
+   * Default install uses the CSS-rendered .calendar__brand-text below. */
+  height: 26px; width: auto;
+}
+
+/* Why: matches the FOM marketing logo — heavy black-condensed "FLAT-OUT" stacked over a
+ * smaller red letter-spaced "MEDIA". Anton is a single-weight black display sans (Google Fonts)
+ * that carries the exact visual mass of the marketing wordmark at this scale. The two spans
+ * are right-aligned to the calendar header so the wider "FLAT-OUT" sets the column edge. */
+/* Why: was stacked vertically (FLAT-OUT on top, MEDIA below), but the calendar row
+ * is now 48px tall after the layout shrink — the 48px primary clipped at the top.
+ * Switched to a single-line layout: FLAT-OUT bold, MEDIA red suffix sitting on the
+ * same baseline. Reads as one wordmark, fits the 48px row, still on-brand. */
+.calendar__brand-text {
+  display: flex; align-items: baseline; gap: 8px;
+  line-height: 1;
+}
+.calendar__brand-text-primary {
+  font-family: "Anton", "Oswald", "Arial Narrow", sans-serif;
+  font-weight: 400;
+  font-size: 32px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  text-transform: uppercase;
+  line-height: 1;
+  text-shadow:
+    0 0 14px var(--fom-red-glow),
+    0 0 2px rgba(255, 255, 255, 0.6);
+}
+.calendar__brand-text-suffix {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.4em;
+  color: var(--fom-red);
+  text-transform: uppercase;
+  margin-right: -0.4em;          /* strip trailing letter-spacing gap so right-edge aligns */
+  text-shadow: 0 0 8px var(--fom-red-glow);
+}
+
+.calendar__brand-tag {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 9px;
+  letter-spacing: 0.35em;
+  color: var(--text-dim);
+  text-transform: lowercase;
+}
+
+/* ---------- PANEL BASE ---------- */
+.panel {
+  position: relative;
+  background:
+    linear-gradient(135deg, var(--fom-red-tint) 0%, transparent 60%),
+    var(--ink-1);
+  border: var(--line-w) solid var(--line);
+  padding: 10px 12px;
+  /* Why: corner-clipped panels read as "instrument cluster" not "card UI" */
+  clip-path: polygon(
+    0 12px, 12px 0,
+    calc(100% - 12px) 0, 100% 12px,
+    100% calc(100% - 12px), calc(100% - 12px) 100%,
+    12px 100%, 0 calc(100% - 12px)
+  );
+  /* Why: lock panels to their grid cell so over-long lists scroll INSIDE rather than
+   * pushing the panel past the row boundary and clipping content out the bottom of the
+   * viewport. min-height: 0 is the magic flexbox/grid trick that lets overflow children
+   * size correctly inside an auto-sized track. */
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.panel__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  font-size: 11px;
+  color: var(--fom-red);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+/* Why: left-rail panels were leaving large empty bands because their content sat at
+ * the top of a panel taller than the content. Using justify-content makes the panels
+ * distribute their natural content across the full panel height — month centres its
+ * ring, system spreads syspods/stat-row evenly, comms lets its list fill the slot.
+ * Result: same grid geometry, no awkward bottom-gap. */
+.panel--month     { grid-column: 1; grid-row: 2; justify-content: center; }
+.panel--system    { grid-column: 1; grid-row: 3; justify-content: space-around; }
+.panel--comms     { grid-column: 1; grid-row: 4; }
+.panel--comms .comms { flex: 1; min-height: 0; }    /* fill remaining vertical, scroll on overflow */
+.panel--core      { grid-column: 2 / 5; grid-row: 2 / 5; border: none; background: transparent; clip-path: none; padding: 0; display: grid; place-items: center; position: relative; }
+.panel--weather   { grid-column: 5; grid-row: 2; }
+.panel--clock     { grid-column: 5; grid-row: 3; display: flex; flex-direction: column; align-items: stretch; justify-content: stretch; }
+
+/* Why: clock panel split into a 2-up — time block (top) + today's diary feed (bottom).
+ * Diary is bridge-fed via /diary which proxies macOS Calendar so the operator can glance
+ * at what's coming up without leaving the HUD. Items are colour-coded by how soon they fire:
+ * imminent (<30 min) red, today's later events soft text, rest dim. */
+.clock-split { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; }
+.clock-split__time {
+  display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
+  flex: 1 1 50%;
+  border-bottom: 1px dashed var(--line-soft);
+  padding-bottom: 8px;
+}
+.clock-split__diary {
+  flex: 1 1 50%;
+  display: flex; flex-direction: column; min-height: 0;
+}
+.diary__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.diary__title { font-family: var(--font-display); font-weight: 600; font-size: 10px; letter-spacing: 0.32em; color: var(--fom-red); text-transform: uppercase; }
+.diary__count { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.12em; }
+.diary {
+  list-style: none;
+  font-family: var(--font-display); font-size: 11px;
+  letter-spacing: 0.06em;
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.diary::-webkit-scrollbar { width: 4px; }
+.diary::-webkit-scrollbar-thumb { background: var(--line-soft); border-radius: 2px; }
+.diary li {
+  display: flex; gap: 8px; align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--line-soft);
+  color: var(--text);
+}
+.diary li:last-child { border-bottom: none; }
+.diary li.diary__empty { color: var(--text-dim); font-style: italic; border-bottom: none; }
+.diary__time { color: var(--fom-red); font-weight: 600; min-width: 44px; }
+.diary__title-line { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.diary li.is-imminent .diary__time { color: var(--text); text-shadow: 0 0 8px var(--fom-red-glow); }
+.diary li.is-imminent .diary__title-line { color: var(--text); }
+.panel--launch    { grid-column: 5; grid-row: 4; }
+.panel--telemetry { grid-column: 1 / -1; grid-row: 5; }
+
+/* ---------- MONTH RING ---------- */
+/* Why: ring sized to fit the parent panel — was overflowing the month panel on
+ * smaller viewports. min(width, height) keeps the circle proportional regardless
+ * of which dimension is the limiting factor. */
+.ring { position: relative; aspect-ratio: 1; max-width: 220px; max-height: 100%; margin: 0 auto; flex-shrink: 1; }
+.ring__svg { display: block; }
+.ring__svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring__track { fill: none; stroke: var(--line-soft); stroke-width: 4; }
+.ring__fill {
+  fill: none; stroke: var(--fom-red); stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 578;
+  stroke-dashoffset: 578;
+  filter: drop-shadow(0 0 6px var(--fom-red-glow));
+  transition: stroke-dashoffset 1s ease;
+}
+.ring__inner {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+}
+.ring__label {
+  font-family: var(--font-display);
+  font-size: 13px; letter-spacing: 0.4em; color: var(--text-dim);
+  text-transform: uppercase;
+}
+.ring__value {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+.ring__value--xl { font-size: 72px; line-height: 1; color: var(--text); }
+
+/* ---------- SYSTEM GAUGE ---------- */
+.gauge { width: 100%; }
+.gauge__svg { width: 100%; height: auto; }
+.gauge__track { fill: none; stroke: var(--line-soft); stroke-width: 8; stroke-linecap: round; }
+.gauge__fill {
+  fill: none; stroke: var(--fom-red); stroke-width: 8; stroke-linecap: round;
+  stroke-dasharray: 283;
+  stroke-dashoffset: 283;
+  filter: drop-shadow(0 0 4px var(--fom-red-glow));
+  transition: stroke-dashoffset 0.8s ease;
+}
+.gauge__readout {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: -16px;
+  font-family: var(--font-display);
+}
+.gauge__label { font-size: 11px; letter-spacing: 0.3em; color: var(--text-dim); text-transform: uppercase; }
+.gauge__value { font-size: 24px; font-weight: 600; color: var(--text); }
+
+/* ---------- CAR-POD DIALS (CPU / GPU / RAM) ----------
+ * Round dials in a horizontal row — instrument-cluster feel. Each pod is overlay-style:
+ * SVG ring sits behind, value + label sit centred via absolute positioning so the dial
+ * reads as a single unit. The fill stroke uses dasharray with circumference 2π·42 ≈ 263.9
+ * so a 0..100% maps directly to dashoffset 263.9..0. */
+.syspods {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+}
+.syspod {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 88px;       /* Cap so three across fit comfortably in the left column */
+  margin: 0 auto;
+}
+.syspod__svg {
+  width: 100%; height: 100%;
+  transform: rotate(-90deg);   /* 12-o-clock starts at the top */
+}
+.syspod__track {
+  fill: none; stroke: var(--line-soft); stroke-width: 6;
+}
+.syspod__fill {
+  fill: none; stroke: var(--fom-red); stroke-width: 6;
+  stroke-linecap: round;
+  stroke-dasharray: 264;        /* 2π × r=42 */
+  stroke-dashoffset: 264;       /* starts empty; JS sets via setArcGauge */
+  filter: drop-shadow(0 0 3px var(--fom-red-glow));
+  transition: stroke-dashoffset 0.7s ease;
+}
+.syspod__fill--cpu { stroke: var(--fom-red); }
+.syspod__fill--gpu { stroke: #ff5a3a; filter: drop-shadow(0 0 4px rgba(255, 90, 58, 0.55)); }
+.syspod__fill--ram { stroke: var(--fom-red-deep); }
+
+.syspod__readout {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0;
+  text-align: center;
+  font-family: var(--font-display);
+  pointer-events: none;
+}
+.syspod__value { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1; }
+.syspod__label { font-size: 8px; letter-spacing: 0.25em; color: var(--text-dim); text-transform: uppercase; margin-top: 2px; }
+.syspod__sub   { font-size: 7px; letter-spacing: 0.18em; color: var(--text-dim); text-transform: uppercase; margin-top: 1px; }
+.syspod__sub.is-light    { color: #f6c544; }
+.syspod__sub.is-moderate { color: #ff9c1a; }
+.syspod__sub.is-heavy    { color: var(--fom-red); text-shadow: 0 0 6px var(--fom-red-glow); }
+
+.stat-row { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.stat { display: flex; flex-direction: column; gap: 2px; font-family: var(--font-mono); font-size: 11px; }
+.stat__k { color: var(--text-dim); letter-spacing: 0.2em; }
+.stat__v { color: var(--text); }
+
+/* ---------- COMMS LIST ----------
+ * Why: now-dynamic (polled from /comms) so item count varies. Cap the list height to the
+ * panel's free space and scroll internally on overflow rather than pushing the panel taller
+ * — the tracking incident was the panel growing past the grid row and clipping. */
+.comms {
+  list-style: none; font-size: 12px; line-height: 1.55;
+  max-height: 100%; overflow-y: auto;
+  padding-right: 4px;
+}
+.comms::-webkit-scrollbar { width: 4px; }
+.comms::-webkit-scrollbar-thumb { background: var(--line-soft); border-radius: 2px; }
+.comms li {
+  padding-left: 14px;
+  position: relative;
+  color: var(--text-dim);
+  border-bottom: 1px dashed var(--line-soft);
+  padding-bottom: 3px;
+  margin-bottom: 3px;
+}
+.comms li:before {
+  /* Why: the FOM "blade" is angular — use a clip-path slash instead of generic triangle */
+  content: "";
+  position: absolute; left: 0; top: 6px;
+  width: 8px; height: 12px;
+  background: var(--fom-red);
+  clip-path: polygon(40% 0, 100% 0, 60% 100%, 0 100%);
+}
+.comms__clickable { cursor: pointer; transition: color 0.15s, padding-left 0.15s, background 0.15s; }
+.comms__clickable:hover { color: var(--text); padding-left: 18px; background: linear-gradient(90deg, var(--fom-red-tint) 0%, transparent 50%); }
+
+/* ---------- SPEEDO (CENTERPIECE) ---------- */
+.speedo {
+  position: relative;
+  width: min(78vmin, 720px);
+  aspect-ratio: 1;
+  /* Why: when the operator speaks or Daniel replies, the transcript bubble appears just
+   * below the speedo. To stop it overlapping the dial we shrink + lift the speedo so
+   * there's room for HEARD/FLAT-OUT lines underneath. Smooth transition keeps the
+   * choreography clean — looks like the gauge is "leaning back" to give the conversation
+   * the spotlight, then settling back in standby. */
+  transform: scale(1) translateY(0);
+  transition: transform 0.4s cubic-bezier(0.2, 0.6, 0.25, 1);
+  transform-origin: center top;
+}
+.speedo.is-listening,
+.speedo.is-thinking,
+.speedo.is-speaking {
+  transform: scale(0.72) translateY(-6%);
+}
+.speedo__svg { width: 100%; height: 100%; position: relative; z-index: 2; }
+
+/* The FOM dial sits prominently behind the SVG gauge — the red blade is mostly all there is in the PNG (rest is transparent), so on black it reads as a bold signature stroke rather than a competing element. */
+.speedo__brand-mark {
+  position: absolute;
+  inset: 8%;
+  background: url("assets/fom-dial.png") center / contain no-repeat;
+  opacity: 0.95;
+  z-index: 1;
+  /* Why: amplify the red blade with its own glow so it pops as the brand anchor */
+  filter: drop-shadow(0 0 16px var(--fom-red-glow)) drop-shadow(0 0 4px var(--fom-red-glow));
+  animation: bladePulse 3s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes bladePulse {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50%      { opacity: 1.0;  transform: scale(1.015); }
+}
+
+.speedo__ring { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.speedo__ring--outer { stroke: var(--fom-red); opacity: 0.3; }
+.speedo__ring--mid   { stroke-dasharray: 4 6; opacity: 0.5; }
+.speedo__ring--inner { stroke-width: 2; }
+
+.speedo__arc {
+  fill: none; stroke: var(--fom-red); stroke-width: 3;
+  stroke-dasharray: 1500 2000;
+  stroke-dashoffset: 0;
+  transform-origin: 300px 300px;
+  /* Drop-shadow on a rotating element is GPU-expensive — only show on tiers that can afford it */
+}
+body.tier-pro .speedo__arc, body.tier-max .speedo__arc {
+  filter: drop-shadow(0 0 6px var(--fom-red-glow));
+}
+body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
+  /* Lite tier: stop the constant rotation entirely — saves the most GPU */
+  animation: none !important;
+}
+.speedo__arc--a { animation: arcSpinA 12s linear infinite; opacity: 0.8; }
+.speedo__arc--b { animation: arcSpinB 9s linear infinite reverse; opacity: 0.55; stroke: #fff; }
+@keyframes arcSpinA { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+@keyframes arcSpinB { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+/* Legacy line needle kept for backwards compatibility; the blade path is the active needle. */
+.speedo__needle {
+  stroke: var(--fom-red); stroke-width: 4; stroke-linecap: round;
+  filter: drop-shadow(0 0 8px var(--fom-red-glow));
+}
+
+/* FOM blade-shaped needle — tapered curved wedge mirroring the brand mark */
+.speedo__needle-blade {
+  fill: url(#redGrad);
+  stroke: var(--fom-red);
+  stroke-width: 0.6;
+  filter: drop-shadow(0 0 10px var(--fom-red-glow)) drop-shadow(0 0 4px var(--fom-red-glow));
+  transition: fill 0.25s, stroke 0.25s, filter 0.25s;
+}
+/* Amber-drop mood — error / service-down. Tints the blade for ~1.5s before fading
+ * back to brand red. Speedo controller toggles the class. */
+.speedo__needle-blade.is-amber {
+  fill: #f39c12;
+  stroke: #f39c12;
+  filter: drop-shadow(0 0 12px rgba(243, 156, 18, 0.6)) drop-shadow(0 0 4px rgba(243, 156, 18, 0.4));
+}
+
+#needle {
+  /* Why: SVG viewBox-relative origin so 50%/50% = (300, 300) regardless of rendered size.
+   * Without transform-box, transform-origin is interpreted in CSS-box pixels (top-left of group)
+   * and the needle pivots from a wrong point. CSS transition deliberately removed —
+   * speedo.js's per-frame spring is the smoothing layer; a CSS transition on top causes
+   * compounding lag. */
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+.speedo__hub { fill: var(--fom-red); filter: drop-shadow(0 0 6px var(--fom-red-glow)); }
+.speedo__hub-inner { fill: var(--ink-0); }
+.speedo__core { fill: var(--ink-0); stroke: var(--fom-red); stroke-width: 2; }
+.speedo__core-glow { fill: none; stroke: var(--fom-red); stroke-width: 1; opacity: 0.6; }
+/* Why: dial centre had 20px FLAT + 11px OUT with 25 SVG units between baselines —
+ * left a visible empty band around the text. Bumped FLAT to 28px (Anton-style heft so
+ * it reads as the brand mark, not just a label) and OUT to 14px with tighter spacing
+ * so the two lines hug each other and fill the reactor circle. */
+.speedo__mark {
+  font-family: "Anton", var(--font-display), sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  fill: #fff;
+  font-size: 28px;
+}
+.speedo__mark--small {
+  font-size: 14px;
+  fill: var(--fom-red);
+  letter-spacing: 0.35em;
+  font-weight: 600;
+}
+
+.speedo__tick { stroke: var(--text-dim); }
+.speedo__tick--major { stroke: #fff; }
+.speedo__tick--red { stroke: var(--fom-red); }
+.speedo__numeral { fill: var(--text-dim); font-family: var(--font-mono); font-size: 13px; }
+.speedo__numeral--red { fill: var(--fom-red); }
+
+.speedo__state {
+  position: absolute; bottom: 4%; left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-display);
+  letter-spacing: 0.4em;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  z-index: 3;
+}
+.speedo__state-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--text-dim);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+.speedo.is-listening .speedo__state-dot { background: #00ff88; box-shadow: 0 0 12px #00ff88; }
+.speedo.is-listening .speedo__state-text { color: #00ff88; }
+.speedo.is-thinking  .speedo__state-dot { background: #ffaa00; box-shadow: 0 0 12px #ffaa00; animation: pulse 0.8s ease-in-out infinite; }
+.speedo.is-thinking  .speedo__state-text { color: #ffaa00; }
+.speedo.is-speaking  .speedo__state-dot { background: var(--fom-red); box-shadow: 0 0 16px var(--fom-red-glow); animation: pulse 0.4s ease-in-out infinite; }
+.speedo.is-speaking  .speedo__state-text { color: var(--fom-red); }
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.4); opacity: 0.6; }
+}
+
+/* Ghosted FOM tagline as a watermark across the bottom waveform panel.
+ * Why: the tagline used to be tucked under the speedo and was clipping past the
+ * viewport. Pulled it out and made it a big, low-opacity Anton wash behind the
+ * sine wave — reads on-brand without competing with the gauges. */
+.telemetry__tagline {
+  position: absolute;
+  inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "Anton", "Oswald", "Impact", sans-serif;
+  font-weight: 400;
+  font-size: clamp(20px, 3.6vw, 56px);
+  letter-spacing: 0.12em;
+  color: var(--text);
+  opacity: 0.12;             /* ghosted — wave + telemetry numbers stay legible on top */
+  pointer-events: none;
+  white-space: nowrap;
+  text-transform: uppercase;
+  text-shadow: 0 0 24px var(--fom-red-glow);
+  z-index: 0;
+}
+.panel--telemetry .waveform { position: relative; z-index: 1; }
+.panel--telemetry .telemetry__row { position: relative; z-index: 2; }
+.speedo__tagline em {
+  font-style: normal;
+  color: var(--fom-red);
+  font-weight: 600;
+}
+
+/* ---------- WEATHER ---------- */
+.weather__head { border-bottom: 1px solid var(--line-soft); padding-bottom: 10px; margin-bottom: 10px; }
+.weather__loc {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.35em;
+  color: var(--fom-red);
+  text-transform: uppercase;
+}
+/* Why: now-row pivots from "label, label" to "icon | (temp / condition stack)".
+ * 56px icon reads from across the room; temp+condition stacked right keeps the
+ * vertical block compact so the 5-day forecast still gets its space below. */
+.weather__now { display: flex; align-items: center; gap: 14px; margin-top: 6px; }
+.weather__icon { width: 56px; height: 56px; flex-shrink: 0; }
+.weather__readout { display: flex; flex-direction: column; gap: 2px; }
+.weather__temp { font-family: var(--font-display); font-size: 40px; font-weight: 600; color: var(--text); line-height: 1; }
+.weather__cond { font-size: 11px; letter-spacing: 0.2em; color: var(--text-dim); text-transform: uppercase; }
+.weather__forecast { list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.weather__forecast li {
+  display: grid;
+  /* Why: prepend a 22px icon column so each forecast row carries a visual cue
+   * matching the hero icon. Reads at-a-glance from a 27"+ kiosk display. */
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+}
+.weather__forecast .icon { width: 22px; height: 22px; }
+.weather__forecast .day { color: var(--text-dim); letter-spacing: 0.15em; }
+.weather__forecast .hi { color: var(--text); }
+.weather__forecast .lo { color: var(--text-dim); }
+
+/* ---------- CLOCK ---------- */
+.clock {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 96px;
+  line-height: 1;
+  color: var(--text);
+  letter-spacing: 0;
+}
+.clock__sec {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 32px;
+  color: var(--fom-red);
+  margin-top: -8px;
+}
+.clock__date {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.3em;
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+
+/* ---------- TELEMETRY ---------- */
+.waveform { width: 100%; height: 56px; display: block; transition: opacity 0.3s; }
+/* When tasks are in flight, dim the waveform so the strip reads as the primary signal. */
+.waveform--dim { opacity: 0.18; }
+.telemetry__row {
+  display: flex; gap: 18px; align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.telemetry__k { color: var(--fom-red); letter-spacing: 0.3em; margin-right: 4px; }
+.telemetry__v { color: var(--text); margin-right: 14px; }
+
+/* ────────── TASK STRIP ──────────
+ *  Sits inside .panel--telemetry, layered ABOVE the waveform canvas. One row per
+ *  active long-running task. Hidden when no tasks running (idle = waveform only).
+ *  Designed to read clean across a 27"+ display from across the room. */
+.tasks {
+  position: absolute;
+  /* Why: stack on top of the waveform without disturbing the existing layout flow.
+   * Inset matches the panel's padding so rows align with the DOWN/UP/LAT readouts. */
+  top: 0; left: 0; right: 0; bottom: 24px;
+  padding: 8px 12px;
+  list-style: none;
+  display: flex; flex-direction: column;
+  gap: 4px;
+  z-index: 3;
+  pointer-events: none;
+}
+.tasks[hidden] { display: none; }
+
+.tasks__row {
+  display: grid;
+  grid-template-columns: 70px 1fr auto;
+  grid-template-rows: auto 3px;
+  column-gap: 14px;
+  row-gap: 4px;
+  align-items: center;
+  padding: 4px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  /* Why: animated entrance reinforces "something just kicked off" without being
+   * overdesigned. 180ms keeps the response tight; ease-out feels like settling. */
+  animation: tasks-row-in 0.18s ease-out;
+}
+@keyframes tasks-row-in {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.tasks__kind {
+  grid-column: 1; grid-row: 1;
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  /* Why: bright red for visibility, derived from brand accent so colour-picker theming
+   * propagates. Mirror trick used on the settings cog. */
+  color: color-mix(in srgb, var(--fom-red), white 25%);
+  text-transform: uppercase;
+}
+
+.tasks__label-wrap {
+  grid-column: 2; grid-row: 1;
+  display: flex; flex-direction: column;
+  min-width: 0;
+}
+.tasks__label {
+  color: var(--text);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Stage sub-line — appears below the task label when a multi-stage pipeline
+ * (video edit, YT promo) reports its current lane. */
+.tasks__stage {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.tasks__row.is-error .tasks__stage { color: #f39c12; }
+/* Slightly more vertical room when a stage is rendered. */
+.tasks__row--with-stage { padding: 6px 0; }
+
+.tasks__meta {
+  grid-column: 3; grid-row: 1;
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks__bar {
+  grid-column: 1 / -1; grid-row: 2;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  position: relative;
+  overflow: hidden;
+}
+.tasks__bar-fill {
+  height: 100%;
+  background: var(--fom-red);
+  /* Why: smooth fill animation so progress visibly flows rather than snap-jumping. */
+  transition: width 0.4s ease-out;
+  box-shadow: 0 0 8px var(--fom-red-glow);
+}
+.tasks__bar--indeterminate::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  width: 30%; height: 100%;
+  background: linear-gradient(90deg, transparent, var(--fom-red), transparent);
+  animation: tasks-indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes tasks-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(380%); }
+}
+
+/* Error state: row tints amber so the operator sees failure at a glance. */
+.tasks__row.is-error .tasks__kind { color: #f39c12; }
+.tasks__row.is-error .tasks__meta { color: #f39c12; letter-spacing: 0.3em; }
+.tasks__row.is-error .tasks__bar-fill { background: #f39c12; box-shadow: 0 0 8px rgba(243, 156, 18, 0.5); }
+
+/* Why: panel--telemetry needs explicit position:relative so .tasks absolute positioning anchors. */
+.panel--telemetry { position: relative; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tasks__row { animation: none; }
+  .tasks__bar-fill { transition: none; }
+  .tasks__bar--indeterminate::after { animation: none; }
+}
+
+/* ---------- LAUNCH ----------
+ * Why: 8+ launchers (Mail / Capture One / Adobe CC / Premiere / Lightroom / Output /
+ * Shoots / Frame.io) in a single column got tall and pushed the panel past its row.
+ * Switched to a 2-column grid so launchers come 2-up, halving the vertical footprint.
+ * Right rail was widened to 1.4fr in the page grid so the tiles still read at a glance. */
+.launch {
+  list-style: none;
+  font-family: var(--font-display); font-size: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  max-height: 100%; overflow-y: auto;
+  padding-right: 4px;
+}
+.launch::-webkit-scrollbar { width: 4px; }
+.launch::-webkit-scrollbar-thumb { background: var(--line-soft); border-radius: 2px; }
+.launch li {
+  padding: 5px 6px;
+  color: var(--text-dim);
+  border-bottom: 1px dashed var(--line-soft);
+  letter-spacing: 0.18em;
+  cursor: pointer;
+  transition: color 0.2s, padding-left 0.2s, background 0.2s;
+  text-transform: uppercase;
+  white-space: nowrap;          /* Don't wrap CAPTURE ONE / PREMIERE PRO mid-tile */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.launch li:hover {
+  color: var(--fom-red);
+  padding-left: 10px;
+  background: linear-gradient(90deg, var(--fom-red-glow) 0%, transparent 30%);
+}
+
+/* ---------- WAKE BUTTON ---------- */
+.wake {
+  /* Why: bottom-right corner so it doesn't cover the calendar dates or wordmark.
+   * Floats above the launch panel — the most ignorable corner of the layout. */
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  background: var(--ink-0);
+  border: var(--line-w) solid var(--fom-red);
+  color: var(--fom-red);
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  font-size: 10px;
+  padding: 6px 14px;
+  z-index: 50;
+  cursor: pointer;
+  z-index: 10;
+  text-transform: uppercase;
+  /* Why: angled clip echoes the FOM "blade" mark */
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.wake:hover, .wake:focus-visible {
+  background: var(--fom-red);
+  color: var(--ink-0);
+  box-shadow: 0 0 24px var(--fom-red-glow);
+  outline: none;
+}
+
+/* ---------- TRANSCRIPT ---------- */
+.transcript {
+  position: fixed;
+  bottom: 150px;
+  left: 50%; transform: translateX(-50%);
+  width: min(680px, 90vw);
+  background: rgba(0, 0, 0, 0.85);
+  border: var(--line-w) solid var(--fom-red);
+  padding: 14px 18px;
+  z-index: 9;
+  backdrop-filter: blur(8px);
+  clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%);
+}
+.transcript__heard {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.transcript__heard:before { content: "HEARD // "; color: var(--fom-red); letter-spacing: 0.2em; }
+.transcript__reply {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 18px;
+  color: var(--text);
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+}
+.transcript__reply:empty { display: none; }
+.transcript__reply:not(:empty):before { content: "FLAT-OUT // "; color: var(--fom-red); letter-spacing: 0.2em; font-size: 12px; font-weight: 600; }
+
+/* ---------- DEBUG PANEL (audio diagnostics) ---------- */
+.debug {
+  position: fixed;
+  top: 80px;
+  left: 24px;
+  z-index: 60;
+  width: 320px;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1.5px solid var(--fom-red);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  pointer-events: none;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.debug__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  font-size: 11px;
+  color: var(--fom-red);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.debug__row {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+}
+.debug__row > span:first-child {
+  letter-spacing: 0.2em;
+}
+.debug__row > span:not(:first-child) {
+  color: var(--text);
+  font-size: 10px;
+  text-align: right;
+  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.debug__meter {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line-soft);
+  position: relative;
+  overflow: hidden;
+}
+.debug__meter-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--fom-red);
+  box-shadow: 0 0 6px var(--fom-red-glow);
+  transition: width 0.05s linear;
+}
+.debug__btn {
+  margin-top: 10px;
+  width: 100%;
+  background: var(--ink-0);
+  color: var(--fom-red);
+  border: 1.5px solid var(--fom-red);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  font-size: 10px;
+  padding: 8px 0;
+  cursor: pointer;
+  pointer-events: auto;
+  text-transform: uppercase;
+}
+.debug__btn:hover { background: var(--fom-red); color: var(--ink-0); }
+.debug__select {
+  pointer-events: auto;
+  background: var(--ink-0);
+  color: var(--text);
+  border: 1px solid var(--fom-red);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 4px;
+  max-width: 200px;
+  width: 100%;
+}
+
+/* ---------- WEBCAM INLAY (operator viewport — top-right of centerpiece) ----------
+ * Stark-HUD aesthetic: red tint, scan-lines, four corner brackets, flicker.
+ * Now positioned relative to .panel--core so it sits in the top-right of the speedometer area. */
+.cam {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 220px;
+  height: 220px;
+  z-index: 5;
+  pointer-events: none;
+  /* Why: clip-path angled corners echo the FOM blade language */
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  background: var(--ink-0);
+  border: 1.5px solid var(--fom-red);
+  box-shadow: 0 0 28px rgba(225, 6, 0, 0.45), inset 0 0 30px rgba(225, 6, 0, 0.15);
+  overflow: hidden;
+  /* Why: camera-on-demand. Default hidden via opacity (not display:none, so MediaPipe
+   * can still tick the video element when revealed); adds an .is-revealed class to
+   * fade in. transform-scale gives a subtle "lock-on" feel to match the bracket vibe. */
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 0.4s ease-out, transform 0.4s ease-out;
+}
+.cam.is-revealed {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.cam__video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  /* Mirror so the operator sees themselves intuitively, plus saturate-down for the moody look */
+  transform: scaleX(-1);
+  filter: contrast(1.15) saturate(0.65) brightness(0.95);
+}
+
+.cam__tint {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at center, rgba(225, 6, 0, 0.18) 0%, rgba(225, 6, 0, 0.45) 100%),
+    linear-gradient(180deg, rgba(0,0,0,0.0), rgba(0,0,0,0.35));
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+/* Scan-lines + slow vertical sweep for "live targeting" feel */
+.cam__scan {
+  position: absolute; inset: 0;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 2px,
+      rgba(225, 6, 0, 0.10) 3px,
+      transparent 4px
+    );
+  animation: camScan 7s linear infinite;
+  pointer-events: none;
+}
+@keyframes camScan {
+  0%   { background-position: 0 -100%; opacity: 0.35; }
+  50%  { opacity: 0.6; }
+  100% { background-position: 0 100%;  opacity: 0.35; }
+}
+
+/* Corner brackets — Stark-style framing */
+.cam__bracket {
+  position: absolute;
+  width: 22px; height: 22px;
+  border: 2px solid var(--fom-red);
+  filter: drop-shadow(0 0 4px var(--fom-red-glow));
+}
+.cam__bracket--tl { top: 6px;    left: 6px;    border-right: none;  border-bottom: none; }
+.cam__bracket--tr { top: 6px;    right: 6px;   border-left: none;   border-bottom: none; }
+.cam__bracket--bl { bottom: 6px; left: 6px;    border-right: none;  border-top: none;    }
+.cam__bracket--br { bottom: 6px; right: 6px;   border-left: none;   border-top: none;    }
+
+.cam__label {
+  position: absolute;
+  bottom: 14px; left: 50%; transform: translateX(-50%);
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.4em;
+  color: var(--fom-red);
+  text-transform: uppercase;
+  text-shadow: 0 0 6px var(--fom-red-glow);
+}
+
+/* Centre targeting reticle — small + + animated rotation */
+.cam__targeting {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 60px; height: 60px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(225, 6, 0, 0.55);
+  border-radius: 50%;
+  animation: camRotate 4s linear infinite;
+}
+.cam__targeting:before, .cam__targeting:after {
+  content: "";
+  position: absolute;
+  background: var(--fom-red);
+}
+.cam__targeting:before { top: 50%; left: -8px; width: 16px; height: 1px; transform: translateY(-50%); }
+.cam__targeting:after  { left: 50%; top: -8px; height: 16px; width: 1px;  transform: translateX(-50%); }
+@keyframes camRotate { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+/* Subtle red flicker every few seconds to feel "live" */
+.cam__video {
+  animation: camFlicker 11s infinite;
+}
+@keyframes camFlicker {
+  0%, 91%, 100%      { opacity: 1; }
+  92%, 94%           { opacity: 0.85; }
+  93%                { opacity: 0.95; }
+}
+
+/* ---------- VIDEO PLAYBACK WINDOW (in-kiosk, not fullscreen takeover) ---------- */
+.video-window {
+  position: fixed;
+  /* Centered horizontally, slightly above middle so the wake button + waveform stay visible */
+  top: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  width: min(58vw, 560px);
+  background: var(--ink-0);
+  border: 2px solid var(--fom-red);
+  box-shadow: 0 0 60px var(--fom-red-glow), 0 16px 40px rgba(0,0,0,0.6);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  display: flex;
+  flex-direction: column;
+}
+.video-window__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, var(--fom-red-tint), transparent);
+  border-bottom: 1px solid var(--line);
+}
+.video-window__title {
+  font-family: var(--font-display);
+  letter-spacing: 0.4em;
+  font-size: 11px;
+  color: var(--fom-red);
+  text-transform: uppercase;
+}
+.video-window__title-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: 12px;
+  letter-spacing: 0.1em;
+}
+.video-window__actions { display: flex; gap: 8px; }
+.video-window__btn {
+  background: var(--ink-0);
+  border: 1px solid var(--fom-red);
+  color: var(--fom-red);
+  font-family: var(--font-display);
+  letter-spacing: 0.3em;
+  font-size: 10px;
+  padding: 5px 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background 0.15s, color 0.15s;
+}
+.video-window__btn:hover { background: var(--fom-red); color: var(--ink-0); }
+.video-window__player {
+  width: 100%;
+  display: block;
+  background: var(--ink-0);
+  /* Why: stays inside the window frame, vertical 9:16 mp4s display correctly without overflowing */
+  max-height: 70vh;
+  object-fit: contain;
+}
+/* Subtle scan-line overlay for the HUD aesthetic */
+.video-window:after {
+  content: "";
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2px,
+    rgba(255, 255, 255, 0.018) 3px,
+    transparent 4px
+  );
+  mix-blend-mode: screen;
+}
+
+/* ---------- PDF WINDOW (mirrors video-window styling, slightly larger for readability) ---------- */
+.pdf-window {
+  position: fixed;
+  top: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  width: min(70vw, 720px);
+  height: 80vh;
+  background: var(--ink-0);
+  border: 2px solid var(--fom-red);
+  box-shadow: 0 0 60px var(--fom-red-glow), 0 16px 40px rgba(0,0,0,0.6);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  display: flex;
+  flex-direction: column;
+}
+.pdf-window__header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, var(--fom-red-tint), transparent);
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.pdf-window__title { font-family: var(--font-display); letter-spacing: 0.4em; font-size: 11px; color: var(--fom-red); text-transform: uppercase; }
+.pdf-window__title-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-left: 12px; letter-spacing: 0.05em; }
+.pdf-window__actions { display: flex; gap: 8px; }
+.pdf-window__btn {
+  background: var(--ink-0);
+  border: 1px solid var(--fom-red);
+  color: var(--fom-red);
+  font-family: var(--font-display);
+  letter-spacing: 0.3em;
+  font-size: 10px;
+  padding: 5px 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.15s, color 0.15s;
+}
+.pdf-window__btn:hover { background: var(--fom-red); color: var(--ink-0); }
+.pdf-window__frame { flex: 1; width: 100%; border: none; background: white; }
+
+/* ---------- DEMO RECORDING INDICATOR ---------- */
+.rec-indicator {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 100;
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(0,0,0,0.85);
+  border: 1.5px solid var(--fom-red);
+  padding: 6px 12px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.3em;
+  color: var(--fom-red);
+  text-transform: uppercase;
+  pointer-events: none;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+.rec-indicator[hidden] { display: none; }
+.rec-indicator__dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--fom-red);
+  box-shadow: 0 0 10px var(--fom-red);
+  animation: recPulse 1s ease-in-out infinite;
+}
+.rec-indicator__time {
+  color: var(--text);
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  margin-left: 4px;
+}
+@keyframes recPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ---------- FIRST-RUN SETUP MODAL ---------- */
+.setup {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.96);
+  z-index: 2000;
+  display: grid; place-items: center;
+  backdrop-filter: blur(12px);
+}
+.setup[hidden] { display: none; }
+.setup__panel {
+  width: min(560px, 92vw);
+  max-height: 90vh; overflow-y: auto;
+  background: var(--ink-1);
+  border: 1.5px solid var(--fom-red);
+  padding: 36px 40px;
+  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  box-shadow: 0 0 80px var(--fom-red-glow);
+}
+.setup__brand { text-align: center; margin-bottom: 18px; }
+.setup__logo { width: 220px; height: auto; }
+.setup__sub {
+  font-family: var(--font-display);
+  letter-spacing: 0.5em;
+  font-size: 11px;
+  color: var(--fom-red);
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+.setup__welcome {
+  font-family: var(--font-display);
+  font-weight: 300;
+  font-size: 15px;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  text-align: center;
+  margin-bottom: 22px;
+}
+.setup__field { margin-bottom: 18px; }
+.setup__field label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--fom-red);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+.setup__field input[type="text"], .setup__field select {
+  width: 100%;
+  background: var(--ink-0);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.setup__field input:focus, .setup__field select:focus {
+  outline: none; border-color: var(--fom-red);
+}
+.setup__field button {
+  background: transparent;
+  color: var(--fom-red);
+  border: 1px solid var(--fom-red);
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background 0.2s, color 0.2s;
+}
+.setup__field button:hover { background: var(--fom-red); color: var(--ink-0); }
+.setup__field small {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.setup__loc-row { display: flex; gap: 8px; align-items: center; }
+.setup__loc-row input { margin-bottom: 0; }
+.setup__submit {
+  width: 100%;
+  background: var(--fom-red);
+  color: var(--ink-0);
+  border: none;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  font-size: 13px;
+  padding: 14px 0;
+  cursor: pointer;
+  margin-top: 14px;
+  text-transform: uppercase;
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  box-shadow: 0 0 24px var(--fom-red-glow);
+}
+.setup__submit:hover { box-shadow: 0 0 32px var(--fom-red), inset 0 0 12px rgba(0,0,0,0.3); }
+.setup__skip {
+  display: block;
+  margin: 8px auto 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.setup__skip:hover { color: var(--text); }
+
+/* ────────── Help nudge card ──────────
+ *  Floating tip that surfaces after long idle to teach voice phrasings. Sits
+ *  above the wake button (bottom-right area) so it's read but doesn't compete
+ *  with the speedometer. Auto-fades after 12s. Hidden in demo mode. */
+.help-card {
+  position: fixed;
+  bottom: 70px;
+  right: 18px;
+  max-width: 360px;
+  padding: 10px 32px 10px 14px;
+  background: var(--ink-1);
+  border: 1px solid color-mix(in srgb, var(--fom-red), white 25%);
+  border-left: 3px solid color-mix(in srgb, var(--fom-red), white 25%);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  z-index: 60;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.help-card[hidden] { display: none; }
+.help-card.is-shown {
+  opacity: 1;
+  transform: translateY(0);
+}
+.help-card__lead {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: color-mix(in srgb, var(--fom-red), white 25%);
+  margin-right: 10px;
+  text-transform: uppercase;
+}
+.help-card__phrase {
+  color: var(--text);
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+.help-card__dismiss {
+  position: absolute;
+  top: 4px; right: 6px;
+  background: none; border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-family: var(--font-display);
+}
+.help-card__dismiss:hover { color: var(--fom-red); }
+
+/* Help card auto-hidden in demo mode — client visits don't need internal hints. */
+body.is-demo .help-card { display: none !important; }
+
+/* ────────── Command palette (Cmd+K) ──────────
+ *  Overlay with a centred panel, search input + suggestions list. Routes typed
+ *  queries through the same pipeline voice does, so it doubles as keyboard
+ *  fallback + voice-vocabulary documentation. Hidden in demo mode wouldn't make
+ *  sense — the operator might still need it during a client visit. */
+.palette {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  z-index: 2200;
+  display: grid;
+  /* Center the panel ~25% from the top so it lands at the natural eye-line of
+   * a 27" display rather than dead-centre (which feels low when typing). */
+  align-items: start; justify-items: center;
+  padding-top: 12vh;
+  backdrop-filter: blur(6px);
+}
+.palette[hidden] { display: none; }
+.palette__panel {
+  width: min(640px, 92vw);
+  background: var(--ink-1);
+  border: 1.5px solid var(--fom-red);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  box-shadow: 0 0 60px var(--fom-red-glow);
+  display: flex; flex-direction: column;
+  max-height: 70vh;
+  animation: palette-slide-in 0.18s ease-out;
+}
+@keyframes palette-slide-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.palette__input-wrap {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--fom-red);
+}
+.palette__prompt {
+  font-family: var(--font-display);
+  font-size: 22px;
+  color: color-mix(in srgb, var(--fom-red), white 25%);
+  line-height: 1;
+}
+.palette__input {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-body, sans-serif);
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  outline: none;
+  width: 100%;
+}
+.palette__input::placeholder {
+  color: var(--text-dim);
+  font-style: italic;
+}
+.palette__hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.15em;
+  white-space: nowrap;
+}
+.palette__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.palette__row {
+  padding: 8px 20px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
+}
+.palette__row:hover, .palette__row.is-active {
+  background: var(--fom-red-tint);
+  border-left-color: color-mix(in srgb, var(--fom-red), white 25%);
+}
+.palette__row-head {
+  display: flex; gap: 10px; align-items: baseline;
+}
+.palette__row-cat {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--fom-red);
+  min-width: 70px;
+}
+.palette__row-label {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text);
+  letter-spacing: 0.05em;
+}
+.palette__row-flag {
+  font-family: var(--font-display);
+  font-size: 8px;
+  letter-spacing: 0.3em;
+  color: #f39c12;
+  border: 1px solid #f39c12;
+  padding: 1px 6px;
+}
+.palette__row-desc {
+  margin-top: 3px;
+  margin-left: 80px;        /* align under the label, past the category column */
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+.palette__empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.palette__footer {
+  border-top: 1px solid var(--line);
+  padding: 10px 20px;
+  display: flex; gap: 18px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+}
+.palette__footer kbd {
+  background: var(--ink-0);
+  border: 1px solid var(--line);
+  padding: 1px 5px;
+  margin: 0 2px;
+  font-family: inherit;
+  color: var(--text);
+}
+
+/* ────────── Accessibility chrome ──────────
+ *  Body classes set by Storage prefs:
+ *    .is-high-contrast — boost text-on-bg contrast for impaired-vision operators
+ *    .font-scale-{s,m,l,xl} — scale the entire UI down/up via root font-size
+ *  Reduced motion is OS-driven via the existing prefers-reduced-motion media
+ *  query. */
+body.is-high-contrast {
+  --text: #ffffff;
+  --text-dim: #d8d8d8;
+  --line: rgba(255, 255, 255, 0.35);
+  --line-soft: rgba(255, 255, 255, 0.25);
+}
+body.is-high-contrast .panel { border-width: 2px; }
+body.is-high-contrast .calendar__days span { color: var(--text); }
+
+body.font-scale-s  { font-size: 14px; }   /* default browser is 16px */
+body.font-scale-m  { font-size: 16px; }
+body.font-scale-l  { font-size: 18px; }
+body.font-scale-xl { font-size: 21px; }
+
+.settings-modal__check {
+  display: inline-flex; align-items: center; gap: 8px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+.settings-modal__check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px; height: 16px;
+  border: 1px solid var(--fom-red);
+  background: var(--ink-0);
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.settings-modal__check input[type="checkbox"]:checked {
+  background: var(--fom-red);
+}
+.settings-modal__check input[type="checkbox"]:checked::after {
+  content: "✓";
+  color: var(--ink-0);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ────────── Demo / Clean mode (Cmd+D) ──────────
+ *  Hides operational chrome (numeric readouts, debug, history drawer, REC dot,
+ *  notification timestamps) so the kiosk reads as a pure cinematic surface for
+ *  client visits. Functional state stays — voice loop, speedo, weather, comms,
+ *  task strip all keep working. */
+body.is-demo .rec-indicator,
+body.is-demo .history-drawer,
+body.is-demo .syspod__value,
+body.is-demo .syspod__sub,
+body.is-demo .stat-row,
+body.is-demo .telemetry__row,
+body.is-demo .notif__time,
+body.is-demo .history-entry__time {
+  display: none !important;
+}
+/* In demo mode, expand the syspod label up to compensate for the missing percentage. */
+body.is-demo .syspod__label {
+  font-size: 10px;
+  letter-spacing: 0.32em;
+  margin-top: 0;
+}
+/* The waveform panel keeps its dimensions but loses the readout row — stretch
+ * the canvas so the strip stays visually balanced. */
+body.is-demo .waveform { height: 76px; }
+
+/* ────────── Notification bell ──────────
+ *  Sits next to the health pips in the calendar strip. Unread count badge in
+ *  brand red on top-right corner. Click → toggle drawer. */
+.notif-bell {
+  position: relative;
+  width: 28px; height: 28px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  display: grid; place-items: center;
+  transition: color 0.18s, border-color 0.18s;
+}
+.notif-bell svg { width: 16px; height: 16px; }
+.notif-bell:hover, .notif-bell:focus-visible {
+  color: color-mix(in srgb, var(--fom-red), white 25%);
+  border-color: color-mix(in srgb, var(--fom-red), white 25%);
+  outline: none;
+}
+.notif-bell.is-unread { color: var(--fom-red); border-color: var(--fom-red); }
+.notif-bell.is-unread svg { animation: bell-shake 1.2s ease-in-out 0s 2; }
+@keyframes bell-shake {
+  0%, 100% { transform: rotate(0); }
+  20%, 60% { transform: rotate(-8deg); }
+  40%, 80% { transform: rotate(8deg); }
+}
+.notif-bell__count {
+  position: absolute;
+  top: -6px; right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: var(--fom-red);
+  color: var(--ink-0);
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  box-shadow: 0 0 8px var(--fom-red-glow);
+}
+.notif-bell__count:empty { display: none; }
+
+/* ────────── Toast queue ──────────
+ *  Top-right floating column. New toasts slide in from the right, push older ones
+ *  down. Auto-dismiss with hover-pause (handled in notifications.js). Doesn't steal
+ *  focus — operator can ignore them and rely on the bell + drawer. */
+.notif-toasts {
+  position: fixed;
+  top: 56px;            /* below the calendar strip */
+  right: 14px;
+  width: 320px;
+  display: flex; flex-direction: column;
+  gap: 8px;
+  z-index: 1800;
+  pointer-events: none;  /* let clicks fall through; .notif overrides per-row */
+}
+.notif {
+  pointer-events: auto;
+  background: var(--ink-1);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--text-dim);
+  padding: 10px 36px 10px 12px;
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  /* Why: clip-path mirrors the panel chrome so toasts read as part of the kit. */
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.notif--toast {
+  animation: notif-slide-in 0.25s ease-out;
+}
+@keyframes notif-slide-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.notif--success { border-left-color: #4ade80; }
+.notif--error   { border-left-color: var(--fom-red); }
+.notif--info    { border-left-color: color-mix(in srgb, var(--fom-red), white 25%); }
+.notif__head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.notif__kind {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: color-mix(in srgb, var(--fom-red), white 25%);
+  text-transform: uppercase;
+}
+.notif--success .notif__kind { color: #4ade80; }
+.notif--error   .notif__kind { color: var(--fom-red); }
+.notif__title {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+.notif__time {
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.notif__body {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.notif__actions {
+  margin-top: 8px;
+  display: flex; gap: 8px;
+}
+.notif__action {
+  background: transparent;
+  color: color-mix(in srgb, var(--fom-red), white 25%);
+  border: 1px solid color-mix(in srgb, var(--fom-red), white 25%);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.25em;
+  padding: 4px 10px;
+  cursor: pointer;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: background 0.15s, color 0.15s;
+}
+.notif__action:hover {
+  background: color-mix(in srgb, var(--fom-red), white 25%);
+  color: var(--ink-0);
+}
+.notif__dismiss {
+  position: absolute;
+  top: 6px; right: 8px;
+  background: none; border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-family: var(--font-display);
+}
+.notif__dismiss:hover { color: var(--text); }
+
+/* ────────── Drawer ──────────
+ *  Right-edge slide-out, full-height. Listed newest-first. Clear button at top. */
+.notif-drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 380px;
+  max-width: 92vw;
+  background: var(--ink-1);
+  border-left: 2px solid var(--fom-red);
+  z-index: 2000;
+  display: flex; flex-direction: column;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.6);
+  animation: drawer-slide-in 0.25s ease-out;
+}
+.notif-drawer[hidden] { display: none; }
+@keyframes drawer-slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.notif-drawer__head {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--fom-red);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.notif-drawer__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.4em;
+  color: var(--fom-red);
+}
+.notif-drawer__clear {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  padding: 4px 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.notif-drawer__clear:hover { color: var(--fom-red); border-color: var(--fom-red); }
+
+/* Action group on the right of the drawer head — CLEAR + close button. */
+.notif-drawer__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.notif-drawer__close {
+  background: transparent;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+  width: 26px; height: 26px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.notif-drawer__close:hover { color: var(--fom-red); border-color: var(--fom-red); }
+.notif-drawer__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.notif-drawer__list .notif--toast { animation: none; }   /* drawer rows shouldn't slide */
+.notif-drawer__empty {
+  text-align: center;
+  padding: 32px 0;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+/* ────────── Audit log overlay ──────────
+ *  Centred modal — read-only history of every tool dispatch. Opens from settings,
+ *  filters by operator + tool. Dense list because operators audit specific events,
+ *  not browse casually. */
+.audit-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 2200;
+  display: grid; place-items: center;
+  backdrop-filter: blur(8px);
+}
+.audit-overlay[hidden] { display: none; }
+.audit-overlay__panel {
+  width: min(820px, 94vw);
+  height: min(640px, 86vh);
+  background: var(--ink-1);
+  border: 1.5px solid var(--fom-red);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  box-shadow: 0 0 60px var(--fom-red-glow);
+  display: flex; flex-direction: column;
+}
+.audit-overlay__head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--fom-red);
+}
+.audit-overlay__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.5em;
+  color: var(--fom-red);
+}
+.audit-overlay__summary {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+.audit-overlay__close {
+  background: none; border: none;
+  color: var(--text-dim);
+  width: 28px; height: 28px;
+  cursor: pointer;
+  padding: 4px;
+  display: grid; place-items: center;
+}
+.audit-overlay__close img {
+  width: 16px; height: 16px;
+  background: currentColor;
+  -webkit-mask: url("assets/icons/x.svg") center / contain no-repeat;
+          mask: url("assets/icons/x.svg") center / contain no-repeat;
+}
+.audit-overlay__close:hover { color: var(--fom-red); }
+.audit-overlay__filters {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.audit-overlay__filters select {
+  background: var(--ink-0);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.audit-overlay__filters button {
+  background: transparent;
+  color: var(--fom-red);
+  border: 1px solid var(--fom-red);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  padding: 6px 12px;
+  cursor: pointer;
+  margin-left: auto;
+}
+.audit-overlay__filters button:hover { background: var(--fom-red); color: var(--ink-0); }
+.audit-overlay__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.audit-overlay__empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.audit-row {
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+}
+.audit-row__head {
+  display: grid;
+  grid-template-columns: 160px 100px 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.audit-row__time {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+.audit-row__operator {
+  color: color-mix(in srgb, var(--fom-red), white 25%);
+  letter-spacing: 0.1em;
+}
+.audit-row__tool {
+  color: var(--text);
+  font-weight: 500;
+}
+.audit-row__duration {
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+.audit-row__args {
+  margin-top: 3px;
+  margin-left: 170px;
+  color: var(--text-dim);
+  font-size: 10px;
+  word-break: break-all;
+}
+.audit-row__error {
+  margin-top: 4px;
+  margin-left: 170px;
+  color: var(--fom-red);
+  font-size: 11px;
+}
+.audit-row--error .audit-row__tool { color: var(--fom-red); }
+
+/* Settings-modal footer with secondary actions (VIEW AUDIT LOG, EDIT LAYOUT, RESET).
+ * Three buttons line up in a flex row that wraps on narrow viewports. */
+.settings-modal__footer {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.settings-modal__secondary {
+  background: transparent;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  padding: 6px 14px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: color 0.18s, border-color 0.18s;
+}
+.settings-modal__secondary:hover {
+  color: var(--fom-red);
+  border-color: var(--fom-red);
+}
+
+/* ────────── Conversation history drawer ──────────
+ *  Mirrors the notification drawer but slides in from the LEFT. Press H to toggle.
+ *  Persists across refresh via storage.js. Hidden in demo mode (body.is-demo). */
+.history-drawer {
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  width: 420px;
+  max-width: 92vw;
+  background: var(--ink-1);
+  border-right: 2px solid var(--fom-red);
+  z-index: 2000;
+  display: flex; flex-direction: column;
+  box-shadow: 16px 0 40px rgba(0, 0, 0, 0.6);
+  animation: history-drawer-slide-in 0.25s ease-out;
+}
+.history-drawer[hidden] { display: none; }
+@keyframes history-drawer-slide-in {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+.history-drawer__head {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--fom-red);
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 14px;
+  align-items: center;
+}
+.history-drawer__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.4em;
+  color: var(--fom-red);
+}
+.history-drawer__meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+.history-drawer__clear {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  padding: 4px 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.history-drawer__clear:hover { color: var(--fom-red); border-color: var(--fom-red); }
+.history-drawer__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.history-drawer__empty {
+  text-align: center;
+  padding: 32px 0;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.history-entry {
+  padding: 8px 12px;
+  border-left: 2px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  font-family: var(--font-body, var(--font-mono));
+}
+.history-entry--user {
+  border-left-color: color-mix(in srgb, var(--fom-red), white 25%);
+}
+.history-entry--assistant {
+  border-left-color: #4ade80;
+  background: rgba(74, 222, 128, 0.04);
+}
+.history-entry__head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 4px;
+}
+.history-entry__role {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  color: var(--fom-red);
+  text-transform: uppercase;
+}
+.history-entry--assistant .history-entry__role { color: #4ade80; }
+.history-entry__time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+}
+.history-entry__body {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.history-entry__tools {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+
+/* ────────── Settings cog + modal ──────────
+ *  Cog: bottom-LEFT mirroring the wake button (which sits bottom-right). Action on
+ *  the right, configuration on the left, both equidistant from the centrepiece
+ *  speedo. Phosphor's gear-six SVG carries the duotone — we tint via CSS mask so
+ *  the duotone strokes adopt the brand red without per-icon recolour work. */
+/* ────────── Settings button — "TUNE" plate ──────────
+ *  Design rationale: vocab-native, not iconographic. Reuses three existing HUD
+ *  motifs (camera corner brackets, launch-panel Oswald letterspacing, wake button
+ *  text-only label) so the control feels native rather than imported. Transparent
+ *  background lets the grid backdrop show through; brackets + label do all the work.
+ *  Hover transitions the brackets + label to brand red — no rotation, no clip-path,
+ *  no icon clichés. */
+.settings-btn {
+  /* Anchored to .panel--core (the centre/speedo column) which has position:relative.
+   * Bottom-right corner of the speedo area — visible against the dark backdrop +
+   * doesn't overlap the centre dial, the camera inlay (top-right), or any data
+   * panel on the left/right rails. Works at every responsive breakpoint because
+   * the parent panel grid placement handles the layout. */
+  position: absolute;
+  bottom: 14px; right: 14px;
+  width: 78px; height: 30px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  z-index: 5;
+  padding: 0;
+  display: grid; place-items: center;
+}
+
+.settings-btn__bracket {
+  position: absolute;
+  width: 9px; height: 9px;
+  border: 1.5px solid var(--text-dim);
+  pointer-events: none;
+  /* Why: at rest the brackets read as soft framing furniture, not a CTA. They
+   * brighten to brand red on hover — matching the cam inlay's bracket treatment
+   * but at half the arm-length so the plate feels lighter than the camera frame. */
+  transition: border-color 0.18s, filter 0.18s, width 0.18s, height 0.18s;
+}
+.settings-btn__bracket--tl { top: 0;     left: 0;    border-right: none;  border-bottom: none; }
+.settings-btn__bracket--tr { top: 0;     right: 0;   border-left: none;   border-bottom: none; }
+.settings-btn__bracket--bl { bottom: 0;  left: 0;    border-right: none;  border-top: none;    }
+.settings-btn__bracket--br { bottom: 0;  right: 0;   border-left: none;   border-top: none;    }
+
+.settings-btn__label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5em;
+  /* Why: 0.5em on a 4-letter word ("TUNE") gives optical centring inside the brackets
+   * — the trailing letterspace pushes "E" off-axis right, so we add a 0.5em left pad
+   * that recentres the text mass. Same trick the launch panel uses. */
+  padding-left: 0.5em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  transition: color 0.18s, text-shadow 0.18s;
+}
+
+.settings-btn:hover .settings-btn__bracket,
+.settings-btn:focus-visible .settings-btn__bracket {
+  border-color: var(--fom-red);
+  filter: drop-shadow(0 0 4px var(--fom-red-glow));
+  /* Why: brackets grow 2px on hover so the plate "locks on" — echoes the camera's
+   * targeting reticle behaviour. Subtle, no rotation, no clip-path gymnastics. */
+  width: 11px; height: 11px;
+}
+.settings-btn:hover .settings-btn__label,
+.settings-btn:focus-visible .settings-btn__label {
+  color: var(--fom-red);
+  text-shadow: 0 0 8px var(--fom-red-glow);
+}
+.settings-btn:focus-visible { outline: none; }
+
+/* Generic Phosphor icon class — apply to <img src="assets/icons/*.svg"> to get a
+ * currentColor-tintable mask. Duotone source becomes a single-colour silhouette
+ * with the duotone's opacity preserved in the mask. */
+.icon-mask {
+  display: inline-block;
+  background: currentColor;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain;     mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+
+.settings-modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.92);
+  z-index: 2100;
+  display: grid; place-items: center;
+  backdrop-filter: blur(10px);
+}
+.settings-modal[hidden] { display: none; }
+/* Why max-height + overflow: settings has grown to ~10 sections (project, profile,
+ * voice, model, accent, accessibility, camera, folders, location). On smaller
+ * displays the panel overruns the viewport and the actions get clipped. Cap at
+ * 90dvh and scroll the body, with head/actions/footer pinned via sticky. */
+.settings-modal__panel {
+  width: min(480px, 92vw);
+  max-height: 90dvh;
+  overflow-y: auto;
+  background: var(--ink-1);
+  border: 1.5px solid var(--fom-red);
+  padding: 28px 32px;
+  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  box-shadow: 0 0 60px var(--fom-red-glow);
+}
+.settings-modal__head {
+  position: sticky;
+  top: -28px;            /* cancel the panel's 28px top padding so head sticks flush */
+  margin: -28px -32px 20px;
+  padding: 28px 32px 12px;
+  background: var(--ink-1);
+  z-index: 2;
+}
+.settings-modal__actions,
+.settings-modal__status,
+.settings-modal__footer {
+  position: sticky;
+  background: var(--ink-1);
+  z-index: 2;
+}
+.settings-modal__actions { bottom: 0; margin: 0 -32px; padding: 14px 32px 0; }
+.settings-modal__footer  { bottom: -28px; margin: 0 -32px -28px; padding: 14px 32px 28px; }
+
+/* Slim red scrollbar so the scroll affordance matches the panel chrome. */
+.settings-modal__panel::-webkit-scrollbar { width: 8px; }
+.settings-modal__panel::-webkit-scrollbar-track { background: transparent; }
+.settings-modal__panel::-webkit-scrollbar-thumb { background: var(--fom-red-deep); }
+.settings-modal__panel::-webkit-scrollbar-thumb:hover { background: var(--fom-red); }
+/* Layout for the head region. Sticky behaviour set above (line ~2245); these rules
+ * just set the head's flex layout + bottom border. Order them as flex on top of
+ * the sticky/positioning so both apply. */
+.settings-modal__head {
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--fom-red);
+}
+.settings-modal__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.5em;
+  color: var(--fom-red);
+}
+.settings-modal__close {
+  background: none; border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px;
+  display: grid; place-items: center;
+  width: 28px; height: 28px;
+}
+.settings-modal__close img {
+  width: 18px; height: 18px;
+  background: currentColor;
+  -webkit-mask: url("assets/icons/x.svg") center / contain no-repeat;
+          mask: url("assets/icons/x.svg") center / contain no-repeat;
+}
+.settings-modal__close:hover { color: var(--fom-red); }
+
+/* Per-field icon next to the label — mirrors the Phosphor → mask pattern. */
+.settings-modal__icon {
+  display: inline-block;
+  width: 14px; height: 14px;
+  vertical-align: -2px;
+  margin-right: 8px;
+  background: currentColor;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain;     mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+.settings-modal__field label img.settings-modal__icon[src*="speaker-high"] { -webkit-mask-image: url("assets/icons/speaker-high.svg"); mask-image: url("assets/icons/speaker-high.svg"); }
+.settings-modal__field label img.settings-modal__icon[src*="cpu"]          { -webkit-mask-image: url("assets/icons/cpu.svg");          mask-image: url("assets/icons/cpu.svg"); }
+.settings-modal__field label img.settings-modal__icon[src*="palette"]      { -webkit-mask-image: url("assets/icons/palette.svg");      mask-image: url("assets/icons/palette.svg"); }
+.settings-modal__field label img.settings-modal__icon[src*="map-pin"]      { -webkit-mask-image: url("assets/icons/map-pin-line.svg"); mask-image: url("assets/icons/map-pin-line.svg"); }
+.settings-modal__field label img.settings-modal__icon[src*="monitor"]      { -webkit-mask-image: url("assets/icons/monitor.svg");      mask-image: url("assets/icons/monitor.svg"); }
+.settings-modal__field label img.settings-modal__icon[src*="folder"]       { -webkit-mask-image: url("assets/icons/folder.svg");       mask-image: url("assets/icons/folder.svg"); }
+.settings-modal__field label img.settings-modal__icon[src*="sliders"]      { -webkit-mask-image: url("assets/icons/sliders-horizontal.svg"); mask-image: url("assets/icons/sliders-horizontal.svg"); }
+
+/* Folders block — two stacked rows with a 70px monospace label so "Shoots in" / "Output to"
+ * line up like a labelled instrument readout. The text input owns the remaining width. */
+.settings-modal__row--folder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.settings-modal__folder-label {
+  flex: 0 0 78px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+.settings-modal__field small code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 1px 4px;
+}
+
+/* HUD accent colour swatches — 8 brand-aligned options + the current/custom one. */
+.settings-modal__swatches {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 8px;
+  margin-top: 6px;
+}
+.settings-modal__swatch {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+}
+.settings-modal__swatch:hover { transform: scale(1.08); border-color: var(--text); }
+.settings-modal__swatch.is-active {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px currentColor inset, 0 0 12px currentColor;
+}
+.settings-modal__swatch.is-active::after {
+  content: "";
+  position: absolute; inset: 4px;
+  border: 1px solid #fff;
+}
+
+.settings-modal__field input[type="text"] {
+  flex: 1;
+  background: var(--ink-0);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+}
+.settings-modal__field input[type="text"]:focus { outline: none; border-color: var(--fom-red); }
+
+/* Typeahead suggestions for the location search. Anchored under the input so it
+ * overlays the small helper line below — operator sees results without layout shift.
+ * Limited to 5 results; Open-Meteo's geocoding API is free and disambiguates
+ * Manchester-UK vs Manchester-NH cleanly when the operator picks the right one. */
+.settings-modal__row--searchable { position: relative; }
+.settings-modal__suggest {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0; right: 0;
+  z-index: 10;
+  background: var(--ink-1);
+  border: 1px solid var(--fom-red);
+  max-height: 240px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+.settings-modal__suggest[hidden] { display: none; }
+.settings-modal__suggest-row {
+  padding: 8px 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  transition: background 0.12s;
+}
+.settings-modal__suggest-row:last-child { border-bottom: none; }
+.settings-modal__suggest-row:hover,
+.settings-modal__suggest-row.is-active {
+  background: var(--fom-red-tint);
+}
+.settings-modal__suggest-name {
+  color: var(--text);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-modal__suggest-name strong {
+  color: color-mix(in srgb, var(--fom-red), white 25%);
+  font-weight: 600;
+}
+.settings-modal__suggest-region {
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+.settings-modal__suggest-empty {
+  padding: 8px 12px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.settings-modal__field { margin-bottom: 18px; }
+.settings-modal__field label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--fom-red);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+.settings-modal__row { display: flex; gap: 8px; align-items: center; }
+.settings-modal__row select {
+  flex: 1;
+  background: var(--ink-0);
+  color: var(--text);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+}
+.settings-modal__row select:focus { outline: none; border-color: var(--fom-red); }
+.settings-modal__row button {
+  background: transparent;
+  color: var(--fom-red);
+  border: 1px solid var(--fom-red);
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  padding: 8px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background 0.2s, color 0.2s;
+}
+.settings-modal__row button:hover { background: var(--fom-red); color: var(--ink-0); }
+.settings-modal__row button:disabled { opacity: 0.5; cursor: wait; }
+.settings-modal__field small {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.settings-modal__actions {
+  display: flex; gap: 10px;
+  /* margin-top moved to the sticky-actions definition above (~line 2260) so the
+   * action row hugs the bottom of the panel when sticky. */
+}
+.settings-modal__cancel, .settings-modal__save {
+  flex: 1;
+  font-family: var(--font-display);
+  letter-spacing: 0.4em;
+  font-size: 12px;
+  padding: 12px 0;
+  cursor: pointer;
+  text-transform: uppercase;
+  border: 1px solid var(--fom-red);
+}
+.settings-modal__cancel {
+  background: transparent;
+  color: var(--fom-red);
+}
+.settings-modal__cancel:hover { background: var(--fom-red-tint); }
+.settings-modal__save {
+  background: var(--fom-red);
+  color: var(--ink-0);
+  font-weight: 700;
+  border: none;
+  clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+  box-shadow: 0 0 16px var(--fom-red-glow);
+}
+.settings-modal__save:hover { box-shadow: 0 0 24px var(--fom-red); }
+.settings-modal__save:disabled { opacity: 0.5; cursor: wait; box-shadow: none; }
+.settings-modal__status {
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: center;
+  min-height: 14px;
+  color: var(--text-dim);
+}
+.settings-modal__status.is-error { color: var(--fom-red); }
+.settings-modal__status.is-ok { color: #4ade80; }
+
+@media (prefers-reduced-motion: reduce) {
+  .speedo__arc--a, .speedo__arc--b, .grid-bg, .speedo__state-dot, .speedo__brand-mark { animation: none !important; }
+  .settings-btn { transition: none; }
+}
+
+/* ────────── Plan stage panel ──────────
+ *  Centred top-of-screen slab that surfaces what the LLM is about to call. Lives for
+ *  ~1.8s per tool call. Brand-vocabulary aligned: red blade-edge stroke, monospace
+ *  numerals for the tool name, Oswald for the action label. Esc within the panel's
+ *  lifetime fires /cancel on the bridge.
+ *
+ *  Sits at z-index 2000 — above toasts (1800), below result modals (>=2500). */
+.plan-panel {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  z-index: 2000;
+  background: var(--ink-1);
+  border: 1px solid var(--fom-red);
+  border-left: 3px solid var(--fom-red);
+  padding: 10px 18px 10px 14px;
+  min-width: 320px;
+  max-width: 560px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 18px rgba(225, 6, 0, 0.25);
+  opacity: 0;
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+}
+.plan-panel:not([hidden]) {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.plan-panel.is-leaving {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-8px);
+}
+.plan-panel__label {
+  font-family: var(--font-display, "Oswald", sans-serif);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: var(--fom-red);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.plan-panel__summary {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  color: var(--text);
+}
+.plan-panel__hint {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-panel { transition: none; }
+}
+
+/* ────────── Settings · accent reset link ──────────
+ *  Slim text link sits beneath the swatch grid, signalling "I'm a destructive-ish
+ *  action but reversible by re-saving" — no button chrome that would compete with
+ *  the swatch grid above for attention. */
+.settings-modal__row--swatch-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.settings-modal__link {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-decoration-color: rgba(244, 244, 244, 0.25);
+  text-underline-offset: 3px;
+}
+.settings-modal__link:hover { color: var(--text); text-decoration-color: var(--text); }
+
+/* ────────── Editable widget layout ──────────
+ *  Cmd+L toggles body.is-edit-layout. While in edit mode each widget gets a drag
+ *  handle (top-left) + size cycler (top-right). Drag-and-drop swaps widget positions;
+ *  the size cycler steps through 1×1 / 1×2 / 1×3. Esc exits and persists.
+ *
+ *  The drag-source panel dims to communicate "this is in flight"; the drop-target
+ *  panel highlights with the brand red so the operator sees where the swap will land. */
+.widget-edit__handle,
+.widget-edit__cycler {
+  position: absolute;
+  z-index: 30;
+  background: var(--ink-1);
+  color: var(--text);
+  border: 1px solid var(--fom-red);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  display: none;             /* shown only in edit mode via :is */
+  padding: 3px 6px;
+}
+body.is-edit-layout .widget-edit__handle,
+body.is-edit-layout .widget-edit__cycler { display: inline-block; }
+
+.widget-edit__handle  { top: 4px; left: 4px; cursor: grab; }
+.widget-edit__handle:active { cursor: grabbing; }
+.widget-edit__cycler  { top: 4px; right: 4px; min-width: 36px; text-align: center; }
+.widget-edit__cycler:hover { background: var(--fom-red); color: var(--ink-0); }
+
+/* While editing, widgets get a subtle red border-glow so the operator sees they're
+ * interactive. Non-edit-mode panels stay on their existing chrome. */
+body.is-edit-layout [data-widget-id] {
+  outline: 1px dashed var(--fom-red);
+  outline-offset: -2px;
+  cursor: move;
+}
+body.is-edit-layout [data-widget-id].is-drag-source {
+  opacity: 0.4;
+}
+body.is-edit-layout [data-widget-id].is-drag-target {
+  outline: 2px solid var(--fom-red);
+  box-shadow: 0 0 18px var(--fom-red-glow);
+}
+
+/* The hint banner — bottom-centre, above the telemetry strip, communicates "you're
+ * editing" + the keybinds. Subtle pulse keeps it from being missable. */
+.widget-edit__hint {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink-1);
+  border: 1px solid var(--fom-red);
+  color: var(--text);
+  padding: 10px 18px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  z-index: 2200;
+  box-shadow: 0 0 24px var(--fom-red-glow);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  animation: widget-edit-pulse 2s ease-in-out infinite;
+}
+@keyframes widget-edit-pulse {
+  0%, 100% { box-shadow: 0 0 18px var(--fom-red-glow); }
+  50%      { box-shadow: 0 0 32px var(--fom-red); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-edit__hint { animation: none; }
+}
+
+/* ────────── Usage telemetry overlay ──────────
+ *  Centred read-only panel summarising the last 24h of tool dispatches. Five tile
+ *  layout up top (dispatches / errors / error rate / avg duration / fal calls), then
+ *  top-tools breakdown, optional operator breakdown. Brand-aligned: ink-1 panel,
+ *  red blade-edge stroke, JetBrains Mono numerals. */
+.usage-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.86);
+  z-index: 2300;
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(8px);
+}
+.usage-overlay[hidden] { display: none; }
+.usage-overlay__panel {
+  width: min(640px, 92vw);
+  max-height: 90dvh;
+  overflow-y: auto;
+  background: var(--ink-1);
+  border: 1.5px solid var(--fom-red);
+  padding: 24px 28px;
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  box-shadow: 0 0 50px var(--fom-red-glow);
+}
+.usage-overlay__panel::-webkit-scrollbar { width: 6px; }
+.usage-overlay__panel::-webkit-scrollbar-thumb { background: var(--fom-red-deep); }
+.usage-overlay__panel::-webkit-scrollbar-thumb:hover { background: var(--fom-red); }
+
+.usage-overlay__head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--fom-red);
+}
+.usage-overlay__title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5em;
+  color: var(--fom-red);
+}
+.usage-overlay__close {
+  background: transparent;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+  width: 28px; height: 28px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid; place-items: center;
+}
+.usage-overlay__close:hover { color: var(--fom-red); border-color: var(--fom-red); }
+
+.usage-overlay__loading {
+  padding: 40px 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* Five-tile headline row. Equal-width cells, monospace numerals so columns align. */
+.usage-overlay__tiles {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.usage-overlay__tile {
+  background: var(--ink-2);
+  border: 1px solid var(--line);
+  padding: 14px 10px;
+  text-align: center;
+}
+.usage-overlay__tile.is-warn  { border-color: var(--fom-red); color: var(--fom-red); }
+.usage-overlay__tile.is-spend { border-color: #F8E71C; color: #F8E71C; }
+.usage-overlay__tile-value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+.usage-overlay__tile-label {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+.usage-overlay__tile.is-warn .usage-overlay__tile-label,
+.usage-overlay__tile.is-spend .usage-overlay__tile-label { color: inherit; opacity: 0.8; }
+
+.usage-overlay__span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  margin: 12px 0 18px;
+  text-align: center;
+}
+
+.usage-overlay__section-head {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--fom-red);
+  margin: 18px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--line);
+  text-transform: uppercase;
+}
+
+.usage-overlay__empty {
+  padding: 16px 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.usage-overlay__tool-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.usage-overlay__tool-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.usage-overlay__tool-row:last-child { border-bottom: none; }
+.usage-overlay__tool-name { color: var(--text); }
+.usage-overlay__tool-count { color: var(--fom-red); font-weight: 600; min-width: 40px; text-align: right; }
+.usage-overlay__tool-dur  { color: var(--text-dim); min-width: 56px; text-align: right; }
+.usage-overlay__tool-tags { display: flex; gap: 4px; }
+.usage-overlay__tag {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+}
+.usage-overlay__tag--fal { color: #F8E71C; }
+.usage-overlay__tag--err { color: var(--fom-red); }
+
+.usage-overlay__note {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba(248, 231, 28, 0.06);
+  border-left: 2px solid #F8E71C;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+/* ────────── Keyboard accessibility ──────────
+ *  Global focus-visible affordance for every interactive element. The kiosk's chrome
+ *  was designed mouse-first; this layer adds a visible red ring whenever a control
+ *  receives focus via keyboard. Pointer focus is suppressed (focus-visible only fires
+ *  on actual keyboard navigation) so the rings don't appear on click. */
+
+/* Generic catch-all — any focusable element gets a 2px red outline at 2px offset.
+ * Specific overrides further down already exist for buttons that need different
+ * treatment (wake, settings-btn, notif-bell). */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--fom-red);
+  outline-offset: 2px;
+}
+
+/* Skip-link — visually hidden until focused. Lets keyboard users jump past the
+ * chrome and land on the wake button (the primary "do something" target on the kiosk). */
+.skip-link {
+  position: fixed;
+  top: -40px;
+  left: 12px;
+  background: var(--fom-red);
+  color: var(--ink-0);
+  padding: 8px 14px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-decoration: none;
+  z-index: 5000;
+  transition: top 0.18s;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 12px;
+  outline: none;
+}
+
+/* Reduced-motion users get no transition on the skip-link slide. */
+@media (prefers-reduced-motion: reduce) {
+  .skip-link { transition: none; }
+}
+
+/* ────────── Responsive: tablet / iPad variant ──────────
+ *  Primary use case: operator's iPad in landscape, mirrored to the kiosk view from
+ *  anywhere in the studio. The desktop grid is built for 1440-1920px wide; iPad Pro
+ *  11" landscape is 1194×834 and iPad mini is 1024×768. The breakpoints below
+ *  progressively tighten the layout; below 900px we collapse the 5-column grid
+ *  into a stacked variant so the speedo stays prominent.
+ *
+ *  Touch-target minimum on tablet/phone: WCAG / Apple HIG say 44×44pt. The HUD's
+ *  tap targets default to ~30px (mouse-friendly); we lift them to 44px on tablet
+ *  so a thumb tap registers reliably. */
+
+/* Wide tablet (iPad Pro landscape ≤1280px) — tighten gap + padding so panels still
+ * fit without scrollbars. The grid ratios stay; only the spacing compresses. */
+@media (max-width: 1280px) {
+  .hud {
+    gap: 8px;
+    padding: 8px 12px;
+    grid-template-rows: 44px 0.95fr 1.3fr 0.95fr 60px;
+  }
+  .panel { padding: 10px 12px; }
+}
+
+/* iPad landscape ≤1100px — reduce centre column weight so side panels keep
+ * readable widths. Speedo still dominates but at slightly smaller scale. */
+@media (max-width: 1100px) {
+  .hud {
+    grid-template-columns: 0.9fr 0.9fr 1.5fr 0.9fr 1.3fr;
+    grid-template-rows: 40px 0.9fr 1.4fr 0.9fr 56px;
+  }
+  /* Touch-friendly tap targets — at-rest size 44px+. */
+  .settings-btn { width: 96px; height: 36px; }
+  .notif-bell { width: 44px; height: 44px; }
+  .wake { min-height: 56px; }
+  .launch__a { min-height: 44px; }
+}
+
+/* iPad portrait / narrow landscape ≤900px — stacked variant. The 5-column desktop
+ * grid breaks; we collapse to a 2-column grid that puts the speedo + telemetry on
+ * the right and the side widgets in a left strip. Editable widget layout still
+ * works because layout.js sets grid-row + grid-column inline; we re-target those
+ * via the new variables on the parent. */
+@media (max-width: 900px) {
+  .hud {
+    grid-template-columns: 1fr 1.4fr;
+    grid-template-rows: 40px repeat(6, minmax(80px, auto)) 56px;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  /* Calendar strip + telemetry strip span both columns, same as before. */
+  .calendar      { grid-column: 1 / -1; }
+  .panel--telemetry { grid-column: 1 / -1; }
+
+  /* Side widgets pile into the LEFT column, rows 2-7 (six slots). The
+   * editable-layout module's inline grid-row/column writes still apply, but we
+   * re-target column 1 here so the widgets stack vertically rather than fighting
+   * over the desktop's 5-column horizontal arrangement. layout.js writes
+   * data-widget-side='left' and data-widget-side='right' on each panel; on
+   * narrow screens we ignore the side and run all 6 widgets down column 1. */
+  [data-widget-id] {
+    grid-column: 1 !important;
+  }
+
+  /* Speedo (centre) dominates the right column and grows to fill the available
+   * vertical space across rows 2-7. */
+  .panel--core {
+    grid-column: 2;
+    grid-row: 2 / 8;
+  }
+}
+
+/* Very narrow (≤640px — phones held landscape) — the live.html companion view
+ * is the right surface for this size, but degrade gracefully if someone opens
+ * the kiosk URL on their phone. Hide the side widgets, just show speedo + bottom
+ * telemetry + calendar. */
+@media (max-width: 640px) {
+  [data-widget-id] {
+    display: none;
+  }
+  .panel--core {
+    grid-column: 1 / -1;
+    grid-row: 2 / -2;
+  }
+  .hud {
+    grid-template-columns: 1fr;
+    grid-template-rows: 36px 1fr 50px;
+  }
+}
+
+/* Touch-screen detection — coarse pointer = no hover, tap targets need to be larger
+ * regardless of viewport width (an iPad Pro on its dock is wide but still a touch
+ * device). */
+@media (hover: none) and (pointer: coarse) {
+  /* Suppress hover-only states that confuse touch users (a tap shouldn't leave a
+   * "stuck hover" outline). */
+  .settings-btn:hover .settings-btn__bracket { border-color: var(--text-dim); }
+  /* Ensure all buttons hit the 44px minimum touch target. */
+  button, [role="button"], .launch__a {
+    min-height: 44px;
+  }
+  /* Disable cursor: pointer (already implied) but make sure interactive elements
+   * have generous padding for thumb taps. */
+  .palette__row, .audit-overlay__row, .notif {
+    padding-block: 12px;
+  }
+}

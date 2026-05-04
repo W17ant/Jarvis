@@ -1,0 +1,126 @@
+# ─────────────────────────────────────────────────────────────────
+# Flat-Out / Jarvis — public-repo gitignore
+#
+# Anything matched here NEVER reaches GitHub. Three categories:
+#   1. Secrets — env files, API keys, auth tokens
+#   2. Operator state — memory DB, audit logs, contacts, conversation history
+#   3. Build / runtime artefacts — node_modules, render output, cache
+# ─────────────────────────────────────────────────────────────────
+
+# 1 ── SECRETS ───────────────────────────────────────────────────
+# .env files hold FAL_KEY / FRAMEIO_TOKEN / SERPAPI_KEY / HUNTER_API_KEY +
+# model picks. Never commit. Setup wizard re-creates per install.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.gh-token
+auth.json
+
+# 2 ── OPERATOR STATE ────────────────────────────────────────────
+# data/memory.db = persistent SQLite with the operator's contacts, projects,
+# facts, conversation summaries. Per-install, contains personal data, never
+# commit. The setup wizard / boot path creates a fresh empty DB if missing.
+data/
+!data/.gitkeep
+
+# Inbox watcher target. Operator drops files here. Per-install, never commit.
+inbox/
+!inbox/.gitkeep
+
+# Operator's shoots — primary input data. Test artefacts + real client work.
+# Per-install, often gigabytes of footage, never commit.
+shoots/
+!shoots/.gitkeep
+
+# Generated deliverables. Re-renderable from shoots/, no need to ship.
+output/
+!output/.gitkeep
+
+# Per-install brand customisation. The setup wizard regenerates this from
+# defaults on first run; committing it would force every clone to the same
+# brand. Use config/brand.example.json for the canonical default.
+config/brand.json
+config/brand.json.bak
+
+# Setup-wizard artefacts (active project, profile state, custom configs).
+config/leads.json
+config/competitors.json
+
+# 3 ── BUILD + RUNTIME ARTEFACTS ─────────────────────────────────
+node_modules/
+package-lock.json.bak
+.npm/
+.pnpm-store/
+
+# Python venvs (Whisper / Kokoro install scripts create these).
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Remotion render cache + bundle artefacts.
+remotion/out/
+remotion/.cache/
+remotion/node_modules/
+# Public folder under remotion/ holds generated narration WAVs + manifests
+# that are re-creatable from scripts/. Skip the binaries; keep the scripts.
+remotion/public/audio/*.wav
+remotion/public/audio/*-manifest.json
+
+# Docker render env build artefacts (image is built locally, not shipped).
+docker/render/.cache/
+
+# 4 ── macOS / IDE NOISE ────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon?
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+.history/
+
+# 5 ── LOGS + TEMP ──────────────────────────────────────────────
+*.log
+flat-out-*.log
+/tmp/
+.tmp/
+
+# 6 ── TEST / FIXTURE DATA ──────────────────────────────────────
+# Small bridge smoke-tests + ad-hoc helpers that aren't part of the public API.
+# Keep in repo (they're useful), but exclude their generated outputs.
+tools/adhoc/cleanse-test-refs.mjs
+bridge/_smoke.mjs
+bridge/_pipeline_test.mjs
+bridge/_restitch_fastcut.mjs
+
+# 7 ── ASSETS LOCAL ONLY ────────────────────────────────────────
+# Music tracks are operator-supplied (per install-music.sh) and copyrighted —
+# never commit MP3s. The manifest schema + selection code stays.
+assets/music/*.mp3
+assets/music/*.wav
+assets/music/*.m4a
+
+# Kokoro ONNX model + voice bank are 318MB + 28MB respectively — over GitHub's
+# 100MB single-file limit. install.sh fetches them from upstream on first run.
+assets/kokoro/*.onnx
+assets/kokoro/*.bin
+
+# Demo shoot artefacts that were used during development.
+assets/demo-shoot/
+
+# Output PDFs / thumbnails that may have been generated during testing.
+assets/*.pdf
+
+# 8 ── PERSONAL TAILSCALE / DAEMON CONFIG ──────────────────────
+tools/launchd/com.flatoutmedia.hud.plist
+tools/launchd/com.flatoutmedia.*.plist

@@ -1,0 +1,65 @@
+[
+  {
+    "id": "title",
+    "text": "Flat-Out. The automotive AI kiosk built for your studio.",
+    "file": "audio/title.wav",
+    "seconds": 3.7546666666666666,
+    "frames": 113
+  },
+  {
+    "id": "hook",
+    "text": "Imagine a kiosk that listens, sees, edits, and remembers — purpose-built for an automotive PR and content agency. Here's what Flat-Out can do, and how to install it on your M5 Max in under thirty minutes.",
+    "file": "audio/hook.wav",
+    "seconds": 12.266666666666667,
+    "frames": 368
+  },
+  {
+    "id": "voice",
+    "text": "Say: hey Flat-Out, cut a thirty-second teaser of yesterday's Aston shoot. The kiosk picks up the wake phrase, transcribes locally, and starts rendering. Sentence-level streaming gets the first reply in your ear in about a second. Say stop and it'll cut you off mid-sentence.",
+    "file": "audio/voice.wav",
+    "seconds": 14.613333333333333,
+    "frames": 439
+  },
+  {
+    "id": "vision",
+    "text": "Vision sees every shot. Caption the Vulcan folder, find the front-grille hero, score clips for the trailer cut. The local Qwen 2.5 vision model keeps your client work on your machine.",
+    "file": "audio/vision.wav",
+    "seconds": 10.218666666666667,
+    "frames": 307
+  },
+  {
+    "id": "edit",
+    "text": "Voice-driven cinematic edits. Drop a shoot folder, ask for a teaser, and Flat-Out plans the cut points, applies your brand pack tail-card, beat-syncs to a music track, and lands a finished MP4 in your Downloads.",
+    "file": "audio/edit.wav",
+    "seconds": 11.882666666666667,
+    "frames": 357
+  },
+  {
+    "id": "brand",
+    "text": "Hero shot ready? One command exports a full brand pack — sixteen-by-nine, nine-by-sixteen, one-by-one and four-by-five, watermarked and clean, zipped for the client. On location, the live shoot mode turns the photographer's phone into a hands-free flag-and-caption mic.",
+    "file": "audio/brand.wav",
+    "seconds": 14.421333333333333,
+    "frames": 433
+  },
+  {
+    "id": "memory",
+    "text": "Persistent memory means you never re-explain who Sarah at the press office is, or what the FOM look means. Plus, Flat-Out exposes its tools through the Model Context Protocol, so Claude Desktop, Cursor and Continue can drive the same kiosk from anywhere.",
+    "file": "audio/memory.wav",
+    "seconds": 14.549333333333333,
+    "frames": 437
+  },
+  {
+    "id": "install",
+    "text": "Installing takes a coffee. Open Terminal. Clone the repo. Run install dot sh — the script grabs Ollama, Whisper, Kokoro and Qwen for you. Run setup wizard — pick your hardware tier, your voice, and your shoots folder. Done. Run launch dot sh kiosk, and Flat-Out is live.",
+    "file": "audio/install.wav",
+    "seconds": 14.976,
+    "frames": 450
+  },
+  {
+    "id": "outro",
+    "text": "Flat-Out. Built for the agency that lives and breathes automotive. Ready when you are.",
+    "file": "audio/outro.wav",
+    "seconds": 4.906666666666666,
+    "frames": 148
+  }
+]

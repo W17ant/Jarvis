@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.flatoutmedia.hud — LaunchAgent that keeps Flat-Out HUD running.
+  Installed by tools/install-daemon.sh; this template gets {{PROJECT_DIR}} substituted.
+
+  Behaviour:
+    RunAtLoad        — start when the user logs in
+    KeepAlive        — restart if launch.sh exits
+    ThrottleInterval — wait 30s between restart attempts (avoid tight crash loops)
+    StandardOutPath  — /tmp/flat-out-daemon.log (rotates by tmp cleanup)
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.flatoutmedia.hud</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{PROJECT_DIR}}/tools/daemon.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{{PROJECT_DIR}}</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/flat-out-daemon.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/flat-out-daemon.err</string>
+
+  <!-- PATH so the daemon can find brew-installed binaries (ollama, ffmpeg, node) -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- Don't run while battery; only on AC. Optional. Uncomment for laptop installs. -->
+  <!--
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+  -->
+</dict>
+</plist>

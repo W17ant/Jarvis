@@ -1,0 +1,692 @@
+<!doctype html>
+<!-- HUD - Branded Stark-style assistant kiosk. White-label per /brand config. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HUD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Default fonts: Oswald + Rubik for body/UI, Anton for the heavy "FLAT-OUT" wordmark
+       so it matches the marketing logo's black-condensed treatment. JetBrains Mono for tickers. -->
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <!-- Versioned to bust Chrome's CSS cache when styles.css changes. Bump on each release. -->
+  <link rel="stylesheet" href="styles.css?v=20260504" />
+  <script>
+  /* Why: brand-bootstrap runs before main scripts so colours, agent name, fonts, and logos
+   * are applied before the user sees the first paint. Falls back to embedded Flat-Out
+   * defaults if the bridge isn't up yet. */
+  (async () => {
+    const apply = (b) => {
+      const c = b?.colors || {};
+      const f = b?.fonts || {};
+      const root = document.documentElement;
+      if (c.primary)      root.style.setProperty("--fom-red", c.primary);
+      if (c.primaryDeep)  root.style.setProperty("--fom-red-deep", c.primaryDeep);
+      if (c.primaryGlow)  root.style.setProperty("--fom-red-glow", c.primaryGlow);
+      if (c.primaryTint)  root.style.setProperty("--fom-red-tint", c.primaryTint);
+      if (c.ink0)         root.style.setProperty("--ink-0", c.ink0);
+      if (c.ink1)         root.style.setProperty("--ink-1", c.ink1);
+      if (c.ink2)         root.style.setProperty("--ink-2", c.ink2);
+      if (c.text)         root.style.setProperty("--text", c.text);
+      if (c.textDim)      root.style.setProperty("--text-dim", c.textDim);
+      if (f.display)      root.style.setProperty("--font-display", `"${f.display}", "Arial Narrow", system-ui, sans-serif`);
+      if (f.body)         root.style.setProperty("--font-body", `"${f.body}", system-ui, sans-serif`);
+      if (f.mono)         root.style.setProperty("--font-mono", `"${f.mono}", ui-monospace, monospace`);
+      const name = b?.agent?.name || "Flat-Out";
+      const agency = b?.agency?.name || "Flat-Out Media";
+      const tagline = b?.agency?.tagline || "we live and breathe automotive";
+      document.title = `${name} // HUD`;
+      document.querySelectorAll("[data-brand-agent]").forEach(el => el.textContent = name);
+      document.querySelectorAll("[data-brand-agency]").forEach(el => { el.textContent = agency; el.setAttribute("alt", agency); });
+      document.querySelectorAll("[data-brand-tagline]").forEach(el => el.textContent = tagline);
+      /* Two-line wordmark: split the agency name at the LAST space.
+       * "Flat-Out Media" → "FLAT-OUT" / "MEDIA"
+       * "Acme Studios"   → "ACME" / "STUDIOS"
+       * Single-word names render as primary only with no suffix. */
+      const lastSpace = agency.lastIndexOf(" ");
+      const primary = lastSpace > 0 ? agency.slice(0, lastSpace) : agency;
+      const suffix  = lastSpace > 0 ? agency.slice(lastSpace + 1) : "";
+      document.querySelectorAll("[data-brand-agency-primary]").forEach(el => el.textContent = primary.toUpperCase());
+      document.querySelectorAll("[data-brand-agency-suffix]").forEach(el => {
+        el.textContent = suffix.toUpperCase();
+        el.style.display = suffix ? "" : "none";
+      });
+      const logo = b?.logo?.wordmarkPng || "assets/fom-wordmark.png";
+      document.querySelectorAll("img[data-brand-logo]").forEach(el => el.src = logo);
+      const wakeLabel = document.getElementById("wakeBtnLabel");
+      const wake = (b?.agent?.wakePhrase || `hey ${name.toLowerCase()}`).toUpperCase();
+      if (wakeLabel) wakeLabel.textContent = `TAP / SAY "${wake}"`;
+      const wakeBtn = document.getElementById("wakeBtn");
+      if (wakeBtn) wakeBtn.setAttribute("aria-label", `Activate ${name}`);
+      window.__BRAND__ = b;
+    };
+    try {
+      const r = await fetch("http://localhost:8766/brand", { cache: "no-store" });
+      if (r.ok) apply(await r.json());
+    } catch {}
+
+    /* Per-profile accent override — layer on top of brand.json defaults so each
+     * operator can pick their own colour without overwriting the agency-wide
+     * configuration. Reads the active profile's accentColor from localStorage
+     * (Storage namespace prefix), derives deep/glow/tint, applies as CSS vars. */
+    try {
+      const activeProfile = localStorage.getItem("flatout.activeProfile") || "default";
+      const hex = localStorage.getItem(`flatout.${activeProfile}.accentColor`);
+      if (hex && /^#[0-9a-f]{6}$/i.test(hex)) {
+        const root = document.documentElement;
+        const r2 = parseInt(hex.slice(1, 3), 16);
+        const g2 = parseInt(hex.slice(3, 5), 16);
+        const b2 = parseInt(hex.slice(5, 7), 16);
+        const shade = (amt) => {
+          const adj = (c) => Math.max(0, Math.min(255, Math.round(c + (amt < 0 ? c * amt : (255 - c) * amt))));
+          const toHex = (c) => c.toString(16).padStart(2, "0").toUpperCase();
+          return "#" + toHex(adj(r2)) + toHex(adj(g2)) + toHex(adj(b2));
+        };
+        root.style.setProperty("--fom-red", hex.toUpperCase());
+        root.style.setProperty("--fom-red-deep", shade(-0.45));
+        root.style.setProperty("--fom-red-glow", `rgba(${r2},${g2},${b2},0.55)`);
+        root.style.setProperty("--fom-red-tint", `rgba(${r2},${g2},${b2},0.06)`);
+      }
+    } catch {}
+  })();
+  </script>
+</head>
+<body>
+  <!-- Skip-link: keyboard-only affordance to jump past the calendar strip + brand
+       header straight to the wake button. Visually hidden until focused (Tab from
+       the address bar lands here first). -->
+  <a class="skip-link" href="#wakeBtn">Skip to wake</a>
+
+  <!-- Backdrop: animated grid + scanlines for sci-fi atmosphere -->
+  <div class="grid-bg" aria-hidden="true"></div>
+  <div class="scanline" aria-hidden="true"></div>
+
+  <main class="hud">
+    <!-- TOP: calendar strip - Stark HUD signature element -->
+    <header class="calendar" aria-label="Calendar">
+      <div class="calendar__days" id="calendarDays"></div>
+      <div class="calendar__brand">
+        <!-- Why: replaces the legacy fom-wordmark.png (white text on transparent → too thin
+             on the HUD's black backdrop). Renders the marketing logo's heavy black-condensed
+             "FLAT-OUT" + red "MEDIA" treatment via Anton + Oswald so it carries the same
+             visual weight at any zoom. The brand bootstrap rewrites these spans on white-label installs. -->
+        <div class="calendar__brand-text" data-brand-agency-block>
+          <span class="calendar__brand-text-primary" data-brand-agency-primary>FLAT-OUT</span>
+          <span class="calendar__brand-text-suffix" data-brand-agency-suffix>MEDIA</span>
+        </div>
+        <span class="calendar__brand-tag" data-brand-tagline>we live and breathe automotive</span>
+      </div>
+      <!-- Service health pips: bridge / ollama / kokoro / whisper. Polled every 15s.
+           Green = up, amber = slow/unreachable, dim = unknown. Read-only at-a-glance. -->
+      <div class="health" id="healthBar" aria-label="Service health" title="Service health">
+        <span class="health__pip" data-svc="bridge"  title="Bridge"><span class="health__dot"></span><span class="health__label">BR</span></span>
+        <span class="health__pip" data-svc="ollama"  title="Ollama (LLM + Vision)"><span class="health__dot"></span><span class="health__label">AI</span></span>
+        <span class="health__pip" data-svc="kokoro"  title="Kokoro TTS"><span class="health__dot"></span><span class="health__label">TTS</span></span>
+        <span class="health__pip" data-svc="whisper" title="Whisper STT"><span class="health__dot"></span><span class="health__label">STT</span></span>
+      </div>
+      <!-- Notification bell — opens the recent-activity drawer. Sits next to the
+           health pips so all "status surfaces" cluster top-right. Unread count
+           shows as a small red badge on top-right of the bell. -->
+      <button class="notif-bell" id="notifBell" type="button" aria-label="Open notifications" title="Notifications">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 2a1 1 0 0 1 1 1v1.07a7 7 0 0 1 6 6.93v3.18l1.71 1.71A1 1 0 0 1 20 18H4a1 1 0 0 1-.71-1.71L5 14.58V11a7 7 0 0 1 6-6.93V3a1 1 0 0 1 1-1Zm0 19a2.5 2.5 0 0 0 2.45-2H9.55A2.5 2.5 0 0 0 12 21Z" fill="currentColor"/>
+        </svg>
+        <span class="notif-bell__count" id="notifBellCount" aria-live="polite"></span>
+      </button>
+    </header>
+
+    <!-- Toast container — slides notifications in from the right, auto-dismiss. -->
+    <div class="notif-toasts" id="notifToasts" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- Notification drawer — slide-out panel, opens on bell click. -->
+    <aside class="notif-drawer" id="notifDrawer" hidden aria-label="Notifications history"></aside>
+
+    <!-- Conversation history drawer — slides out from the LEFT (notifications own
+         the right). Press H to toggle. Holds the last 100 turns, persisted across
+         refresh. Hidden in demo mode. -->
+    <aside class="history-drawer" id="historyDrawer" hidden aria-label="Conversation history"></aside>
+
+    <!-- Command palette — Cmd+K opens. Fuzzy search over /actions manifest, Enter
+         dispatches the typed query through the same voice pipeline. -->
+    <div class="palette" id="paletteOverlay" hidden role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="palette__panel">
+        <div class="palette__input-wrap">
+          <span class="palette__prompt">›</span>
+          <input id="paletteInput" type="text" class="palette__input" autocomplete="off" spellcheck="false" placeholder="Type a command, or describe what you want…" />
+          <span class="palette__hint">⎋ to dismiss</span>
+        </div>
+        <div class="palette__list" id="paletteList"></div>
+        <div class="palette__footer">
+          <span><kbd>↵</kbd> run</span>
+          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+          <span><kbd>⇥</kbd> insert phrasing</span>
+          <span><kbd>⎋</kbd> close</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOP-LEFT: month + big day -->
+    <section class="panel panel--month" data-widget-id="month" aria-label="Date">
+      <div class="ring ring--month">
+        <svg viewBox="0 0 200 200" class="ring__svg">
+          <circle class="ring__track" cx="100" cy="100" r="92" />
+          <circle class="ring__fill ring__fill--month" cx="100" cy="100" r="92" />
+        </svg>
+        <div class="ring__inner">
+          <div class="ring__label" id="monthName">MAY</div>
+          <div class="ring__value ring__value--xl" id="dayNumber">01</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LEFT-MID: CPU / GPU / RAM as three round car-pod dials in a horizontal row.
+         Why: half-arcs were stacking and pushing the rest of the column out of bounds.
+         Round dials are smaller, evoke a dashboard instrument cluster, and read as a
+         tight matched set. Each circle uses stroke-dasharray to animate the fill. -->
+    <section class="panel panel--system" data-widget-id="system" aria-label="System">
+      <div class="syspods">
+        <div class="syspod">
+          <svg viewBox="0 0 100 100" class="syspod__svg">
+            <circle cx="50" cy="50" r="42" class="syspod__track" />
+            <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--cpu" id="cpuArc" />
+          </svg>
+          <div class="syspod__readout">
+            <div class="syspod__value" id="cpuValue">— %</div>
+            <div class="syspod__label">CPU</div>
+          </div>
+        </div>
+        <div class="syspod">
+          <svg viewBox="0 0 100 100" class="syspod__svg">
+            <circle cx="50" cy="50" r="42" class="syspod__track" />
+            <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--gpu" id="gpuArc" />
+          </svg>
+          <div class="syspod__readout">
+            <div class="syspod__value" id="gpuValue">— %</div>
+            <div class="syspod__label">GPU</div>
+            <div class="syspod__sub" id="gpuTherm">—</div>
+          </div>
+        </div>
+        <div class="syspod">
+          <svg viewBox="0 0 100 100" class="syspod__svg">
+            <circle cx="50" cy="50" r="42" class="syspod__track" />
+            <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--ram" id="ramArc" />
+          </svg>
+          <div class="syspod__readout">
+            <div class="syspod__value" id="ramValue">— GB</div>
+            <div class="syspod__label">RAM</div>
+          </div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <div class="stat"><span class="stat__k">NET</span><span class="stat__v" id="netValue">—</span></div>
+        <div class="stat"><span class="stat__k">DSK</span><span class="stat__v" id="dskValue">— TB</span></div>
+        <div class="stat"><span class="stat__k">GPU MEM</span><span class="stat__v" id="gpuMemValue">—</span></div>
+      </div>
+    </section>
+
+    <!-- LEFT-BOTTOM: comms / news strip -->
+    <section class="panel panel--comms" data-widget-id="comms" aria-label="Communications">
+      <div class="panel__title">COMMS</div>
+      <ul class="comms" id="commsList">
+        <li>3 unread // editorial inbox</li>
+        <li>shoot brief // the SUV</li>
+        <li>retouch queue // 14 files</li>
+        <li>social schedule // 06 pending</li>
+      </ul>
+    </section>
+
+    <!-- CENTER: speedometer + voice state. The signature element. -->
+    <section class="panel panel--core" aria-label="Core">
+      <!-- WEBCAM INLAY: anchored to top-right of the centerpiece -->
+      <div class="cam" id="cam" aria-hidden="true">
+        <video id="camVideo" class="cam__video" autoplay muted playsinline></video>
+        <div class="cam__tint"></div>
+        <div class="cam__scan"></div>
+        <span class="cam__bracket cam__bracket--tl"></span>
+        <span class="cam__bracket cam__bracket--tr"></span>
+        <span class="cam__bracket cam__bracket--bl"></span>
+        <span class="cam__bracket cam__bracket--br"></span>
+        <div class="cam__label">OPERATOR</div>
+        <div class="cam__targeting"></div>
+      </div>
+
+      <div class="speedo" id="speedo">
+        <!-- FOM brand blade layered behind animated overlays -->
+        <div class="speedo__brand-mark" aria-hidden="true"></div>
+        <!-- Outer rotating ring -->
+        <svg viewBox="0 0 600 600" class="speedo__svg">
+          <defs>
+            <linearGradient id="redGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ff1a1a" />
+              <stop offset="100%" stop-color="#a30000" />
+            </linearGradient>
+            <filter id="glow"><feGaussianBlur stdDeviation="4" /></filter>
+          </defs>
+
+          <!-- Tick marks around the dial -->
+          <g id="speedoTicks"></g>
+
+          <!-- Concentric rings -->
+          <circle cx="300" cy="300" r="270" class="speedo__ring speedo__ring--outer" />
+          <circle cx="300" cy="300" r="240" class="speedo__ring speedo__ring--mid" />
+          <circle cx="300" cy="300" r="210" class="speedo__ring speedo__ring--inner" />
+
+          <!-- Animated arc segments (state-driven) -->
+          <circle cx="300" cy="300" r="255" class="speedo__arc speedo__arc--a" />
+          <circle cx="300" cy="300" r="225" class="speedo__arc speedo__arc--b" />
+
+          <!-- Numerals 0-200 around the lower hemisphere -->
+          <g id="speedoNumerals"></g>
+
+          <!-- Needle: shaped like the FOM blade — tapered curved wedge, brand red, glowing -->
+          <g id="needle" transform="rotate(-120 300 300)">
+            <!-- Why: two cubic curves form a leaf/blade shape: 14px wide at base, tapering to a sharp tip,
+                 with a subtle outward curve on the trailing edge to match the FOM mark's swoosh. -->
+            <path d="M 287 300
+                     C 290 230, 294 150, 299 78
+                     L 301 78
+                     C 308 150, 313 230, 316 300
+                     Z"
+                  class="speedo__needle-blade" />
+            <circle cx="300" cy="300" r="14" class="speedo__hub" />
+            <circle cx="300" cy="300" r="6" class="speedo__hub-inner" />
+          </g>
+
+          <!-- Center reactor / FOM mark -->
+          <circle cx="300" cy="300" r="50" class="speedo__core" />
+          <circle cx="300" cy="300" r="50" class="speedo__core-glow" filter="url(#glow)" />
+          <!-- Why: tightened the FLAT/OUT stack — bumped FLAT and brought OUT up so the
+               two lines fill the central reactor circle instead of leaving an empty gap. -->
+          <text x="300" y="298" text-anchor="middle" class="speedo__mark">FLAT</text>
+          <text x="300" y="319" text-anchor="middle" class="speedo__mark speedo__mark--small">OUT</text>
+        </svg>
+
+        <!-- State readout below dial -->
+        <div class="speedo__state" id="stateReadout">
+          <span class="speedo__state-dot"></span>
+          <span class="speedo__state-text" id="stateText">STANDBY</span>
+        </div>
+        <!-- (Tagline relocated to a ghosted watermark on the bottom telemetry panel.) -->
+      </div>
+
+      <!-- Settings TUNE plate. Anchored to the bottom-right corner of .panel--core
+           via absolute positioning (.panel--core has position:relative). Reuses the
+           camera inlay's corner-bracket vocabulary + the launch panel's Oswald
+           letterspacing + the wake button's text-not-icon approach. -->
+      <button class="settings-btn" id="settingsBtn" type="button" aria-label="Open settings" title="Tune the HUD">
+        <span class="settings-btn__bracket settings-btn__bracket--tl"></span>
+        <span class="settings-btn__bracket settings-btn__bracket--tr"></span>
+        <span class="settings-btn__bracket settings-btn__bracket--bl"></span>
+        <span class="settings-btn__bracket settings-btn__bracket--br"></span>
+        <span class="settings-btn__label">TUNE</span>
+      </button>
+    </section>
+
+    <!-- RIGHT-TOP: weather forecast strip. Hero icon left, temp right, forecast below.
+         Icon slot uses an <img> swapped via JS based on WMO code from Open-Meteo. -->
+    <section class="panel panel--weather" data-widget-id="weather" aria-label="Weather">
+      <div class="weather__head">
+        <div class="weather__loc" id="weatherLoc">MANCHESTER, UK</div>
+        <div class="weather__now">
+          <img class="weather__icon" id="weatherIcon" src="assets/weather-icons/partly-cloudy-day.svg" alt="" aria-hidden="true" />
+          <div class="weather__readout">
+            <span class="weather__temp" id="weatherTemp">14°</span>
+            <span class="weather__cond" id="weatherCond">PARTLY CLOUDED</span>
+          </div>
+        </div>
+      </div>
+      <ul class="weather__forecast" id="weatherForecast"></ul>
+    </section>
+
+    <!-- RIGHT-MID: clock + today's calendar feed (two-up split). -->
+    <section class="panel panel--clock" data-widget-id="clock" aria-label="Time">
+      <div class="clock-split">
+        <div class="clock-split__time">
+          <div class="clock" id="clock">00:00</div>
+          <div class="clock__sec" id="clockSec">:00</div>
+          <div class="clock__date" id="clockDate">— — —</div>
+        </div>
+        <div class="clock-split__diary" aria-label="Today's diary">
+          <div class="diary__head">
+            <span class="diary__title">TODAY</span>
+            <span class="diary__count" id="diaryCount">—</span>
+          </div>
+          <ul class="diary" id="diaryList">
+            <li class="diary__empty">checking calendar…</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- BOTTOM: audio waveform / network telemetry. The ghosted tagline sits behind the
+         waveform canvas so the FOM phrase reads as a faint watermark across the bottom. -->
+    <section class="panel panel--telemetry" aria-label="Telemetry">
+      <div class="telemetry__tagline" data-brand-tagline-big>STEPPING YOUR AUTOMOTIVE BUSINESS UP A GEAR</div>
+      <canvas id="waveform" class="waveform" width="1200" height="80"></canvas>
+      <!-- Task strip: covers the waveform when long-running work is in flight.
+           One row per active task with progress bar + ETA. Hidden when empty. -->
+      <ul class="tasks" id="taskStrip" hidden></ul>
+      <div class="telemetry__row">
+        <span class="telemetry__k">DOWN</span><span class="telemetry__v" id="downValue">2.5 KB/s</span>
+        <span class="telemetry__k">UP</span><span class="telemetry__v" id="upValue">169 B/s</span>
+        <span class="telemetry__k">LAT</span><span class="telemetry__v" id="latValue">12 MS</span>
+      </div>
+    </section>
+
+    <!-- RIGHT-BOTTOM: launcher / quick links. Entries populated at runtime from
+         /launcher (config/launcher.json). White-label installs edit the JSON. -->
+    <section class="panel panel--launch" data-widget-id="launch" aria-label="Quick Launch">
+      <div class="panel__title">LAUNCH</div>
+      <ul class="launch" id="launchList"></ul>
+    </section>
+
+    <!-- FIRST-RUN SETUP MODAL — shown once until localStorage records completion -->
+    <div class="setup" id="setupModal" hidden role="dialog" aria-modal="true" aria-label="First-run setup">
+      <div class="setup__panel">
+        <div class="setup__brand">
+          <img src="assets/fom-wordmark.png" alt="Flat-Out Media" class="setup__logo" data-brand-logo data-brand-agency />
+          <div class="setup__sub">FIRST-RUN SETUP</div>
+        </div>
+        <div class="setup__welcome">
+          <p>Welcome. Two minutes to get you tuned in.</p>
+        </div>
+
+        <div class="setup__field">
+          <label>Operator location</label>
+          <div class="setup__loc-row">
+            <input id="setupCity" type="text" placeholder="Detecting…" />
+            <button id="setupRedetect" type="button">REDETECT</button>
+          </div>
+          <small id="setupCoords">—</small>
+        </div>
+
+        <div class="setup__field">
+          <label>Voice</label>
+          <select id="setupVoice">
+            <option value="bm_daniel">Daniel — British male, Jarvis-tier</option>
+            <option value="bm_george">George — British male, deeper</option>
+            <option value="bm_lewis">Lewis — British male, warmer</option>
+            <option value="bm_fable">Fable — British male, narrator</option>
+            <option value="bf_emma">Emma — British female</option>
+            <option value="bf_alice">Alice — British female, formal</option>
+            <option value="bf_isabella">Isabella — British female, warm</option>
+            <option value="bf_lily">Lily — British female, light</option>
+          </select>
+          <button id="setupVoiceTest" type="button">TEST VOICE</button>
+        </div>
+
+        <div class="setup__field">
+          <label>Microphone</label>
+          <select id="setupMic"><option value="">— pick mic —</option></select>
+          <button id="setupMicAuto" type="button">AUTO-PICK WORKING MIC</button>
+        </div>
+
+        <div class="setup__field">
+          <label>Performance tier</label>
+          <select id="setupTier">
+            <option value="lite">Lite — older Macs / battery-saving</option>
+            <option value="standard">Standard — M-series base / Pro</option>
+            <option value="pro">Pro — M-series Max</option>
+            <option value="max">Max — M3/M4/M5 Max or Ultra, 64GB+</option>
+          </select>
+          <small id="setupHwInfo">Detecting hardware…</small>
+        </div>
+
+        <div class="setup__field">
+          <label>Agency name (shown in voice persona)</label>
+          <input id="setupAgency" type="text" placeholder="Flat-Out Media" />
+        </div>
+
+        <button class="setup__submit" id="setupSubmit" type="button">GET STARTED</button>
+        <button class="setup__skip" id="setupSkip" type="button">Skip (use defaults)</button>
+      </div>
+    </div>
+
+    <!-- Demo recording indicator — appears top-left while recording, hidden otherwise -->
+    <div class="rec-indicator" id="recIndicator" hidden>
+      <span class="rec-indicator__dot"></span>
+      <span class="rec-indicator__label">REC</span>
+      <span class="rec-indicator__time" id="recTime">0:00</span>
+    </div>
+
+    <!-- TUNE button moved inside .panel--core (see line ~240) so it anchors to the
+         bottom-right corner of the centre/speedo column rather than floating over
+         the whole viewport. -->
+
+    <!-- Settings modal — voice / model / colour / location, with live preview. -->
+    <div class="settings-modal" id="settingsModal" hidden role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="settings-modal__panel">
+        <div class="settings-modal__head">
+          <div class="settings-modal__title">SETTINGS</div>
+          <button class="settings-modal__close" id="settingsClose" type="button" aria-label="Close">
+            <img src="assets/icons/x.svg" alt="" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/map-pin-line.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Active project</label>
+          <div class="settings-modal__row">
+            <select id="settingsProject"></select>
+          </div>
+          <small>Voice commands without an explicit subject default to this shoot. Pick "(none)" to scope at the LLM's discretion per query.</small>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/cpu.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Operator profile</label>
+          <div class="settings-modal__row">
+            <select id="settingsProfile"></select>
+            <button id="settingsProfileNew" type="button">+ NEW</button>
+          </div>
+          <small id="settingsProfileHint">Each profile keeps its own voice, colour, tier, and camera settings. Switching reloads the kiosk.</small>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/speaker-high.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Voice</label>
+          <div class="settings-modal__row">
+            <select id="settingsVoice"></select>
+            <button id="settingsVoicePreview" type="button">▸ PREVIEW</button>
+          </div>
+          <small>British male and female voices preferred for the kiosk</small>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/cpu.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Language model</label>
+          <div class="settings-modal__row">
+            <select id="settingsModel"></select>
+          </div>
+          <small>Larger models reason better but consume more RAM and respond slower</small>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/palette.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>HUD accent colour</label>
+          <div class="settings-modal__swatches" id="settingsSwatches"></div>
+          <div class="settings-modal__row settings-modal__row--swatch-actions">
+            <button id="settingsAccentReset" type="button" class="settings-modal__link">Reset to brand default</button>
+          </div>
+          <small>Per-operator preference — repaints the HUD instantly. Brand default lives in <code>config/brand.json</code>; reset above clears your override.</small>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Accessibility</label>
+          <div class="settings-modal__row">
+            <label class="settings-modal__check">
+              <input type="checkbox" id="settingsHighContrast" />
+              <span>High-contrast text</span>
+            </label>
+          </div>
+          <div class="settings-modal__row">
+            <select id="settingsFontScale">
+              <option value="s">Smaller text</option>
+              <option value="m" selected>Standard text</option>
+              <option value="l">Larger text</option>
+              <option value="xl">Largest text</option>
+            </select>
+          </div>
+          <small>Reduced motion follows your OS setting automatically.</small>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/monitor.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Operator camera</label>
+          <div class="settings-modal__row">
+            <select id="settingsCameraMode">
+              <option value="off">Off — camera never appears</option>
+              <option value="on-listen">On listening — fade in during conversation</option>
+              <option value="always">Always on — show whenever HUD is open</option>
+            </select>
+          </div>
+          <small>Default off for privacy; switch on when demoing or you want the operator inlay</small>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/folder.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Folders</label>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Shoots in</span>
+            <input id="settingsShootsDir" type="text" placeholder="Shoots root — e.g. /Volumes/Workdrive/Shoots or shoots" autocomplete="off" />
+          </div>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Output to</span>
+            <input id="settingsOutputDir" type="text" placeholder="Output root — e.g. /Volumes/Workdrive/Output or output" autocomplete="off" />
+          </div>
+          <small id="settingsFoldersHint">Output auto-organises into <code>youtube/thumbnails</code>, <code>youtube/shorts</code>, <code>instagram/reels</code>, <code>instagram/posts</code>, <code>tiktok</code>, <code>brand-packs</code>, <code>pdf</code>, <code>watermarked</code>, <code>aspects</code>, <code>portraits</code>, <code>contactsheets</code>, <code>premiere-renders</code>, <code>videos</code>. Absolute paths or paths relative to the project.</small>
+        </div>
+
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/map-pin-line.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Location</label>
+          <div class="settings-modal__row settings-modal__row--searchable">
+            <input id="settingsCity" type="text" placeholder="Search place — e.g. Leicester, Goodwood, Bedford" autocomplete="off" />
+            <button id="settingsLocate" type="button" title="Re-detect via IP">↻</button>
+            <!-- Typeahead suggestions render here as the operator types. Disambiguates
+                 "Manchester UK" vs "Manchester NH" before save instead of guessing. -->
+            <div class="settings-modal__suggest" id="settingsSuggest" hidden></div>
+          </div>
+          <small id="settingsCoords">—</small>
+        </div>
+
+        <div class="settings-modal__actions">
+          <button class="settings-modal__cancel" id="settingsCancel" type="button">CANCEL</button>
+          <button class="settings-modal__save" id="settingsSave" type="button">SAVE</button>
+        </div>
+        <div class="settings-modal__status" id="settingsStatus"></div>
+        <div class="settings-modal__footer">
+          <button class="settings-modal__secondary" id="settingsAuditBtn" type="button">VIEW AUDIT LOG</button>
+          <button class="settings-modal__secondary" id="settingsUsageBtn" type="button">VIEW USAGE</button>
+          <button class="settings-modal__secondary" id="settingsEditLayoutBtn" type="button">EDIT LAYOUT</button>
+          <button class="settings-modal__secondary" id="settingsResetLayoutBtn" type="button">RESET LAYOUT</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audit log viewer — centred overlay, opened from settings. Filters by
+         operator + tool + date. Read-only — no rerun-from-here for v1. -->
+    <div class="audit-overlay" id="auditOverlay" hidden role="dialog" aria-modal="true" aria-label="Audit log">
+      <div class="audit-overlay__panel">
+        <div class="audit-overlay__head">
+          <div class="audit-overlay__title">AUDIT LOG</div>
+          <div class="audit-overlay__summary" id="auditSummary"></div>
+          <button class="audit-overlay__close" id="auditClose" type="button" aria-label="Close">
+            <img src="assets/icons/x.svg" alt="" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="audit-overlay__filters">
+          <select id="auditFilterOperator"><option value="">all operators</option></select>
+          <select id="auditFilterTool"><option value="">all tools</option></select>
+          <button id="auditRefresh" type="button">REFRESH</button>
+        </div>
+        <div class="audit-overlay__list" id="auditList"></div>
+      </div>
+    </div>
+
+    <!-- Wake-button: tap or wake word activates listening. Label is rewritten by brand bootstrap. -->
+    <button class="wake" id="wakeBtn" type="button" aria-label="Activate assistant">
+      <span class="wake__inner" id="wakeBtnLabel">TAP / SAY "HEY FLAT-OUT"</span>
+    </button>
+
+    <!-- Idle command-discovery nudge. Sits above the wake button when shown.
+         Auto-fades after 12s, dismissible, hidden in demo mode. -->
+    <div class="help-card" id="helpCard" hidden role="status" aria-live="polite"></div>
+
+    <!-- Live transcript bubble (appears during listening) -->
+    <div class="transcript" id="transcript" hidden>
+      <div class="transcript__heard" id="transcriptHeard"></div>
+      <div class="transcript__reply" id="transcriptReply"></div>
+    </div>
+  </main>
+
+  <script type="module">
+    /* Profiles MUST init first — it sets the Storage namespace before any other
+     * module performs its first Storage.get/set. Otherwise modules read the
+     * default profile briefly even though the operator's last-active was different. */
+    import * as Profiles from "./profiles.js";
+    Profiles.init();
+    window.__profiles = Profiles;
+
+    /* Wire tasks.js as window.__tasks so voice.js can dispatch lifecycle events
+     * without a hard ESM import (voice.js loads as a module too but earlier in
+     * the pipeline). Also exposes the dev simulate handle for manual testing. */
+    import * as Tasks from "./tasks.js";
+    window.__tasks = Tasks;
+
+    /* Speedo expressiveness controller — owns the needle, runs a 60fps mood-driven
+     * loop. Started AFTER hud.js's setNeedle is exposed (it imports from hud.js). */
+    import * as Speedo from "./speedo.js";
+    window.__speedo = Speedo;
+    /* Defer start until next tick so hud.js's module body has run and #needle is
+     * in the DOM. The import itself doesn't trigger DOMContentLoaded yet. */
+    window.addEventListener("DOMContentLoaded", () => Speedo.start());
+
+    /* Notifications surface — toast + drawer. Self-subscribes to bridge events
+     * so voice.js doesn't need to know about it. */
+    import * as Notifications from "./notifications.js";
+    window.__notif = Notifications;
+    window.addEventListener("DOMContentLoaded", () => Notifications.init());
+
+    /* Conversation history drawer — H key toggles. Persists in localStorage. */
+    import * as History from "./history.js";
+    window.__history = History;
+    window.addEventListener("DOMContentLoaded", () => History.init());
+
+    /* Demo mode — Cmd+D flips a body class that hides ops chrome for client visits. */
+    import * as Demo from "./demo.js";
+    window.__demo = Demo;
+    window.addEventListener("DOMContentLoaded", () => Demo.init());
+
+    /* Command palette — Cmd+K opens fuzzy search over /actions. Routes through
+     * window.__runQuery so the typed query enters the same pipeline as voice. */
+    import * as Palette from "./palette.js";
+    window.__palette = Palette;
+    window.addEventListener("DOMContentLoaded", () => Palette.init());
+
+    /* Help nudges — periodic command-discovery tips after long idle. Reads phrasings
+     * from /actions manifest. Hidden in demo mode. */
+    import * as Help from "./help.js";
+    window.__help = Help;
+    window.addEventListener("DOMContentLoaded", () => Help.init());
+
+    /* Audit log viewer — opened from settings → "VIEW AUDIT LOG". Reads /audit. */
+    import * as Audit from "./audit.js";
+    window.__audit = Audit;
+    window.addEventListener("DOMContentLoaded", () => Audit.init());
+
+    /* Transparent plan stage — slide-in panel showing the LLM's intended tool call
+     * before it fires. Esc cancels via /cancel. Subscribes to "tool.proposed" events. */
+    import * as Plan from "./plan.js";
+    window.__plan = Plan;
+    window.addEventListener("DOMContentLoaded", () => Plan.init());
+
+    /* Editable widget layout — Cmd+L enters edit mode. Per-profile layout persists
+     * via Storage. Default matches the as-built grid so existing setups don't shift. */
+    import * as Layout from "./layout.js";
+    window.__layout = Layout;
+    window.addEventListener("DOMContentLoaded", () => Layout.init());
+
+    /* Usage telemetry overlay — VIEW USAGE button in settings opens it. Read-only
+     * snapshot of audit log: dispatches, errors, top tools, fal call count. */
+    import * as Usage from "./usage.js";
+    window.__usage = Usage;
+    window.addEventListener("DOMContentLoaded", () => Usage.init());
+  </script>
+  <script src="hud.js" type="module"></script>
+  <script src="voice.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "manufacturers": [
+    "Aston Martin",
+    "McLaren",
+    "Bentley",
+    "Lotus",
+    "Bugatti",
+    "Pagani",
+    "Ferrari",
+    "Lamborghini"
+  ],
+  "outlets": [
+    "topgear.com",
+    "autocar.co.uk",
+    "carwow.co.uk",
+    "motor1.com",
+    "evo.co.uk"
+  ],
+  "maxPerSweep": 3
+}

@@ -1,0 +1,9 @@
+{
+  "_comment": "Backing track library. BPM drives beat-aligned cut timing. mood lets the LLM auto-pick by request.",
+  "tracks": [
+    { "file": "action-hero.mp3",        "bpm": 140, "mood": "epic",      "loudness": -14, "tags": ["cinematic", "trailer", "action"] },
+    { "file": "heroic-adventure.mp3",   "bpm": 128, "mood": "driving",   "loudness": -12, "tags": ["heroic", "automotive", "build"] },
+    { "file": "rynos-theme.mp3",        "bpm": 150, "mood": "action",    "loudness": -13, "tags": ["high-tempo", "chase", "fast"] },
+    { "file": "the-descent.mp3",        "bpm": 130, "mood": "cinematic", "loudness": -14, "tags": ["dark", "trailer", "drop"] }
+  ]
+}

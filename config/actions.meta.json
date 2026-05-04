@@ -1,0 +1,206 @@
+{
+  "_comment": "Action manifest enrichment — labels, categories, voice phrasings layered on top of the bridge's tool definitions at /actions. Optional per-tool entries; missing tools fall back to name/description/parameters only. As the command palette + help cheat-sheet land they'll consume these fields. Categories: video, pdf, vision, mail, calendar, premiere, frameio, memory, agency, social, lightroom, shell, system.",
+
+  "video_edit_from_shoot": {
+    "label": "Cut a teaser",
+    "category": "video",
+    "phrasings": ["cut a teaser", "edit a teaser from", "make a teaser of", "build a video for"]
+  },
+  "generate_youtube_short": {
+    "label": "YouTube short",
+    "category": "video",
+    "phrasings": ["render a youtube short", "cut a short for"]
+  },
+  "generate_youtube_thumbnail": {
+    "label": "YouTube thumbnail",
+    "category": "video",
+    "phrasings": ["thumbnail for", "youtube thumb"]
+  },
+  "generate_youtube_promo": {
+    "label": "YouTube thumb + short",
+    "category": "video",
+    "phrasings": ["thumbnail and a short", "promo pack for"]
+  },
+
+  "create_pdf": {
+    "label": "Generate PDF",
+    "category": "pdf",
+    "phrasings": ["generate a", "draft a", "create a"]
+  },
+  "generate_shoot_report": {
+    "label": "Shoot report",
+    "category": "pdf",
+    "phrasings": ["shoot report", "wrap-up doc", "client report for"]
+  },
+  "press_release_from_bullets": {
+    "label": "Press release from bullets",
+    "category": "pdf",
+    "phrasings": ["draft a press release", "press release from"]
+  },
+  "hero_contact_sheet": {
+    "label": "Hero contact sheet",
+    "category": "pdf",
+    "phrasings": ["contact sheet of the heroes", "hero contact sheet"]
+  },
+
+  "describe_image": {
+    "label": "Describe shot",
+    "category": "vision",
+    "phrasings": ["what's in", "describe the shot", "caption this"]
+  },
+  "caption_shoot_folder": {
+    "label": "Caption a shoot",
+    "category": "vision",
+    "phrasings": ["summarise the shoot", "what's in the latest shoot"]
+  },
+  "find_frame": {
+    "label": "Find a shot by description",
+    "category": "vision",
+    "phrasings": ["find shots of", "where do we have"]
+  },
+  "find_similar_shots": {
+    "label": "Find similar shots",
+    "category": "vision",
+    "phrasings": ["find shots like this"]
+  },
+  "score_clip_for_trailer": {
+    "label": "Score clip for trailer",
+    "category": "vision",
+    "phrasings": ["how good is this clip"]
+  },
+  "find_portrait_crop": {
+    "label": "Suggest crop",
+    "category": "vision",
+    "phrasings": ["where should I crop"]
+  },
+  "crop_to_portrait": {
+    "label": "Crop to vertical",
+    "category": "vision",
+    "phrasings": ["make a vertical of", "crop for stories"]
+  },
+  "export_all_aspects": {
+    "label": "Export all aspect ratios",
+    "category": "vision",
+    "phrasings": ["export every aspect", "all variants of"]
+  },
+
+  "draft_email": {
+    "label": "Draft email",
+    "category": "mail",
+    "phrasings": ["draft an email to", "email"]
+  },
+  "get_mail_summary": {
+    "label": "Inbox summary",
+    "category": "mail",
+    "phrasings": ["what's in the inbox", "summarise my mail"]
+  },
+
+  "get_upcoming_events": {
+    "label": "Upcoming events",
+    "category": "calendar",
+    "phrasings": ["what's coming up", "what's on this week"]
+  },
+  "add_calendar_event": {
+    "label": "Add calendar event",
+    "category": "calendar",
+    "phrasings": ["add to my calendar", "schedule"]
+  },
+
+  "premiere_open_project": { "label": "Open Premiere project", "category": "premiere" },
+  "premiere_import_folder": { "label": "Import folder to Premiere", "category": "premiere" },
+  "premiere_create_sequence_from_folder": { "label": "Build sequence from folder", "category": "premiere" },
+  "premiere_render_active_sequence": { "label": "Render active sequence", "category": "premiere" },
+
+  "frameio_list_pending_review": {
+    "label": "Pending review",
+    "category": "frameio",
+    "phrasings": ["what's pending review", "review queue"]
+  },
+  "frameio_get_comments": { "label": "Read Frame.io comments", "category": "frameio" },
+  "frameio_add_comment": { "label": "Comment on Frame.io", "category": "frameio" },
+  "frameio_set_status": { "label": "Set Frame.io status", "category": "frameio" },
+  "frameio_search_files": { "label": "Search Frame.io", "category": "frameio" },
+
+  "add_contact":   { "label": "Add contact", "category": "memory" },
+  "get_contact":   { "label": "Look up contact", "category": "memory" },
+  "list_contacts": { "label": "List contacts", "category": "memory" },
+  "remember":      { "label": "Remember a fact", "category": "memory" },
+  "recall":        { "label": "Recall a fact", "category": "memory" },
+  "add_project":   { "label": "Add project", "category": "memory" },
+  "list_projects": { "label": "List projects", "category": "memory" },
+  "save_conversation": { "label": "Save session summary", "category": "memory" },
+
+  "flag_shot":        { "label": "Flag shot", "category": "shoots" },
+  "list_shot_flags":  { "label": "List shot flags", "category": "shoots" },
+  "clear_shot_flag":  { "label": "Clear shot flag", "category": "shoots" },
+  "trackday_tag":     { "label": "Tag track-day metadata", "category": "shoots" },
+  "batch_watermark":  { "label": "Watermark a folder", "category": "shoots" },
+
+  "add_usage_rights":    { "label": "Record clearance", "category": "rights" },
+  "check_usage_rights":  { "label": "Check clearance", "category": "rights" },
+  "list_usage_rights":   { "label": "List rights", "category": "rights" },
+  "expire_usage_rights": { "label": "Revoke clearance", "category": "rights" },
+
+  "generate_social_captions": { "label": "Social captions", "category": "agency" },
+  "check_brand_tone":         { "label": "Check brand tone", "category": "agency" },
+  "hashtag_research":         { "label": "Hashtag research", "category": "agency" },
+  "vehicle_spec_lookup":      { "label": "Vehicle spec", "category": "agency" },
+  "ask_internal":             { "label": "How do we usually...", "category": "agency" },
+  "team_standup":             { "label": "Team standup", "category": "agency" },
+  "describe_shoot_with_specs": { "label": "Brief on a shoot", "category": "agency" },
+  "color_match_reference":    { "label": "Match a colour grade", "category": "agency" },
+
+  "generate_outreach_pack":   { "label": "Outreach pack", "category": "leads" },
+  "list_outreach_leads":      { "label": "List leads", "category": "leads" },
+  "mark_lead_contacted":      { "label": "Mark lead contacted", "category": "leads" },
+
+  "apply_lightroom_preset":   { "label": "Apply Lightroom preset", "category": "lightroom" },
+  "list_lightroom_presets":   { "label": "List Lightroom presets", "category": "lightroom" },
+
+  "press_cycle_radar": {
+    "label": "Press-cycle radar",
+    "category": "leads",
+    "phrasings": ["what's in the press cycle", "any pitch opportunities", "what's been in the news"]
+  },
+
+  "pre_shoot_checklist": {
+    "label": "Pre-shoot kit checklist",
+    "category": "agency",
+    "phrasings": ["kit check for", "what should we pack for", "pre-shoot list for"]
+  },
+
+  "brand_pack_export": {
+    "label": "Build a brand pack",
+    "category": "shoots",
+    "phrasings": ["build a brand pack of", "export deliverables for", "pack this up for"]
+  },
+
+  "auto_cull": {
+    "label": "Auto-cull a shoot",
+    "category": "shoots",
+    "phrasings": ["cull the latest shoot", "auto-cull", "remove the duplicates from"]
+  },
+
+  "dream_cycle": {
+    "label": "Tidy memory",
+    "category": "memory",
+    "phrasings": ["tidy up the memory", "compact memory", "merge duplicates"]
+  },
+
+  "read_active_window": {
+    "label": "Read the active window",
+    "category": "system",
+    "phrasings": ["what's open", "what app am I in", "what's on screen", "what's the active sequence"]
+  },
+
+  "undo_last": {
+    "label": "Undo last action",
+    "category": "system",
+    "phrasings": ["undo", "scratch that", "never mind that", "reverse that"]
+  },
+
+  "web_search":               { "label": "Web search", "category": "system" },
+  "run_shell":                { "label": "Run shell command", "category": "system" },
+  "write_file":               { "label": "Write file", "category": "system" },
+  "get_capabilities":         { "label": "What can you do", "category": "system" }
+}

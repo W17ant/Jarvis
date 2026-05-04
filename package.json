@@ -1,0 +1,22 @@
+{
+  "name": "flat-out-hud",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "bridge": "node bridge/server.mjs",
+    "kokoro": "python3 bridge/kokoro_server.py",
+    "serve": "python3 -m http.server 8765"
+  },
+  "dependencies": {
+    "@fal-ai/client": "^1.10.0",
+    "@sparticuz/chromium-min": "^148.0.0",
+    "better-sqlite3": "^12.9.0",
+    "puppeteer-core": "^24.42.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@bybas/weather-icons": "^2.0.0",
+    "@phosphor-icons/core": "^2.1.1"
+  }
+}
