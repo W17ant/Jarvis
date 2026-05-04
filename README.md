@@ -71,6 +71,32 @@ The HUD opens in Chrome's `--app` mode (no browser chrome). Say "hey [agent name
 
 ---
 
+## 🎨 Creative style guide (your CLAUDE.md)
+
+`config/creative-style.md` is the agency house style — editorial voice, words you use vs avoid, edit pacing, visual preferences. The bridge reads it on every message and applies it to every generated draft (email, caption, press release, video brief).
+
+```bash
+cp config/creative-style.example.md config/creative-style.md
+open -e config/creative-style.md   # edit in TextEdit
+```
+
+The example template is opinionated — copy, then tweak. Changes take effect on the next message; no bridge restart needed. The settings panel in the HUD also exposes a textarea for editing it on-screen.
+
+---
+
+## 🔄 Update from upstream
+
+Made changes to the repo? Pull them onto a deployed kiosk with one command:
+
+```bash
+./tools/update.sh           # full update
+./tools/update.sh --check   # dry run — show what would change
+```
+
+Backs up `memory.db`, stashes any local edits, `git pull --ff-only`, `npm install`, rebuilds native bindings, refreshes Python deps, pulls any new Ollama models declared in `package.json`, then restarts the launchd agent (or warns if it isn't installed).
+
+---
+
 ## 🆘 Something broken? Send a diagnostic
 
 ```bash

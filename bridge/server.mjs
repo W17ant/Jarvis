@@ -27,6 +27,7 @@ import * as Agency from "./agency.mjs";
 import * as Leads from "./leads.mjs";
 import * as Youtube from "./youtube.mjs";
 import { loadBrand, invalidateBrandCache } from "./brand.mjs";
+import { creativeStylePromptBlock, loadCreativeStyle, invalidateCreativeStyleCache, creativeStylePath } from "./creative-style.mjs";
 import * as Shotflag from "./shotflag.mjs";
 import { buildHeroContactSheet } from "./contactsheet.mjs";
 import { batchWatermark } from "./watermark.mjs";
@@ -2103,7 +2104,7 @@ async function askLLM(query, history = []) {
   const _todayStr = _now.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const _tomorrow = new Date(_now.getTime() + 86_400_000);
   const _tomorrowStr = _tomorrow.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. The local time is ${_now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}
+  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. The local time is ${_now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}${creativeStylePromptBlock()}
 
 SPOKEN OUTPUT RULES (CRITICAL):
   Your reply is read aloud by a TTS voice. Output ONLY plain spoken prose:
@@ -2653,6 +2654,44 @@ const httpServer = createServer(async (req, res) => {
      * with this before rendering so a single deploy can serve any client. */
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify(loadBrand()));
+    return;
+  }
+  if (req.url === "/style" && req.method === "GET") {
+    /* The operator's creative-style.md ("template for success") — editorial voice,
+     * visual preferences, edit pacing, brand vocabulary. Returned as raw markdown
+     * so the settings panel can drop it into a textarea for editing. Empty body
+     * when the file doesn't exist yet (treated as "not yet customised"). */
+    const text = loadCreativeStyle();
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({
+      ok: true,
+      exists: text.length > 0,
+      path: creativeStylePath(),
+      content: text,
+      examplePath: creativeStylePath().replace(/\.md$/, ".example.md"),
+    }));
+    return;
+  }
+  if (req.url === "/style" && req.method === "POST") {
+    /* Operator saved an edit through the settings panel. We write the raw markdown
+     * to disk + invalidate the cache so the next askLLM picks it up. Bounded length
+     * to prevent a runaway paste from blowing every prompt budget. */
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      const content = String(parsed.content || "").slice(0, 32_000); // hard ceiling
+      const fs = await import("node:fs/promises");
+      const cfgDir = new URL("../config/", import.meta.url);
+      await fs.mkdir(cfgDir, { recursive: true });
+      await fs.writeFile(new URL("../config/creative-style.md", import.meta.url), content, "utf8");
+      invalidateCreativeStyleCache();
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, bytes: content.length }));
+    } catch (e) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
     return;
   }
   if (req.url === "/launcher" && req.method === "GET") {

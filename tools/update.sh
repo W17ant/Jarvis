@@ -84,6 +84,12 @@ step "npm install"
 if [[ $CHECK_ONLY -eq 0 ]]; then
   npm install --silent
   ok "node deps in sync"
+  # Why: native bindings (better-sqlite3) are pinned to a specific Node ABI.
+  # If Homebrew has upgraded `node` between installs (or we just pulled a
+  # commit that bumped a dependency), the binding can fall out of sync and
+  # crash the bridge with NODE_MODULE_VERSION X / Y. Rebuild defensively —
+  # idempotent + cheap when nothing has changed.
+  npm rebuild better-sqlite3 --silent && ok "native bindings rebuilt"
 else
   ok "skipped (--check)"
 fi

@@ -13,7 +13,7 @@
  */
 
 import { readFile, writeFile, copyFile, stat } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 
@@ -256,6 +256,40 @@ async function main() {
     brand.paths = {};
     if (shootsDir) brand.paths.shoots = shootsDir;
     if (outputDir) brand.paths.output = outputDir;
+  }
+
+  /* ---------- CREATIVE STYLE GUIDE ----------
+   * Why: every agency has a "house style" that should land in every generated
+   * email, caption, and press release. Rather than hard-coding, we let the
+   * operator author config/creative-style.md (their CLAUDE.md equivalent) and
+   * the bridge injects it into the system prompt on every askLLM call.
+   *
+   * On first install we offer to seed the active file from the example (which
+   * ships rich, opinionated defaults — the operator edits to taste). On
+   * re-installs we leave their existing file alone. */
+  heading("Creative style guide");
+  console.log(C.dim + "  config/creative-style.md is the agency house style — editorial voice,\n  visual preferences, words you use vs avoid, edit pacing. Read on every\n  message and applied to every generated draft. Equivalent of CLAUDE.md." + C.reset);
+
+  const styleActive = path.join(PROJECT_DIR, "config", "creative-style.md");
+  const styleExample = path.join(PROJECT_DIR, "config", "creative-style.example.md");
+  if (existsSync(styleActive)) {
+    ok(`creative-style.md already in place — left untouched`);
+  } else if (!existsSync(styleExample)) {
+    warn(`example template missing at ${styleExample} — skipping`);
+  } else if (interactive) {
+    const ans = await ask("Seed config/creative-style.md from the example template? [Y/n]", "Y");
+    if (!ans || /^y/i.test(ans)) {
+      const ex = readFileSync(styleExample, "utf8");
+      writeFileSync(styleActive, ex);
+      ok(`wrote ${styleActive}`);
+      console.log(C.dim + "  Edit it later: open ./config/creative-style.md in any editor, save," + C.reset);
+      console.log(C.dim + "  next message picks it up. Or use the settings panel in the HUD." + C.reset);
+    }
+  } else {
+    /* Non-interactive — auto-seed so a fresh install ships with a baseline. */
+    const ex = readFileSync(styleExample, "utf8");
+    writeFileSync(styleActive, ex);
+    ok(`auto-seeded ${styleActive}`);
   }
 
   /* ---------- HARDWARE TIER ---------- */

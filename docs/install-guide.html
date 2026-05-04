@@ -992,42 +992,43 @@
     <div class="faq-row">
       <div class="faq-q">HUD shows a red bridge dot / &ldquo;connection refused&rdquo;</div>
       <div class="faq-body">
-        <p class="cause">One or more local services (bridge, Kokoro, Whisper, static) have died.</p>
-        <p class="fix">In Terminal: <code>cd ~/Desktop/Jarvis &amp;&amp; ./launch.sh restart</code>. That kills every running instance and starts them fresh. Then refresh the kiosk with <code>⌘ Cmd + R</code>.</p>
+        <p class="fix"><code>cd ~/Desktop/Jarvis &amp;&amp; ./launch.sh restart</code> &mdash; kills every running instance and starts them fresh. Refresh the kiosk with <code>⌘ Cmd + R</code>.</p>
       </div>
     </div>
 
     <div class="faq-row">
-      <div class="faq-q">Bridge won&rsquo;t start at all (kept failing after restart)</div>
+      <div class="faq-q">Bridge won&rsquo;t start (Node ABI mismatch from a Homebrew upgrade)</div>
       <div class="faq-body">
-        <p class="cause">Usually a Node version drift &mdash; Homebrew updated <code>node</code> after install, breaking a compiled binding.</p>
-        <p class="fix">Already handled: <code>./launch.sh restart</code> auto-detects this and rebuilds the binding silently. If it still fails, run <code>npm rebuild better-sqlite3</code> in the Jarvis folder, then <code>./launch.sh restart</code> again.</p>
+        <p class="fix"><code>./launch.sh restart</code> auto-detects and rebuilds the native binding silently. If it still fails: <code>npm rebuild better-sqlite3</code>, then restart again.</p>
       </div>
     </div>
 
     <div class="faq-row">
       <div class="faq-q">How do I copy what&rsquo;s in the browser console?</div>
       <div class="faq-body">
-        <p class="cause">Antony often needs the live console output to diagnose UI / voice / fetch errors.</p>
-        <p class="fix"><strong>Right-click anywhere in the HUD &rarr; Inspect</strong> &rarr; click the <em>Console</em> tab. Right-click in the console area &rarr; <em>Save as&hellip;</em> (saves a <code>.log</code> file). Or select all (<code>⌘ A</code>) &rarr; copy &rarr; paste into the email body.</p>
+        <p class="fix">Right-click in the HUD &rarr; <em>Inspect</em> &rarr; <em>Console</em> tab &rarr; right-click in the console &rarr; <em>Save as&hellip;</em>. Or <code>⌘ A</code> &rarr; copy &rarr; paste.</p>
       </div>
     </div>
 
     <div class="faq-row">
-      <div class="faq-q">One command to bundle everything and email Antony</div>
+      <div class="faq-q">Bundle everything and email Antony in one command</div>
       <div class="faq-body">
-        <p class="cause">Logs live in <code>/tmp/flat-out-*.log</code> &mdash; bundling them and the system snapshot is fiddly by hand.</p>
-        <p class="fix">In Terminal:
-          <div class="code" style="margin-top: 6px;"><span class="prompt">$</span> ./tools/diagnose.sh</div>
-          That writes a tarball to <code>~/Desktop/flat-out-diag-*.tgz</code> (logs + system snapshot + <code>brand.json</code>, no secrets) and opens an email draft to <strong>Antony@aoneill.co.uk</strong> with it attached. Add a sentence about what broke, hit Send.
-        </p>
+        <div class="code" style="margin: 6px 0;"><span class="prompt">$</span> ./tools/diagnose.sh</div>
+        <p class="fix">Writes a tarball to <code>~/Desktop/flat-out-diag-*.tgz</code> (logs + system snapshot + <code>brand.json</code>, no secrets) and opens a Mail draft to <strong>Antony@aoneill.co.uk</strong> with it attached. Add a sentence on what broke, hit Send.</p>
       </div>
     </div>
 
     <div class="faq-row">
-      <div class="faq-q">Where do the logs live if I want to read them myself?</div>
+      <div class="faq-q">Antony shipped a fix &mdash; how do I pull it?</div>
       <div class="faq-body">
-        <p class="fix"><code>tail -f /tmp/flat-out-bridge.log</code> &mdash; the most useful one. Others: <code>kokoro.log</code>, <code>whisper.log</code>, <code>static.log</code>, <code>rebuild.log</code> (all under <code>/tmp/flat-out-</code>). Logs reset every reboot &mdash; capture them with <code>./tools/diagnose.sh</code> before you restart if you want to keep them.</p>
+        <p class="fix"><code>./tools/update.sh</code> &mdash; backs up <code>memory.db</code>, stashes local edits, <code>git pull</code>, refreshes Node + Python deps, rebuilds bindings, pulls new Ollama models, restarts services. Use <code>--check</code> first for a dry run.</p>
+      </div>
+    </div>
+
+    <div class="faq-row">
+      <div class="faq-q">Replies don&rsquo;t sound like our agency&rsquo;s voice</div>
+      <div class="faq-body">
+        <p class="fix">No style guide configured. <code>cp config/creative-style.example.md config/creative-style.md</code>, then <code>open -e</code> it and edit. Covers tone, words you use vs avoid, edit pacing &mdash; applied to every draft on the next message.</p>
       </div>
     </div>
 
