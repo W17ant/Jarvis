@@ -1,35 +1,45 @@
 #!/usr/bin/env bash
 # launch.sh - One-command Flat-Out HUD startup.
 # Starts: static server (8765), Node bridge (8766), Kokoro TTS server (8767),
-# then opens Chrome with no browser chrome.
+# Whisper STT server (8768), then opens Chrome.
 #
 # Usage:
-#   ./launch.sh           # windowed app mode (no chrome, draggable)
-#   ./launch.sh kiosk     # true fullscreen (Cmd+Q to exit)
-#   ./launch.sh restart   # kill all services + restart them (does not reopen Chrome)
-#   ./launch.sh stop      # kill all services, leave Chrome open
-#   ./launch.sh reset     # wipes profile + grants fresh, prompts mic/camera again
+#   ./launch.sh              # windowed app mode (no chrome, draggable)
+#   ./launch.sh kiosk        # true fullscreen (Cmd+Q to exit)
+#   ./launch.sh restart      # kill all services + restart them (no Chrome reopen)
+#   ./launch.sh stop         # kill all services, leave Chrome open
+#   ./launch.sh kill         # alias of stop — kills every running instance
+#   ./launch.sh reset        # wipe Chrome profile + restart from scratch
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 URL="http://localhost:8765/"
 
 # ── Service control ────────────────────────────────────────────
-# Restart / stop run BEFORE start_if_free so they take effect cleanly. Each
-# service binds a fixed port; we kill by command-string match because the bridge
-# launches as a child of bash via start_if_free and pkill on PID isn't reliable.
+# Kill by PORT, not by process name. lsof -ti :PORT returns every PID bound to
+# that port — covers static (python3 http.server), bridge (node), kokoro/whisper
+# (python from .venv) regardless of how they were spawned. More reliable than
+# pkill -f against command-string patterns.
 stop_services() {
-  pkill -TERM -f "node bridge/server.mjs"     2>/dev/null || true
-  pkill -TERM -f "bridge/kokoro_server.py"    2>/dev/null || true
-  pkill -TERM -f "bridge/whisper_server.py"   2>/dev/null || true
-  pkill -TERM -f "python3 -m http.server 8765" 2>/dev/null || true
+  for port in 8765 8766 8767 8768; do
+    pids=$(lsof -ti ":$port" 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+      echo "[Flat-Out] killing :${port} (pid=${pids})"
+      kill -TERM $pids 2>/dev/null || true
+    fi
+  done
+  # Give them a beat to exit gracefully, then SIGKILL anything still bound.
   sleep 1
+  for port in 8765 8766 8767 8768; do
+    pids=$(lsof -ti ":$port" 2>/dev/null || true)
+    [[ -n "$pids" ]] && kill -KILL $pids 2>/dev/null || true
+  done
   echo "[Flat-Out] services stopped"
 }
 
 SKIP_CHROME=0     # set by restart so we don't open another Chrome window
 case "${1:-}" in
-  stop)
+  stop|kill)
     stop_services
     exit 0
     ;;
