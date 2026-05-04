@@ -81,11 +81,19 @@ export function sanitiseForTTS(text) {
  * @returns {Promise<ArrayBuffer>}
  * @throws on network failure or non-2xx response — caller should catch and trigger fallback.
  */
-export async function synthesise(text, voice) {
+/* Why 1.1: Kokoro's default 1.0 reads slightly slow for an automotive-PR kiosk
+ * — the operator wants it crisp. 1.1 is ~10% faster speech rate, still
+ * articulate, doesn't sacrifice intelligibility. Kokoro caps usefully around 1.3
+ * (above that words start blurring); 0.9 reads notably more deliberate if the
+ * operator wants a slower house voice instead. Per-voice override possible via
+ * a future settings-modal slider. */
+const DEFAULT_SPEED = 1.1;
+
+export async function synthesise(text, voice, speed = DEFAULT_SPEED) {
   const res = await fetch(KOKORO_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text, voice }),
+    body: JSON.stringify({ text, voice, speed }),
   });
   if (!res.ok) throw new Error(`kokoro ${res.status}`);
   return res.arrayBuffer();

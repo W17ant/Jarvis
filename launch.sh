@@ -4,13 +4,42 @@
 # then opens Chrome with no browser chrome.
 #
 # Usage:
-#   ./launch.sh        # windowed app mode (no chrome, draggable)
-#   ./launch.sh kiosk  # true fullscreen (Cmd+Q to exit)
-#   ./launch.sh reset  # wipes profile + grants fresh, prompts mic/camera again
+#   ./launch.sh           # windowed app mode (no chrome, draggable)
+#   ./launch.sh kiosk     # true fullscreen (Cmd+Q to exit)
+#   ./launch.sh restart   # kill all services + restart them (does not reopen Chrome)
+#   ./launch.sh stop      # kill all services, leave Chrome open
+#   ./launch.sh reset     # wipes profile + grants fresh, prompts mic/camera again
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 URL="http://localhost:8765/"
+
+# ── Service control ────────────────────────────────────────────
+# Restart / stop run BEFORE start_if_free so they take effect cleanly. Each
+# service binds a fixed port; we kill by command-string match because the bridge
+# launches as a child of bash via start_if_free and pkill on PID isn't reliable.
+stop_services() {
+  pkill -TERM -f "node bridge/server.mjs"     2>/dev/null || true
+  pkill -TERM -f "bridge/kokoro_server.py"    2>/dev/null || true
+  pkill -TERM -f "bridge/whisper_server.py"   2>/dev/null || true
+  pkill -TERM -f "python3 -m http.server 8765" 2>/dev/null || true
+  sleep 1
+  echo "[Flat-Out] services stopped"
+}
+
+SKIP_CHROME=0     # set by restart so we don't open another Chrome window
+case "${1:-}" in
+  stop)
+    stop_services
+    exit 0
+    ;;
+  restart)
+    echo "[Flat-Out] restarting services..."
+    stop_services
+    SKIP_CHROME=1   # the operator usually has the HUD already open in Chrome
+    set -- "app"
+    ;;
+esac
 
 start_if_free() {
   local port="$1"; local name="$2"; shift 2
@@ -39,6 +68,11 @@ fi
 
 # Give services a moment to bind
 sleep 2
+
+if [[ "$SKIP_CHROME" == "1" ]]; then
+  echo "[Flat-Out] services restarted — Chrome window not re-opened. Refresh the HUD with Cmd+R."
+  exit 0
+fi
 
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 if [[ ! -x "$CHROME" ]]; then

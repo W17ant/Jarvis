@@ -627,6 +627,13 @@
       <strong>Auto-start on login</strong>
       Run <code>./tools/install-daemon.sh</code> to register a launch agent so the bridge starts whenever you log in.
     </div>
+    <div class="callout">
+      <strong>If something goes wrong &mdash; restart the bridge</strong>
+      If the bridge dot in the HUD ever turns red (services stopped responding), open Terminal and run:
+      <div class="code" style="margin-top: 10px;"><span class="prompt">$</span> ./launch.sh restart</div>
+      That kills the bridge / Kokoro / Whisper services and starts them fresh. Then refresh the kiosk with <code>⌘ Cmd + R</code>.
+      <br><br>To stop everything without restarting, use <code>./launch.sh stop</code>.
+    </div>
   </div>
   <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 6</span></div>
 </div></div>
