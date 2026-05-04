@@ -263,6 +263,10 @@ async function main() {
    * Picker maps a chip name → tested-safe model defaults so the operator doesn't have to
    * remember which b-count fits their machine. Per Ollama: there is no qwen2.5vl:14b —
    * VL family is 3b/7b/32b/72b — so "middle" = 14b text + 7b VL, not 14b/14b. */
+  /* existingEnv is read here (before tier defaults reference it) so the picker can
+   * default to whatever model the previous install committed to .env. Used again
+   * later in the API-keys block — a single read keeps both consistent. */
+  const existingEnv = readEnv(ENV_PATH);
   heading("Hardware tier");
   console.log(C.dim + "  Sets the local model sizes. M5 Max gets press-release-grade 32b/32b;\n  M1/M2/M3 Max get the safe 14b/7b middle that won't thrash the GPU." + C.reset);
 
@@ -338,7 +342,6 @@ async function main() {
    * Both have graceful fallbacks if unset, but most demo installs want them. The keys land
    * in .env so the bridge picks them up via process.env. Skipping is fine — set later. */
   heading("Optional integrations");
-  const existingEnv = readEnv(ENV_PATH);
   const skipKeys = !!flags.skipKeys || !interactive;
 
   console.log(C.dim + "  Press Enter to skip any key — set later by editing .env." + C.reset);

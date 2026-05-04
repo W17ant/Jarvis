@@ -61,11 +61,37 @@ start_if_free() {
   fi
 }
 
+# Self-heal native binding ABI mismatch.
+# Why: better-sqlite3 ships compiled binaries pinned to a specific Node ABI.
+# When Homebrew updates Node between `npm install` and now, the bridge crashes
+# with `NODE_MODULE_VERSION X / Y` on first `require`. The end-user shouldn't
+# need a developer to recover — we detect the error in the log and rebuild
+# silently, then retry. Only triggers when the binding is actually broken.
+heal_bridge_if_native_binding_mismatched() {
+  # Wait briefly for the bridge to either bind :8766 or crash.
+  for i in {1..6}; do
+    sleep 1
+    lsof -i ":8766" >/dev/null 2>&1 && return 0
+  done
+  if grep -q "NODE_MODULE_VERSION\|ERR_DLOPEN_FAILED\|better-sqlite3" /tmp/flat-out-bridge.log 2>/dev/null; then
+    echo "[Flat-Out] native binding ABI mismatch detected — auto-rebuilding (one-time, ~30s) ..."
+    (cd "$HERE" && npm rebuild better-sqlite3 --silent) >/tmp/flat-out-rebuild.log 2>&1
+    if [[ $? -eq 0 ]]; then
+      echo "[Flat-Out] rebuild ok — retrying bridge"
+      bash -c "cd '$HERE' && node bridge/server.mjs" >/tmp/flat-out-bridge.log 2>&1 &
+      echo "[Flat-Out] bridge retry pid=$!"
+    else
+      echo "[Flat-Out] rebuild failed — see /tmp/flat-out-rebuild.log"
+    fi
+  fi
+}
+
 # 1. static file server for the HUD
 start_if_free 8765 "static"  bash -c "cd '$HERE' && python3 -m http.server 8765"
 
 # 2. Node bridge (system stats, Ollama proxy, weather, video.edit pipeline)
 start_if_free 8766 "bridge"  bash -c "cd '$HERE' && node bridge/server.mjs"
+heal_bridge_if_native_binding_mismatched
 
 # 3. Kokoro TTS server (free local voice — bf_emma British female)
 # 4. Whisper STT server (faster-whisper, local, replaces Chrome cloud SpeechRecognition)

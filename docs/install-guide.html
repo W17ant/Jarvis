@@ -11,8 +11,11 @@
   /** install-guide.html — Flat-Out Jarvis install + features + uninstall.
    *
    *  Mirrors the AO MCP SEO outreach-pack layout (light A4 print-ready, accent
-   *  rule on cover, page-head + page-foot per content page, numbered chapters)
-   *  but FOM-branded: red accent (#E10600), Oswald display, Rubik body. */
+   *  rule on cover, page-head + page-foot per content page, AO monogram in
+   *  page header, numbered chapters) but FOM-branded: red accent (#E10600),
+   *  Oswald display, Rubik body. Step flow mirrors the actual install.sh
+   *  end-to-end (installer auto-runs the setup wizard, no separate manual
+   *  step). */
   :root {
     --bg: #ffffff;
     --bg-surface: #fafafa;
@@ -182,7 +185,7 @@
     color: var(--ink-muted);
   }
 
-  /* ─── Page header / footer ─── */
+  /* ─── Page header / footer (matches AO outreach-pack) ─── */
   .pg-head {
     display: flex;
     justify-content: space-between;
@@ -201,13 +204,11 @@
     color: var(--ink-muted);
   }
 
-  .pg-head-right {
-    font-family: var(--font-display);
-    font-weight: 600;
-    font-size: 11px;
-    letter-spacing: 0.4em;
-    color: var(--accent);
-    text-transform: uppercase;
+  /* AO monogram at top-right of every content page — same as keepitwhat
+   * outreach-pack and other AO deliverables. */
+  .pg-head img {
+    height: 18px;
+    opacity: 0.5;
   }
 
   .pg-foot {
@@ -446,6 +447,26 @@
     font-style: normal;
   }
 
+  /* ─── Sub-list inside a step (for the wizard's auto-run questions) ─── */
+  .step-body ul.bullets {
+    margin: 0 0 14px 18px;
+    list-style: none;
+    padding: 0;
+  }
+  .step-body ul.bullets li {
+    position: relative;
+    padding-left: 14px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  .step-body ul.bullets li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 9px;
+    width: 6px; height: 1px;
+    background: var(--accent);
+  }
+
   /* ─── Print refinements ─── */
   @media print {
     body { background: #fff; }
@@ -459,7 +480,7 @@
 <div class="page">
   <div class="cover-inner">
     <div class="cover-logos">
-      <img src="/Users/Antony/Desktop/Keep-It-What/seo-mcp-server/reports/ao-monogram.png" alt="AO" class="ao-mark" onerror="this.style.display='none'">
+      <img src="ao-monogram.png" alt="AO" class="ao-mark" onerror="this.style.display='none'">
       <div class="fom-wordmark">
         <span class="primary">FLAT-OUT</span>
         <span class="suffix">MEDIA</span>
@@ -474,6 +495,7 @@
         <span class="lbl">Platform</span> macOS 14+, Apple Silicon (M-series)<br>
         <span class="lbl">Hardware</span> 64 GB+ RAM recommended (32 GB works on smaller tier)<br>
         <span class="lbl">Setup</span> ~30 minutes, mostly model download time<br>
+        <span class="lbl">Steps</span> 5 — Terminal, clone, install, wizard, launch<br>
         <span class="lbl">Repo</span> github.com/W17ANT/Jarvis<br>
         <span class="lbl">Prepared</span> 4 May 2026<br>
         <span class="lbl">Author</span> Antony O&rsquo;Neill
@@ -490,7 +512,7 @@
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
-    <span class="pg-head-right">SETUP</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="step-num">STEP 01</div>
@@ -516,7 +538,7 @@
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
-    <span class="pg-head-right">SETUP</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="step-num">STEP 02</div>
@@ -543,59 +565,64 @@
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
-    <span class="pg-head-right">SETUP</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="step-num">STEP 03</div>
     <div class="step-title">Run the Installer</div>
-    <p class="step-lede">This step downloads the AI brain (~25 GB). Coffee time.</p>
+    <p class="step-lede">This step downloads the AI brain (~25&nbsp;GB). Coffee time.</p>
     <div class="step-body">
       <p><strong>Type this</strong>, then press <code>Enter</code>:</p>
       <div class="code"><span class="prompt">$</span> cd Jarvis</div>
       <p><strong>Then type this</strong>, then press <code>Enter</code>:</p>
       <div class="code"><span class="prompt">$</span> ./install.sh</div>
       <p>The installer pulls in everything Jarvis needs:</p>
-      <ul style="margin-left: 20px; margin-bottom: 14px;">
+      <ul class="bullets">
         <li><strong>Ollama</strong> &mdash; the engine that runs the AI brain</li>
-        <li><strong>Qwen 2.5</strong> &mdash; the language model that thinks (~19 GB)</li>
-        <li><strong>Qwen 2.5 Vision</strong> &mdash; the model that sees your shots (~6 GB)</li>
+        <li><strong>Qwen 2.5</strong> &mdash; the language model that thinks (~19&nbsp;GB)</li>
+        <li><strong>Qwen 2.5 Vision</strong> &mdash; the model that sees your shots (~6&nbsp;GB)</li>
         <li><strong>Whisper</strong> &mdash; the model that hears you</li>
         <li><strong>Kokoro</strong> &mdash; the voice that speaks back</li>
         <li><strong>Supporting tools</strong> &mdash; ffmpeg, ImageMagick, exiftool</li>
       </ul>
-      <p>Lines with green ticks <span style="color: var(--green);">✓</span> show what&rsquo;s finished. The whole thing takes 10&ndash;15 minutes mostly waiting for downloads.</p>
-      <p>When you see <strong>install complete</strong>, move to the next step.</p>
+      <p>Lines with green ticks <span style="color: var(--green);">✓</span> show progress. 10&ndash;15 minutes total.</p>
+      <p>When you see <strong>install complete</strong> in a box, move to the next step.</p>
     </div>
   </div>
   <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 4</span></div>
 </div></div>
 
-<!-- ============ STEP 04 — WIZARD ============ -->
+<!-- ============ STEP 04 — WIZARD (manual step — install.sh prints "Next: node tools/setup-wizard.mjs" if it didn't auto-run) ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
-    <span class="pg-head-right">SETUP</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="step-num">STEP 04</div>
     <div class="step-title">Run the Setup Wizard</div>
-    <p class="step-lede">Answer a few questions. Press <code>Enter</code> on its own to keep the suggested answer.</p>
+    <p class="step-lede">Configures your voice, brand, folders, hardware tier. Press <code>Enter</code> on its own to keep the suggested answer.</p>
     <div class="step-body">
+      <p><strong>Type this exactly</strong>, then press <code>Enter</code>:</p>
       <div class="code"><span class="prompt">$</span> node tools/setup-wizard.mjs</div>
       <p>You&rsquo;ll be asked, in order:</p>
-      <ul style="margin-left: 20px; margin-bottom: 14px;">
-        <li><strong>Agent name</strong> &mdash; default: <em>Flat-Out</em></li>
-        <li><strong>Wake phrase</strong> &mdash; default: <em>hey flat-out</em></li>
-        <li><strong>Voice</strong> &mdash; default: <em>Daniel</em> (British male, Jarvis-tier)</li>
+      <ul class="bullets">
+        <li><strong>Agent name</strong> &mdash; default <em>Flat-Out</em></li>
+        <li><strong>Wake phrase</strong> &mdash; default <em>hey flat-out</em></li>
+        <li><strong>Voice</strong> &mdash; default <em>Daniel</em> (British, Jarvis-tier)</li>
         <li><strong>Agency name + tagline</strong></li>
-        <li><strong>Brand colours</strong> &mdash; default: FOM red</li>
-        <li><strong>Hardware tier</strong> &mdash; the wizard auto-picks based on your Mac</li>
-        <li><strong>API keys</strong> &mdash; optional. Skip any you don&rsquo;t have</li>
-        <li><strong>Folders</strong> &mdash; where your shoots are stored, where to save output</li>
+        <li><strong>Brand colours</strong> &mdash; default FOM red</li>
+        <li><strong>Hardware tier</strong> &mdash; auto-picked from your Mac</li>
+        <li><strong>API keys</strong> &mdash; skip any you don&rsquo;t have</li>
+        <li><strong>Folders</strong> &mdash; where shoots live, where output goes</li>
       </ul>
     </div>
+    <div class="callout callout--warn">
+      <strong>Don&rsquo;t skip this</strong>
+      The kiosk needs <code>config/brand.json</code> to start cleanly. The installer prints <em>&ldquo;Next: node tools/setup-wizard.mjs&rdquo;</em> at the end &mdash; that&rsquo;s your cue to run it.
+    </div>
     <div class="callout">
-      <strong>You can re-run this any time</strong>
+      <strong>Re-run any time</strong>
       Run <code>node tools/setup-wizard.mjs</code> again whenever you want to change a setting. The kiosk picks up the change without restarting.
     </div>
   </div>
@@ -606,7 +633,7 @@
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
-    <span class="pg-head-right">SETUP</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="step-num">STEP 05</div>
@@ -616,7 +643,7 @@
       <div class="code"><span class="prompt">$</span> ./launch.sh kiosk</div>
       <p>The HUD opens in full-screen Chrome. The speedometer breathes. The corner brackets light up. You&rsquo;re live.</p>
       <p>Try saying:</p>
-      <div class="voice-quote">&ldquo;Hey Flat-Out, what&rsquo;s in my diary today?&rsquo;&rdquo;</div>
+      <div class="voice-quote">&ldquo;Hey Flat-Out, what&rsquo;s in my diary today?&rdquo;</div>
       <p>If you hear a reply, the install worked.</p>
     </div>
     <div class="callout">
@@ -633,21 +660,21 @@
       <div class="code" style="margin-top: 10px;"><span class="prompt">$</span> ./launch.sh restart</div>
       That kills every running instance (bridge, Kokoro, Whisper, static server) and starts them fresh. Then refresh the kiosk with <code>⌘ Cmd + R</code>.
       <br><br>Other useful commands:
-      <ul style="margin-top: 8px; margin-left: 18px; font-size: 11px; line-height: 1.6;">
+      <ul class="bullets" style="margin-top: 8px;">
         <li><code>./launch.sh stop</code> &mdash; stop everything (don&rsquo;t restart)</li>
         <li><code>./launch.sh kill</code> &mdash; same as stop (alternate name)</li>
         <li><code>./launch.sh</code> &mdash; windowed test mode (smaller window, easier to debug)</li>
       </ul>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 6</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 5</span></div>
 </div></div>
 
 <!-- ============ FEATURES PAGE 1 — VOICE + VISION ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
-    <span class="pg-head-right">CAPABILITIES</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="section-band">
@@ -682,14 +709,14 @@
       </div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 7</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 6</span></div>
 </div></div>
 
 <!-- ============ FEATURES PAGE 2 — EDITING ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
-    <span class="pg-head-right">CAPABILITIES</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="section-band">
@@ -724,14 +751,14 @@
       </div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 8</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 7</span></div>
 </div></div>
 
 <!-- ============ FEATURES PAGE 3 — COMMS + STUDIO ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
-    <span class="pg-head-right">CAPABILITIES</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="section-band">
@@ -766,14 +793,14 @@
       </div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 9</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 8</span></div>
 </div></div>
 
 <!-- ============ FEATURES PAGE 4 — POWER ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
-    <span class="pg-head-right">CAPABILITIES</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="section-band">
@@ -808,14 +835,14 @@
       </div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 10</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 9</span></div>
 </div></div>
 
 <!-- ============ UNINSTALL ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis &middot; Uninstall</span>
-    <span class="pg-head-right">TEARDOWN</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="step-num">UNINSTALL</div>
@@ -832,7 +859,7 @@
         </li>
       </ol>
       <p>The wizard handles, in order:</p>
-      <ul style="margin-left: 20px; margin-bottom: 14px;">
+      <ul class="bullets">
         <li><strong>Launch agent</strong> &mdash; the auto-start on login</li>
         <li><strong>Running services</strong> &mdash; bridge, Kokoro, Whisper, kiosk Chrome</li>
         <li><strong>Tailscale serve config</strong> &mdash; if you opted in to remote access</li>
@@ -851,14 +878,14 @@
       <div class="code" style="margin-top: 10px;"><span class="prompt">$</span> ./tools/uninstall-wizard.sh --purge</div>
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 11</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 10</span></div>
 </div></div>
 
 <!-- ============ END ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
     <span class="pg-head-left">Flat-Out Jarvis</span>
-    <span class="pg-head-right">END</span>
+    <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content" style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-top: 60px;">
     <div class="cover-rule" style="margin: 0 auto 30px;"></div>
@@ -872,7 +899,7 @@
       <span class="lbl">Author</span> Antony O&rsquo;Neill &middot; aoneill.co.uk
     </div>
   </div>
-  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 12</span></div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 11</span></div>
 </div></div>
 
 </body>

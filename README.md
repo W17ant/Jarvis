@@ -43,7 +43,9 @@ cd Jarvis
 ./install.sh
 ```
 
-The installer pulls Ollama, the Qwen 2.5 + Qwen 2.5-VL models, sets up Whisper + Kokoro Python venvs, and pins ffmpeg / ImageMagick / exiftool via Homebrew. Then run the wizard:
+The installer pulls Ollama, the Qwen 2.5 + Qwen 2.5-VL models, sets up Whisper + Kokoro Python venvs, and pins ffmpeg / ImageMagick / exiftool via Homebrew.
+
+**You must then run the setup wizard manually** — the kiosk needs `config/brand.json` to start cleanly. If `install.sh` offers to auto-launch the wizard at the end, accept; otherwise (e.g. on a re-install where `config/brand.json` already exists) run it yourself:
 
 ```bash
 node tools/setup-wizard.mjs
@@ -56,11 +58,13 @@ The wizard asks for:
 - Optional API keys (Frame.io for review workflow, SerpAPI for press radar, Hunter.io for outreach)
 - Shoots + output folder roots (point at a NAS / external SSD if you want)
 
-Done. Launch:
+Done. **Launch the kiosk** (also a manual step — `install.sh` does not start it for you):
 
 ```bash
 ./launch.sh kiosk         # full-screen kiosk mode
 ./launch.sh                # windowed test
+./launch.sh restart       # kill all services and start fresh
+./launch.sh stop          # stop everything
 ```
 
 The HUD opens in Chrome's `--app` mode (no browser chrome). Say "hey [agent name]" and start working.
