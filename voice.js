@@ -2053,6 +2053,9 @@ function wireSettingsModal() {
   const fontScaleSel = document.getElementById("settingsFontScale");
   const shootsDirInput = document.getElementById("settingsShootsDir");
   const outputDirInput = document.getElementById("settingsOutputDir");
+  const styleTextarea = document.getElementById("settingsCreativeStyle");
+  const styleLoadTemplateBtn = document.getElementById("settingsStyleLoadTemplate");
+  const styleStatus = document.getElementById("settingsStyleStatus");
 
   /* Stash the selected geocode hit so save can skip the second API call when the
    * operator picked an explicit suggestion. Cleared whenever the input mutates. */
@@ -2140,6 +2143,22 @@ function wireSettingsModal() {
       const activeId = window.__profiles?.activeId?.() || "default";
       for (const p of profiles) appendOption(profileSel, p.id, p.name);
       profileSel.value = activeId;
+    }
+
+    /* Creative-style markdown — fetch the operator's CLAUDE.md equivalent.
+     * Empty content means they haven't configured it yet; the placeholder in
+     * the textarea hints they can click LOAD TEMPLATE to seed from the example. */
+    if (styleTextarea) {
+      styleTextarea.value = "";
+      if (styleStatus) styleStatus.textContent = "";
+      try {
+        const r = await fetch("http://localhost:8766/style", { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          styleTextarea.value = j.content || "";
+          if (styleStatus) styleStatus.textContent = j.exists ? "" : "not yet configured";
+        }
+      } catch { /* bridge offline — leave blank */ }
     }
 
     /* Folder roots — fetch from /paths and pre-fill the inputs. Empty = unconfigured
@@ -2404,6 +2423,37 @@ function wireSettingsModal() {
       }
     }
 
+    /* Save creative-style markdown via /style. Independent endpoint from
+     * /settings — keeps a typo in the bridge's brand-write path from blocking
+     * a style-only edit (and vice-versa). Done before /settings so a 4xx here
+     * doesn't make the operator think their voice/model save failed. */
+    let styleChanged = false;
+    if (styleTextarea) {
+      try {
+        const sr = await fetch("http://localhost:8766/style", { cache: "no-store" });
+        const sj = sr.ok ? await sr.json() : { content: "" };
+        const newStyle = styleTextarea.value || "";
+        if (newStyle !== (sj.content || "")) {
+          const wr = await fetch("http://localhost:8766/style", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ content: newStyle }),
+          });
+          const wj = await wr.json();
+          if (wr.ok && wj.ok) styleChanged = true;
+          else if (styleStatus) {
+            styleStatus.textContent = `save failed — ${wj.error || wr.status}`;
+            styleStatus.className = "settings-modal__hint is-error";
+          }
+        }
+      } catch (e) {
+        if (styleStatus) {
+          styleStatus.textContent = `save failed — ${e.message}`;
+          styleStatus.className = "settings-modal__hint is-error";
+        }
+      }
+    }
+
     try {
       const r = await fetch("http://localhost:8766/settings", {
         method: "POST",
@@ -2421,6 +2471,7 @@ function wireSettingsModal() {
       if (cameraChanged) parts.push(`camera → ${newCamMode}`);
       if (projectChanged) parts.push(`project → ${projectSel.value || "(none)"}`);
       if (foldersChanged) parts.push("folders updated");
+      if (styleChanged) parts.push("style guide updated");
       setStatus(parts.length ? `saved · ${parts.join(", ")}` : "no changes", "ok");
       /* Don't revert colour on close — operator just confirmed it. */
       pendingColour = null;
@@ -2591,6 +2642,36 @@ function wireSettingsModal() {
   saveBtn.addEventListener("click", save);
   previewBtn.addEventListener("click", previewVoice);
   locateBtn.addEventListener("click", redetectLocation);
+
+  /* Load template — fetches the example creative-style.md from the static
+   * server so the operator can start from the Flat-Out baseline + tweak.
+   * Confirms before clobbering existing edits. */
+  if (styleLoadTemplateBtn && styleTextarea) {
+    styleLoadTemplateBtn.addEventListener("click", async () => {
+      if (styleTextarea.value.trim() && !confirm("Replace the current style with the example template? Your unsaved changes will be lost.")) {
+        return;
+      }
+      styleLoadTemplateBtn.disabled = true;
+      if (styleStatus) styleStatus.textContent = "loading template...";
+      try {
+        const r = await fetch("/config/creative-style.example.md", { cache: "no-store" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const text = await r.text();
+        styleTextarea.value = text;
+        if (styleStatus) {
+          styleStatus.textContent = "template loaded — review then SAVE";
+          styleStatus.className = "settings-modal__hint is-saved";
+        }
+      } catch (e) {
+        if (styleStatus) {
+          styleStatus.textContent = `failed — ${e.message}`;
+          styleStatus.className = "settings-modal__hint is-error";
+        }
+      } finally {
+        styleLoadTemplateBtn.disabled = false;
+      }
+    });
+  }
 
   /* Accent reset — clears the per-profile override so the bootstrap falls back to the
    * brand-wide default from config/brand.json. Live-applies the brand colour so the

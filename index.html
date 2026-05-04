@@ -551,6 +551,24 @@
           <small id="settingsFoldersHint">Output auto-organises into <code>youtube/thumbnails</code>, <code>youtube/shorts</code>, <code>instagram/reels</code>, <code>instagram/posts</code>, <code>tiktok</code>, <code>brand-packs</code>, <code>pdf</code>, <code>watermarked</code>, <code>aspects</code>, <code>portraits</code>, <code>contactsheets</code>, <code>premiere-renders</code>, <code>videos</code>. Absolute paths or paths relative to the project.</small>
         </div>
 
+        <!-- Creative style guide — operator's CLAUDE.md equivalent. A markdown
+             file the bridge injects into the LLM system prompt on every askLLM
+             call so generated drafts (emails, captions, press releases, video
+             briefs) follow the agency's house voice. Big textarea + monospace
+             font matches how operators are used to editing markdown. -->
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Creative style guide</label>
+          <textarea id="settingsCreativeStyle"
+                    class="settings-modal__textarea"
+                    spellcheck="false"
+                    placeholder="# Editorial voice&#10;&#10;Tone, sentence length, words you use vs avoid, edit pacing… the rules every generated draft should follow.&#10;&#10;Click LOAD TEMPLATE below to start from the Flat-Out example, or type your own."></textarea>
+          <div class="settings-modal__row settings-modal__row--style-actions">
+            <button id="settingsStyleLoadTemplate" type="button" class="settings-modal__link">↻ LOAD TEMPLATE</button>
+            <span id="settingsStyleStatus" class="settings-modal__hint"></span>
+          </div>
+          <small>Applied to every generated draft. Saved to <code>config/creative-style.md</code>; takes effect on the next message — no restart.</small>
+        </div>
+
         <div class="settings-modal__field">
           <label><img src="assets/icons/map-pin-line.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Location</label>
           <div class="settings-modal__row settings-modal__row--searchable">
