@@ -680,6 +680,12 @@
     window.__layout = Layout;
     window.addEventListener("DOMContentLoaded", () => Layout.init());
 
+    /* Bridge-status overlay — surfaces "waiting for bridge" when the service
+     * isn't reachable, and "first run — setup wizard" when config/brand.json
+     * doesn't exist. Polls /healthz every 2s while down, every 30s while up. */
+    import * as BridgeStatus from "./bridge-status.js";
+    window.addEventListener("DOMContentLoaded", () => BridgeStatus.init());
+
     /* Usage telemetry overlay — VIEW USAGE button in settings opens it. Read-only
      * snapshot of audit log: dispatches, errors, top tools, fal call count. */
     import * as Usage from "./usage.js";

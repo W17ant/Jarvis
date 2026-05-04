@@ -118,10 +118,14 @@ fi
 ok "venv at .venv ($("$HERE/.venv/bin/python" --version))"
 
 step "Python deps (Kokoro TTS + faster-whisper STT)"
-"$HERE/.venv/bin/pip" install --quiet --upgrade pip
-"$HERE/.venv/bin/pip" install --quiet \
+# --no-cache-dir avoids "Cache entry deserialization failed" warnings spammed
+# during pip install when the per-user cache has stale entries from a previous
+# Python version. Ten lines of warnings looks like an error to a non-technical
+# operator; bypassing the cache adds ~2s but keeps the output clean.
+"$HERE/.venv/bin/pip" install --quiet --upgrade pip 2>&1 | grep -v "Cache entry" || true
+"$HERE/.venv/bin/pip" install --quiet --no-cache-dir \
   "kokoro-onnx>=0.4" "onnxruntime" "soundfile" "numpy" \
-  "faster-whisper" "ctranslate2"
+  "faster-whisper" "ctranslate2" 2>&1 | grep -v "Cache entry" || true
 ok "python deps installed"
 
 # ─────────────────────────────────────────────────────────────────
@@ -166,19 +170,14 @@ fi
 ok "node deps installed"
 
 # ─────────────────────────────────────────────────────────────────
-# 7. FAL key — required for image-to-video; optional for everything else
+# 7. .env baseline
+# Why: API keys (FAL.ai for image-to-video, Frame.io for review workflow,
+# SerpAPI for press radar, Hunter.io for outreach enrichment) are all OPTIONAL
+# and gathered by setup-wizard.mjs in the next step — no point nagging here.
+# We just ensure .env exists so the bridge can read it cleanly on first boot.
 # ─────────────────────────────────────────────────────────────────
-step "FAL.ai key (image-to-video)"
 ENV_FILE="$HERE/.env"
-if [[ -f "$ENV_FILE" ]] && grep -q "^FAL_KEY=" "$ENV_FILE"; then
-  ok ".env already has FAL_KEY"
-elif [[ -n "${FAL_KEY:-}" ]]; then
-  echo "FAL_KEY=$FAL_KEY" > "$ENV_FILE"
-  ok "wrote FAL_KEY from environment to .env"
-else
-  warn "no FAL_KEY found — image-to-video will be disabled."
-  warn "to enable: echo 'FAL_KEY=fal-...' >> $ENV_FILE  (get one at https://fal.ai)"
-fi
+[[ -f "$ENV_FILE" ]] || touch "$ENV_FILE"
 
 # ─────────────────────────────────────────────────────────────────
 # 8. Required directories

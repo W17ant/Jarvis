@@ -2628,10 +2628,24 @@ const httpServer = createServer(async (req, res) => {
       probe("http://localhost:8768/health"),
     ]);
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    /* setupRequired: true when config/brand.json is missing — signals to the HUD
+     * that this is a fresh install and the operator should run setup-wizard.mjs.
+     * The bridge still serves a FALLBACK brand so the HUD doesn't crash; this
+     * flag just lets us show a friendly "first run? run the setup wizard"
+     * overlay instead of leaving them with default Flat-Out branding. */
+    let setupRequired = false;
+    try {
+      const fs = await import("node:fs");
+      const brandPath = new URL("../config/brand.json", import.meta.url).pathname;
+      setupRequired = !fs.existsSync(brandPath);
+    } catch { /* assume not required if we can't probe */ }
+
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify({
       ok: true,
       ts: Date.now(),
       services: { bridge: true, ollama, kokoro, whisper },
+      setupRequired,
     }));
     return;
   }

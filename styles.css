@@ -3025,3 +3025,114 @@ summary:focus-visible {
     padding-block: 12px;
   }
 }
+
+/* ────────── Bridge-status overlay ──────────
+ *  Full-screen-dimming overlay that surfaces (a) when the bridge service can't
+ *  be reached, or (b) when config/brand.json is missing on first run. Same
+ *  brand chrome as the kiosk modals: ink-1 panel + red blade-edge stroke +
+ *  Oswald uppercase label. Animated dots while waiting. */
+.bridge-status {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  backdrop-filter: blur(8px);
+  z-index: 4000;
+  display: grid;
+  place-items: center;
+}
+.bridge-status[hidden] { display: none; }
+
+.bridge-status__card {
+  background: var(--ink-1);
+  border: 2px solid var(--fom-red);
+  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  padding: 36px 44px;
+  width: min(560px, 90vw);
+  box-shadow: 0 0 80px var(--fom-red-glow);
+  text-align: left;
+}
+
+.bridge-status__label {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5em;
+  color: var(--fom-red);
+  margin-bottom: 18px;
+  text-transform: uppercase;
+}
+
+.bridge-status__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.25;
+  margin-bottom: 18px;
+}
+
+.bridge-status__body {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.bridge-status__code {
+  background: var(--ink-0);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--fom-red);
+  padding: 14px 18px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 16px;
+  user-select: text;            /* operator can copy-paste even though the rest of the HUD blocks selection */
+  -webkit-user-select: text;
+}
+
+.bridge-status__hint {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.bridge-status__dots {
+  margin-top: 22px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  letter-spacing: 0.5em;
+  color: var(--fom-red);
+  animation: bridge-status-pulse 1.6s ease-in-out infinite;
+}
+@keyframes bridge-status-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1.0; }
+}
+
+.bridge-status__dismiss {
+  margin-top: 22px;
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--text-dim);
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: color 0.18s, border-color 0.18s;
+}
+.bridge-status__dismiss:hover {
+  color: var(--fom-red);
+  border-color: var(--fom-red);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bridge-status__dots { animation: none; opacity: 0.7; }
+}

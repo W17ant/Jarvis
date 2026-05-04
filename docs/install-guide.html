@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Install Guide — Flat-Out Jarvis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Rubik:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /** install-guide.html — Flat-Out Jarvis install + features + uninstall.
+   *
+   *  Mirrors the AO MCP SEO outreach-pack layout (light A4 print-ready, accent
+   *  rule on cover, page-head + page-foot per content page, numbered chapters)
+   *  but FOM-branded: red accent (#E10600), Oswald display, Rubik body. */
+  :root {
+    --bg: #ffffff;
+    --bg-surface: #fafafa;
+    --bg-paper: #f6f6f7;
+    --ink: #0a0a0a;
+    --ink-secondary: rgba(10, 10, 10, 0.78);
+    --ink-muted: rgba(80, 80, 90, 0.95);
+    --accent: #E10600;
+    --accent-deep: #8F0003;
+    --accent-dim: rgba(225, 6, 0, 0.07);
+    --accent-tint: rgba(225, 6, 0, 0.04);
+    --warning: #D17A00;
+    --warning-dim: rgba(209, 122, 0, 0.07);
+    --green: #2A8049;
+    --green-dim: rgba(42, 128, 73, 0.07);
+    --stroke: #e2e2e3;
+    --stroke-strong: #c8c8ca;
+    --code-bg: #15171a;
+    --code-text: #f4f4f4;
+    --code-prompt: #5dd1a3;
+    --code-comment: rgba(244, 244, 244, 0.45);
+    --font-display: "Oswald", system-ui, sans-serif;
+    --font-sans: "Rubik", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", monospace;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 18mm 20mm 18mm 20mm;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 13px;
+    background: #e5e5e7;
+    color: var(--ink-secondary);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--accent); color: #fff; }
+
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    background: var(--bg);
+    margin: 20px auto;
+    padding: 20mm 22mm;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+    position: relative;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .page:last-child { page-break-after: auto; break-after: auto; }
+
+  .pg-inner {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(297mm - 40mm);
+  }
+
+  /* ─── Cover ─── */
+  .cover-inner {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(297mm - 40mm);
+  }
+
+  .cover-logos {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 60px;
+  }
+
+  .cover-logos .ao-mark {
+    height: 30px;
+    width: auto;
+  }
+
+  /* FOM wordmark on the cover — heavy display type, brand red on the suffix
+   * matches the kiosk's calendar-strip wordmark + the marketing collateral. */
+  .cover-logos .fom-wordmark {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-family: var(--font-display);
+  }
+  .cover-logos .fom-wordmark .primary {
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .cover-logos .fom-wordmark .suffix {
+    font-weight: 500;
+    font-size: 13px;
+    letter-spacing: 0.45em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  .cover-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding-bottom: 40px;
+  }
+
+  .cover-rule {
+    width: 56px;
+    height: 4px;
+    background: var(--accent);
+    margin-bottom: 26px;
+    box-shadow: 0 0 16px rgba(225, 6, 0, 0.35);
+  }
+
+  .cover-body h1 {
+    font-family: var(--font-display);
+    font-size: 44px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+  }
+
+  .cover-client {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 400;
+    color: var(--accent-deep);
+    margin-bottom: 36px;
+    letter-spacing: 0.02em;
+  }
+
+  .cover-meta-block {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-muted);
+    letter-spacing: 0.3px;
+    line-height: 2.1;
+  }
+
+  .cover-meta-block .lbl {
+    display: inline-block;
+    width: 80px;
+    font-weight: 500;
+    color: var(--ink-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    font-size: 9px;
+  }
+
+  .cover-foot {
+    border-top: 1px solid var(--stroke);
+    padding-top: 16px;
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--ink-muted);
+  }
+
+  /* ─── Page header / footer ─── */
+  .pg-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    margin-bottom: 22px;
+    border-bottom: 1px solid var(--stroke);
+  }
+
+  .pg-head-left {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 1.6px;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+
+  .pg-head-right {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.4em;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+
+  .pg-foot {
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid var(--stroke);
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--ink-muted);
+  }
+
+  .pg-content { flex: 1; }
+
+  /* ─── Step / chapter card ─── */
+  .step-num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+  }
+
+  .step-title {
+    font-family: var(--font-display);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+    margin: 6px 0 18px;
+    text-transform: uppercase;
+    line-height: 1.1;
+  }
+
+  .step-lede {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--ink-secondary);
+    margin-bottom: 22px;
+    line-height: 1.6;
+  }
+
+  .step-body {
+    font-size: 13px;
+    color: var(--ink-secondary);
+    line-height: 1.65;
+  }
+
+  .step-body p { margin-bottom: 14px; }
+
+  .step-body strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  /* ─── Numbered list (for step instructions) ─── */
+  .num-list {
+    list-style: none;
+    counter-reset: num-list;
+    padding: 0;
+    margin: 0 0 18px 0;
+  }
+  .num-list li {
+    counter-increment: num-list;
+    position: relative;
+    padding-left: 36px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .num-list li::before {
+    content: counter(num-list);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 24px;
+    height: 24px;
+    background: var(--accent);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 12px;
+    display: grid;
+    place-items: center;
+    border-radius: 2px;
+  }
+
+  /* ─── Code block (terminal-style) ─── */
+  .code {
+    background: var(--code-bg);
+    color: var(--code-text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 14px 18px;
+    margin: 14px 0 18px;
+    border-radius: 6px;
+    line-height: 1.5;
+    position: relative;
+    overflow-x: hidden;
+  }
+  .code::before {
+    content: "TERMINAL";
+    position: absolute;
+    top: -8px;
+    left: 14px;
+    background: var(--bg);
+    color: var(--accent);
+    font-size: 8px;
+    font-weight: 600;
+    padding: 2px 8px;
+    letter-spacing: 0.3em;
+    border: 1px solid var(--accent);
+  }
+  .code .prompt { color: var(--code-prompt); }
+  .code .comment { color: var(--code-comment); }
+
+  /* ─── Callout (notes / warnings) ─── */
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-tint);
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-size: 12px;
+    color: var(--ink-secondary);
+    line-height: 1.55;
+  }
+
+  .callout--warn {
+    border-left-color: var(--warning);
+    background: var(--warning-dim);
+  }
+
+  .callout strong {
+    font-family: var(--font-display);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--ink);
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  /* ─── Feature card grid ─── */
+  .feat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 18px;
+  }
+
+  .feat-card {
+    border: 1px solid var(--stroke);
+    background: var(--bg-paper);
+    padding: 14px 16px;
+    position: relative;
+  }
+
+  .feat-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 100%;
+    background: var(--accent);
+  }
+
+  .feat-card h3 {
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+
+  .feat-card p {
+    font-size: 12px;
+    color: var(--ink-muted);
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  /* ─── Section header (used for feature pages) ─── */
+  .section-band {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    padding-bottom: 8px;
+    margin-bottom: 18px;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  .section-band .num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+  }
+
+  .section-band h2 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 28px;
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    line-height: 1;
+  }
+
+  /* ─── Quote bubble (the "first thing to say" voice example) ─── */
+  .voice-quote {
+    background: var(--bg-paper);
+    border-left: 3px solid var(--accent);
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-style: italic;
+    color: var(--ink);
+    line-height: 1.4;
+  }
+
+  .voice-quote::before {
+    content: "VOICE";
+    display: block;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    color: var(--accent);
+    margin-bottom: 6px;
+    font-style: normal;
+  }
+
+  /* ─── Print refinements ─── */
+  @media print {
+    body { background: #fff; }
+    .page { margin: 0; box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ COVER ============ -->
+<div class="page">
+  <div class="cover-inner">
+    <div class="cover-logos">
+      <img src="/Users/Antony/Desktop/Keep-It-What/seo-mcp-server/reports/ao-monogram.png" alt="AO" class="ao-mark" onerror="this.style.display='none'">
+      <div class="fom-wordmark">
+        <span class="primary">FLAT-OUT</span>
+        <span class="suffix">MEDIA</span>
+      </div>
+    </div>
+    <div class="cover-body">
+      <div class="cover-rule"></div>
+      <h1>Install Guide</h1>
+      <div class="cover-client">Flat-Out Jarvis &middot; May 2026</div>
+      <div class="cover-meta-block">
+        <span class="lbl">Product</span> Voice-driven AI kiosk for an automotive PR &amp; content agency<br>
+        <span class="lbl">Platform</span> macOS 14+, Apple Silicon (M-series)<br>
+        <span class="lbl">Hardware</span> 64 GB+ RAM recommended (32 GB works on smaller tier)<br>
+        <span class="lbl">Setup</span> ~30 minutes, mostly model download time<br>
+        <span class="lbl">Repo</span> github.com/W17ANT/Jarvis<br>
+        <span class="lbl">Prepared</span> 4 May 2026<br>
+        <span class="lbl">Author</span> Antony O&rsquo;Neill
+      </div>
+    </div>
+    <div class="cover-foot">
+      <span>aoneill.co.uk &middot; Antony@aoneill.co.uk</span>
+      <span>For Flat-Out Media</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ STEP 01 — TERMINAL ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-right">SETUP</span>
+  </div>
+  <div class="pg-content">
+    <div class="step-num">STEP 01</div>
+    <div class="step-title">Open Terminal</div>
+    <p class="step-lede">Terminal is the command-line app already on your Mac. Don&rsquo;t worry &mdash; you only need to type a handful of lines.</p>
+    <div class="step-body">
+      <ol class="num-list">
+        <li><strong>Hold the <code>⌘ Cmd</code> key</strong> and <strong>press the <code>Space</code> bar</strong>.<br>A search bar appears in the middle of your screen.</li>
+        <li><strong>Type</strong> the word: <code>Terminal</code></li>
+        <li><strong>Press <code>Enter</code></strong>.</li>
+      </ol>
+      <p>A black or white window opens with a blinking cursor. This is Terminal. Keep it open &mdash; everything else happens here.</p>
+    </div>
+    <div class="callout">
+      <strong>What you&rsquo;ll see</strong>
+      A line ending in <code>$</code>. That&rsquo;s the prompt &mdash; it means Terminal is ready for you to type a command.
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 2</span></div>
+</div></div>
+
+<!-- ============ STEP 02 — DOWNLOAD ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-right">SETUP</span>
+  </div>
+  <div class="pg-content">
+    <div class="step-num">STEP 02</div>
+    <div class="step-title">Download the Project</div>
+    <p class="step-lede">Two commands. Each one ends with you pressing <code>Enter</code>.</p>
+    <div class="step-body">
+      <p><strong>Type this exactly</strong>, then press <code>Enter</code>:</p>
+      <div class="code"><span class="prompt">$</span> cd ~/Desktop</div>
+      <p class="step-lede" style="margin-top: -8px;">This moves into your Desktop folder.</p>
+      <p><strong>Now type this</strong>, then press <code>Enter</code>:</p>
+      <div class="code"><span class="prompt">$</span> git clone https://github.com/W17ANT/Jarvis.git</div>
+      <p>You&rsquo;ll see lines flow past &mdash; <em>&ldquo;Cloning into &lsquo;Jarvis&rsquo;&hellip;&rdquo;</em>, then <em>&ldquo;Receiving objects&hellip; done.&rdquo;</em></p>
+      <p>Takes about thirty seconds depending on your internet.</p>
+    </div>
+    <div class="callout">
+      <strong>If it fails</strong>
+      You may need Git installed. Type <code>xcode-select --install</code>, click <em>Install</em> on the popup, wait, then try the clone command again.
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 3</span></div>
+</div></div>
+
+<!-- ============ STEP 03 — INSTALLER ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-right">SETUP</span>
+  </div>
+  <div class="pg-content">
+    <div class="step-num">STEP 03</div>
+    <div class="step-title">Run the Installer</div>
+    <p class="step-lede">This step downloads the AI brain (~25 GB). Coffee time.</p>
+    <div class="step-body">
+      <p><strong>Type this</strong>, then press <code>Enter</code>:</p>
+      <div class="code"><span class="prompt">$</span> cd Jarvis</div>
+      <p><strong>Then type this</strong>, then press <code>Enter</code>:</p>
+      <div class="code"><span class="prompt">$</span> ./install.sh</div>
+      <p>The installer pulls in everything Jarvis needs:</p>
+      <ul style="margin-left: 20px; margin-bottom: 14px;">
+        <li><strong>Ollama</strong> &mdash; the engine that runs the AI brain</li>
+        <li><strong>Qwen 2.5</strong> &mdash; the language model that thinks (~19 GB)</li>
+        <li><strong>Qwen 2.5 Vision</strong> &mdash; the model that sees your shots (~6 GB)</li>
+        <li><strong>Whisper</strong> &mdash; the model that hears you</li>
+        <li><strong>Kokoro</strong> &mdash; the voice that speaks back</li>
+        <li><strong>Supporting tools</strong> &mdash; ffmpeg, ImageMagick, exiftool</li>
+      </ul>
+      <p>Lines with green ticks <span style="color: var(--green);">✓</span> show what&rsquo;s finished. The whole thing takes 10&ndash;15 minutes mostly waiting for downloads.</p>
+      <p>When you see <strong>install complete</strong>, move to the next step.</p>
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 4</span></div>
+</div></div>
+
+<!-- ============ STEP 04 — WIZARD ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-right">SETUP</span>
+  </div>
+  <div class="pg-content">
+    <div class="step-num">STEP 04</div>
+    <div class="step-title">Run the Setup Wizard</div>
+    <p class="step-lede">Answer a few questions. Press <code>Enter</code> on its own to keep the suggested answer.</p>
+    <div class="step-body">
+      <div class="code"><span class="prompt">$</span> node tools/setup-wizard.mjs</div>
+      <p>You&rsquo;ll be asked, in order:</p>
+      <ul style="margin-left: 20px; margin-bottom: 14px;">
+        <li><strong>Agent name</strong> &mdash; default: <em>Flat-Out</em></li>
+        <li><strong>Wake phrase</strong> &mdash; default: <em>hey flat-out</em></li>
+        <li><strong>Voice</strong> &mdash; default: <em>Daniel</em> (British male, Jarvis-tier)</li>
+        <li><strong>Agency name + tagline</strong></li>
+        <li><strong>Brand colours</strong> &mdash; default: FOM red</li>
+        <li><strong>Hardware tier</strong> &mdash; the wizard auto-picks based on your Mac</li>
+        <li><strong>API keys</strong> &mdash; optional. Skip any you don&rsquo;t have</li>
+        <li><strong>Folders</strong> &mdash; where your shoots are stored, where to save output</li>
+      </ul>
+    </div>
+    <div class="callout">
+      <strong>You can re-run this any time</strong>
+      Run <code>node tools/setup-wizard.mjs</code> again whenever you want to change a setting. The kiosk picks up the change without restarting.
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 5</span></div>
+</div></div>
+
+<!-- ============ STEP 05 — LAUNCH ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-right">SETUP</span>
+  </div>
+  <div class="pg-content">
+    <div class="step-num">STEP 05</div>
+    <div class="step-title">Launch &amp; Say Hello</div>
+    <p class="step-lede">One last command, then your studio has an AI.</p>
+    <div class="step-body">
+      <div class="code"><span class="prompt">$</span> ./launch.sh kiosk</div>
+      <p>The HUD opens in full-screen Chrome. The speedometer breathes. The corner brackets light up. You&rsquo;re live.</p>
+      <p>Try saying:</p>
+      <div class="voice-quote">&ldquo;Hey Flat-Out, what&rsquo;s in my diary today?&rsquo;&rdquo;</div>
+      <p>If you hear a reply, the install worked.</p>
+    </div>
+    <div class="callout">
+      <strong>Everyday use</strong>
+      Tap the wake button once, or say <em>&ldquo;hey Flat-Out&rdquo;</em>. To exit the kiosk: <code>⌘ Cmd + Q</code>.
+    </div>
+    <div class="callout">
+      <strong>Auto-start on login</strong>
+      Run <code>./tools/install-daemon.sh</code> to register a launch agent so the bridge starts whenever you log in.
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 6</span></div>
+</div></div>
+
+<!-- ============ FEATURES PAGE 1 — VOICE + VISION ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
+    <span class="pg-head-right">CAPABILITIES</span>
+  </div>
+  <div class="pg-content">
+    <div class="section-band">
+      <span class="num">SECTION 01</span>
+      <h2>Voice + Vision</h2>
+    </div>
+    <p class="step-lede">The hands-free layer. Wake it. Ask it. It sees and replies.</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <h3>Wake on phrase</h3>
+        <p>Say <em>&ldquo;hey Flat-Out&rdquo;</em>. Local Whisper transcribes, Qwen thinks, Kokoro speaks. First reply in your ear in about a second.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Sentence-level streaming</h3>
+        <p>You hear sentence one while sentence two is still being composed. Filler phrases (&ldquo;On it, sir.&rdquo;) cover thinking time.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Barge-in</h3>
+        <p>Mic detects your voice while it&rsquo;s talking. Mid-sentence, Flat-Out stops and listens. No more talking over each other.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Captions every shot</h3>
+        <p>Drop a folder, ask <em>&ldquo;what&rsquo;s in the latest shoot?&rdquo;</em>. Identifies make and model, calls out angle and lighting.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Search by description</h3>
+        <p><em>&ldquo;Find the front-grille hero&rdquo;</em> &rarr; ranked file paths. Auto-warms the cache for new folders.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Score for the trailer</h3>
+        <p>Asks Qwen-VL to rate clips on cinematic appeal &mdash; subject framing, motion, lighting, peak frame &mdash; for picking trailer cuts.</p>
+      </div>
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 7</span></div>
+</div></div>
+
+<!-- ============ FEATURES PAGE 2 — EDITING ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
+    <span class="pg-head-right">CAPABILITIES</span>
+  </div>
+  <div class="pg-content">
+    <div class="section-band">
+      <span class="num">SECTION 02</span>
+      <h2>Editing</h2>
+    </div>
+    <p class="step-lede">Voice in. MP4 out. The signature feature.</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <h3>Cinematic teaser pipeline</h3>
+        <p><em>&ldquo;Cut a 30-second teaser of yesterday&rsquo;s shoot&rdquo;</em> &rarr; flash cuts, speed ramps, beat-synced music, brand intro &amp; tail card. Lands in ~3 minutes.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Brand-pack export</h3>
+        <p>One command exports 16:9, 9:16, 1:1, 4:5 crops &mdash; watermarked + clean variants. Zipped, ready for the client.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Premiere Pro 2025</h3>
+        <p>Open project, import folders, build rough cut sequences, render. Drives Premiere via ExtendScript.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Lightroom presets</h3>
+        <p>Writes XMP sidecars so RAWs open with the preset already applied. No need to launch Lightroom.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Auto-cull duplicates</h3>
+        <p>Compares shots, groups near-duplicates, keeps the best of each, flags the rest. Saves 30&ndash;60 minutes per shoot.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Editorial style memory</h3>
+        <p>Capture your signature look from finished edits. Compare a new grade against it &mdash; get adjustment guidance like &ldquo;cool by 0.04, raise contrast by 0.03&rdquo;.</p>
+      </div>
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 8</span></div>
+</div></div>
+
+<!-- ============ FEATURES PAGE 3 — COMMS + STUDIO ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
+    <span class="pg-head-right">CAPABILITIES</span>
+  </div>
+  <div class="pg-content">
+    <div class="section-band">
+      <span class="num">SECTION 03</span>
+      <h2>Comms + Studio</h2>
+    </div>
+    <p class="step-lede">Mail, Calendar, Frame.io, on-set companion view.</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <h3>Apple Mail</h3>
+        <p>Summarise unread, draft replies. Drafts always open for your approval &mdash; never auto-sent.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Apple Calendar</h3>
+        <p>Read upcoming events, add events by voice. Reminders fire 15 min and 5 min before each event.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Frame.io review</h3>
+        <p>List pending review, read comments, reply by voice, change status. Client-visible writes always confirm before sending.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Live shoot mode</h3>
+        <p>Phone-as-mic walks the studio. Tap <em>Hero</em> mid-frame, say <em>Reshoot</em> between shots. Editor at the desk sees flags land in real time.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Pre-shoot checklist</h3>
+        <p>Pulls weather, vehicle type, crew count &rarr; returns lenses, lighting, batteries, comms. PDF to your phone.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Press radar &amp; media days</h3>
+        <p>Daily sweep of automotive press for tracked manufacturers. Manufacturer media-day calendar tracks every press event, launch, embargo.</p>
+      </div>
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 9</span></div>
+</div></div>
+
+<!-- ============ FEATURES PAGE 4 — POWER ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
+    <span class="pg-head-right">CAPABILITIES</span>
+  </div>
+  <div class="pg-content">
+    <div class="section-band">
+      <span class="num">SECTION 04</span>
+      <h2>Power features</h2>
+    </div>
+    <p class="step-lede">For when you&rsquo;re ready to push it further.</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <h3>Persistent memory</h3>
+        <p>Contacts, projects, free-form facts, conversation summaries &mdash; all stored locally in SQLite. Recall across sessions.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Multi-operator profiles</h3>
+        <p>Each person gets their own voice, brand colour, layout, audit identity. Switch profiles from the settings modal.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Editable widget layout</h3>
+        <p>Press <code>⌘ Cmd + L</code> to enter edit mode. Drag widgets to swap positions, click size to cycle 1&times;1 / 1&times;2 / 1&times;3.</p>
+      </div>
+      <div class="feat-card">
+        <h3>MCP server</h3>
+        <p>Every tool exposed via the Model Context Protocol. Drive the same kiosk from Claude Desktop, Cursor, Continue.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Audit log + Undo</h3>
+        <p>Every action logged with operator id and result. <em>&ldquo;Scratch that&rdquo;</em> reverses destructive actions where reversible.</p>
+      </div>
+      <div class="feat-card">
+        <h3>Local-only privacy</h3>
+        <p>Nothing leaves your Mac for AI inference. All four models (text + vision + STT + TTS) run on localhost.</p>
+      </div>
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 10</span></div>
+</div></div>
+
+<!-- ============ UNINSTALL ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis &middot; Uninstall</span>
+    <span class="pg-head-right">TEARDOWN</span>
+  </div>
+  <div class="pg-content">
+    <div class="step-num">UNINSTALL</div>
+    <div class="step-title">Removing Flat-Out</div>
+    <p class="step-lede">Just as simple as install. The wizard walks through every step and asks before removing anything.</p>
+    <div class="step-body">
+      <ol class="num-list">
+        <li><strong>Open Terminal</strong> &mdash; <code>⌘ Cmd + Space</code> &rarr; type <em>Terminal</em> &rarr; <code>Enter</code>.</li>
+        <li><strong>Navigate to the project folder.</strong>
+          <div class="code"><span class="prompt">$</span> cd ~/Desktop/Jarvis</div>
+        </li>
+        <li><strong>Run the wizard.</strong>
+          <div class="code"><span class="prompt">$</span> ./tools/uninstall-wizard.sh</div>
+        </li>
+      </ol>
+      <p>The wizard handles, in order:</p>
+      <ul style="margin-left: 20px; margin-bottom: 14px;">
+        <li><strong>Launch agent</strong> &mdash; the auto-start on login</li>
+        <li><strong>Running services</strong> &mdash; bridge, Kokoro, Whisper, kiosk Chrome</li>
+        <li><strong>Tailscale serve config</strong> &mdash; if you opted in to remote access</li>
+        <li><strong>Project artifacts</strong> &mdash; node_modules, output, frame cache</li>
+        <li><strong>AI models</strong> &mdash; the ~25 GB Ollama download</li>
+        <li><strong>Optional: user data</strong> &mdash; contacts, projects, conversation history (asks first)</li>
+      </ul>
+    </div>
+    <div class="callout">
+      <strong>Conservative defaults</strong>
+      Items that hold your data (contacts, conversation history, AI models that other apps might use) default to <em>No</em>. Only project-only artefacts default to <em>Yes</em>.
+    </div>
+    <div class="callout callout--warn">
+      <strong>Total wipe</strong>
+      For a complete wipe including user data and the entire <code>~/.ollama</code> store, run:
+      <div class="code" style="margin-top: 10px;"><span class="prompt">$</span> ./tools/uninstall-wizard.sh --purge</div>
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 11</span></div>
+</div></div>
+
+<!-- ============ END ============ -->
+<div class="page"><div class="pg-inner">
+  <div class="pg-head">
+    <span class="pg-head-left">Flat-Out Jarvis</span>
+    <span class="pg-head-right">END</span>
+  </div>
+  <div class="pg-content" style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-top: 60px;">
+    <div class="cover-rule" style="margin: 0 auto 30px;"></div>
+    <h1 style="font-family: var(--font-display); font-weight: 700; font-size: 64px; letter-spacing: -0.02em; color: var(--ink); text-transform: uppercase; line-height: 1; margin-bottom: 20px;">FLAT&#8209;OUT</h1>
+    <div style="font-family: var(--font-display); font-size: 16px; letter-spacing: 0.5em; color: var(--accent); text-transform: uppercase; margin-bottom: 40px;">READY WHEN YOU ARE</div>
+    <div style="font-family: var(--font-sans); font-style: italic; font-size: 16px; color: var(--ink-muted); margin-bottom: 80px;">we live and breathe automotive</div>
+    <div class="cover-meta-block" style="text-align: left; max-width: 320px;">
+      <span class="lbl">Repo</span> github.com/W17ANT/Jarvis<br>
+      <span class="lbl">Setup</span> <code>./install.sh</code> &middot; <code>./launch.sh kiosk</code><br>
+      <span class="lbl">Help</span> README.md in the project root<br>
+      <span class="lbl">Author</span> Antony O&rsquo;Neill &middot; aoneill.co.uk
+    </div>
+  </div>
+  <div class="pg-foot"><span>aoneill.co.uk</span><span>Page 12</span></div>
+</div></div>
+
+</body>
+</html>
