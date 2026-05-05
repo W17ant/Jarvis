@@ -21,6 +21,18 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$HERE"
 
+# Source Homebrew's shellenv so brew-installed tools (node/npm/ollama/ffmpeg)
+# are reliably on PATH. When this script runs from a non-login shell or via
+# launchd/cron, the operator's interactive .zshrc isn't sourced, so a default
+# /usr/bin:/bin PATH is all we get — and brew tools live in /opt/homebrew/bin.
+# Without this, the script wrongly reports "npm: command not found" and
+# "ollama not installed" on machines where everything actually IS installed.
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [[ -x /usr/local/bin/brew ]]; then
+  eval "$(/usr/local/bin/brew shellenv)"
+fi
+
 step() { printf "\n\033[1;36m▶ %s\033[0m\n" "$*"; }
 ok()   { printf "  \033[1;32m✓\033[0m %s\n" "$*"; }
 warn() { printf "  \033[1;33m!\033[0m %s\n" "$*"; }
@@ -143,8 +155,18 @@ elif [[ -f "$HOME/Library/LaunchAgents/com.flatoutmedia.hud.plist" ]]; then
   launchctl bootstrap "gui/$UID" "$HOME/Library/LaunchAgents/com.flatoutmedia.hud.plist"
   ok "launchd agent reloaded — services restarting"
 else
-  warn "launchd agent not installed (./tools/install-daemon.sh) — restart manually:"
-  warn "    pkill -f 'node bridge/server.mjs' && ./launch.sh"
+  # No launchd agent — call ./launch.sh restart directly. That kills every
+  # bound port (covers stale-but-unresponsive bridges) and starts everything
+  # fresh, with the binding-rebuild self-heal already wired in. Cleaner than
+  # punting "pkill ... && ./launch.sh" to the operator and less error-prone.
+  if [[ -x "$HERE/launch.sh" ]]; then
+    "$HERE/launch.sh" restart
+    ok "services restarted via ./launch.sh restart"
+    ok "refresh the kiosk in Chrome with ⌘ Cmd + R"
+  else
+    warn "launchd agent not installed and ./launch.sh missing — restart manually:"
+    warn "    cd $HERE && ./launch.sh restart"
+  fi
 fi
 
 cat <<EOF
