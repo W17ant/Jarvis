@@ -2694,6 +2694,101 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
+  /* Tailscale status — read-only endpoint surfaced in the settings panel.
+   * Tailscale doesn't use a password — auth is browser-based SSO via the
+   * operator's identity provider (Google/GitHub/Apple/etc). The kiosk's job is
+   * to (a) tell the operator whether tailscale is installed + authenticated,
+   * (b) surface the device's tailnet IP + MagicDNS name so they can reach
+   * the HUD from a phone, (c) offer a launch button that pops Terminal with
+   * tools/install-tailscale.sh. The bridge intentionally does NOT run
+   * `sudo tailscale up` itself — that needs an interactive TTY for the
+   * sudo password and the browser SSO redirect.
+   *
+   * Three states:
+   *   - missing     : binary not on PATH
+   *   - logged-out  : binary installed but `tailscale status` returns NeedsLogin
+   *   - connected   : authenticated with tailnet IP + (optionally) MagicDNS */
+  if (req.url === "/tailscale/status" && req.method === "GET") {
+    const out = {
+      ok: true,
+      installed: false,
+      authenticated: false,
+      ip: null,
+      hostname: null,
+      magicDnsName: null,
+      tailnet: null,
+      serveActive: false,
+      serveUrl: null,
+      error: null,
+    };
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const run = promisify(execFile);
+      try {
+        await run("tailscale", ["version"], { timeout: 1500 });
+        out.installed = true;
+      } catch {
+        out.installed = false;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(out));
+        return;
+      }
+      /* `tailscale status --json` is the canonical machine-readable status. The
+       * top-level "Self" object holds this device's identity; "BackendState"
+       * is "Running" when authenticated, "NeedsLogin" before sign-in. */
+      const { stdout } = await run("tailscale", ["status", "--json"], { timeout: 3000 });
+      const j = JSON.parse(stdout);
+      if (j.BackendState === "Running" && j.Self) {
+        out.authenticated = true;
+        out.hostname = j.Self.HostName || null;
+        out.magicDnsName = (j.Self.DNSName || "").replace(/\.$/, "") || null;
+        out.ip = (j.Self.TailscaleIPs || [])[0] || null;
+        out.tailnet = j.MagicDNSSuffix || null;
+      }
+      /* Serve / Funnel status — separate command. Failures are non-fatal: the
+       * HUD will just show "remote access not enabled" if this throws. */
+      try {
+        const { stdout: ss } = await run("tailscale", ["serve", "status", "--json"], { timeout: 2000 });
+        const sj = JSON.parse(ss || "{}");
+        const tcp = sj.TCP || {};
+        if (Object.keys(tcp).length > 0 && out.magicDnsName) {
+          out.serveActive = true;
+          out.serveUrl = `https://${out.magicDnsName}`;
+        }
+      } catch { /* serve status command may not exist on older versions — ignore */ }
+    } catch (e) {
+      out.error = String(e.message || e);
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(out));
+    return;
+  }
+
+  /* POST /tailscale/launch-installer — opens Terminal.app focused on a
+   * pre-built wrapper at tools/open-tailscale-setup.command. Using a
+   * `.command` file means macOS treats it as "double-click to open in
+   * Terminal" with no shell-escaping risk. The bridge can't drive sudo +
+   * browser SSO itself, so this hand-off is the cleanest path. */
+  if (req.url === "/tailscale/launch-installer" && req.method === "POST") {
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const run = promisify(execFile);
+      const wrapper = path.join(PROJECT_ROOT, "tools", "open-tailscale-setup.command");
+      /* `open -a Terminal <file>` is the canonical macOS way to launch a
+       * script in a new Terminal window. No shell interpolation needed —
+       * the path is passed as a single argv to execFile. */
+      await run("open", ["-a", "Terminal", wrapper], { timeout: 5000 });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
+    return;
+  }
+
   if (req.url === "/launcher" && req.method === "GET") {
     /* Why: HUD's quick-launch panel reads its entries from config/launcher.json so
      * white-label installs and operator preferences can swap them without touching

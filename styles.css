@@ -2439,6 +2439,45 @@ body.is-demo .waveform { height: 76px; }
 .settings-modal__hint.is-saved { color: #4ade80; }
 .settings-modal__hint.is-error { color: var(--fom-red); }
 
+/* Tailscale status block — three states. The dot is a 6px circle that
+ * mirrors the HUD's bridge-pip vocabulary; the meta line carries device name
+ * + tailnet IP + MagicDNS hostname when authenticated. */
+.settings-modal__tailscale-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--ink-0);
+  border: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.settings-modal__tailscale-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex-shrink: 0;
+}
+.settings-modal__tailscale-dot.is-connected { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.6); }
+.settings-modal__tailscale-dot.is-warning   { background: #facc15; }
+.settings-modal__tailscale-dot.is-missing   { background: var(--text-dim); }
+.settings-modal__tailscale-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.4;
+}
+.settings-modal__tailscale-text .label {
+  color: var(--text);
+  letter-spacing: 0.05em;
+}
+.settings-modal__tailscale-text .meta {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 /* Typeahead suggestions for the location search. Anchored under the input so it
  * overlays the small helper line below — operator sees results without layout shift.
  * Limited to 5 results; Open-Meteo's geocoding API is free and disambiguates

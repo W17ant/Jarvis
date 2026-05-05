@@ -594,6 +594,25 @@
           <small>Applied to every generated draft. Saved to <code>config/creative-style.md</code>; takes effect on the next message — no restart.</small>
         </div>
 
+        <!-- Remote access (Tailscale) — read-only status + a launch button.
+             Tailscale uses browser SSO (Google/GitHub/Apple/etc), no password
+             stored locally. The bridge can't run `sudo tailscale up` itself
+             so we surface status here and pop Terminal for the auth flow.
+             Three states: missing, logged-out, connected — markup is the same;
+             the JS hides/shows pieces and updates copy based on /tailscale/status. -->
+        <div class="settings-modal__field" id="settingsTailscaleField">
+          <label><img src="assets/icons/monitor.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Remote access (Tailscale)</label>
+          <div class="settings-modal__row settings-modal__tailscale-status" id="settingsTailscaleStatus">
+            <span class="settings-modal__hint">checking…</span>
+          </div>
+          <div class="settings-modal__row settings-modal__row--style-actions">
+            <button id="settingsTailscaleSetupBtn" type="button" class="settings-modal__link" hidden>↻ OPEN SETUP IN TERMINAL</button>
+            <button id="settingsTailscaleAdminBtn" type="button" class="settings-modal__link" hidden>↗ OPEN ADMIN CONSOLE</button>
+            <button id="settingsTailscaleRefreshBtn" type="button" class="settings-modal__link">↻ REFRESH</button>
+          </div>
+          <small>Reach the HUD from your phone in Safari (with HTTPS for mic access). Tailscale is private mesh networking — no port forwarding, no public exposure. Authentication is browser-based SSO with your existing Google / GitHub / Apple account; there's no separate password.</small>
+        </div>
+
         <div class="settings-modal__field">
           <label><img src="assets/icons/map-pin-line.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Location</label>
           <div class="settings-modal__row settings-modal__row--searchable">

@@ -2060,6 +2060,10 @@ function wireSettingsModal() {
   const socialFacebook = document.getElementById("settingsSocialFacebook");
   const socialX = document.getElementById("settingsSocialX");
   const socialTiktok = document.getElementById("settingsSocialTiktok");
+  const tsStatusEl = document.getElementById("settingsTailscaleStatus");
+  const tsSetupBtn = document.getElementById("settingsTailscaleSetupBtn");
+  const tsAdminBtn = document.getElementById("settingsTailscaleAdminBtn");
+  const tsRefreshBtn = document.getElementById("settingsTailscaleRefreshBtn");
 
   /* Stash the selected geocode hit so save can skip the second API call when the
    * operator picked an explicit suggestion. Cleared whenever the input mutates. */
@@ -2098,6 +2102,70 @@ function wireSettingsModal() {
   function setStatus(msg, kind = "") {
     status.textContent = msg || "";
     status.className = "settings-modal__status" + (kind ? ` is-${kind}` : "");
+  }
+
+  /** Fetch /tailscale/status and rewrite the status block + buttons.
+   *  Three render branches keyed off (installed, authenticated):
+   *   - !installed     → "Not installed" + green setup button
+   *   - logged-out     → "Installed but not signed in" + setup button
+   *   - connected      → "kiosk-mac · 100.x.x.x" + admin button
+   *  Network errors (bridge offline mid-session) render "status unavailable". */
+  async function refreshTailscaleStatus() {
+    if (!tsStatusEl) return;
+    /* Reset visibility so a re-render doesn't show stale state from last open. */
+    tsSetupBtn.hidden = true;
+    tsAdminBtn.hidden = true;
+
+    while (tsStatusEl.firstChild) tsStatusEl.removeChild(tsStatusEl.firstChild);
+
+    const dot = document.createElement("span");
+    dot.className = "settings-modal__tailscale-dot";
+    const txt = document.createElement("div");
+    txt.className = "settings-modal__tailscale-text";
+    const label = document.createElement("span"); label.className = "label";
+    const meta = document.createElement("span"); meta.className = "meta";
+    txt.appendChild(label); txt.appendChild(meta);
+    tsStatusEl.appendChild(dot); tsStatusEl.appendChild(txt);
+
+    let snap;
+    try {
+      const r = await fetch("http://localhost:8766/tailscale/status", { cache: "no-store", signal: AbortSignal.timeout(5000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      snap = await r.json();
+    } catch {
+      dot.classList.add("is-missing");
+      label.textContent = "Status unavailable";
+      meta.textContent = "Bridge offline — try ./launch.sh restart";
+      return;
+    }
+
+    if (!snap.installed) {
+      dot.classList.add("is-missing");
+      label.textContent = "Tailscale not installed";
+      meta.textContent = "Click below to install + authenticate (~2 min)";
+      tsSetupBtn.hidden = false;
+      tsSetupBtn.textContent = "↻ INSTALL TAILSCALE";
+      return;
+    }
+    if (!snap.authenticated) {
+      dot.classList.add("is-warning");
+      label.textContent = "Installed — not signed in";
+      meta.textContent = "Tailscale uses browser SSO — no password to remember";
+      tsSetupBtn.hidden = false;
+      tsSetupBtn.textContent = "↻ SIGN IN VIA TERMINAL";
+      return;
+    }
+    /* Connected. Show device identity + reachable URL when serve is enabled. */
+    dot.classList.add("is-connected");
+    label.textContent = snap.hostname || "Connected";
+    const bits = [];
+    if (snap.ip) bits.push(snap.ip);
+    if (snap.serveActive && snap.serveUrl) bits.push(`HUD: ${snap.serveUrl}`);
+    else if (snap.magicDnsName) bits.push(`(serve disabled — re-run setup to enable HTTPS at ${snap.magicDnsName})`);
+    meta.textContent = bits.join("  ·  ") || "authenticated";
+    tsAdminBtn.hidden = false;
+    tsSetupBtn.hidden = false;
+    tsSetupBtn.textContent = "↻ RE-RUN SETUP";
   }
 
   /** Open + fetch state. Defensive against bridge-down: opens with placeholders.
@@ -2147,6 +2215,14 @@ function wireSettingsModal() {
       const activeId = window.__profiles?.activeId?.() || "default";
       for (const p of profiles) appendOption(profileSel, p.id, p.name);
       profileSel.value = activeId;
+    }
+
+    /* Tailscale status — fetch + render. Three states (missing / logged-out /
+     * connected) drive the same markup; we just rewrite the label + meta line
+     * and toggle which buttons are visible. Defensive: if /tailscale/status
+     * returns 4xx/5xx we show "status unavailable" rather than spinning. */
+    if (tsStatusEl) {
+      await refreshTailscaleStatus();
     }
 
     /* Social handles — fetch from /brand and pre-fill the four platform inputs.
@@ -2695,6 +2771,33 @@ function wireSettingsModal() {
   saveBtn.addEventListener("click", save);
   previewBtn.addEventListener("click", previewVoice);
   locateBtn.addEventListener("click", redetectLocation);
+
+  /* Tailscale buttons — refresh re-fetches status, setup pops Terminal at
+   * the install wrapper, admin opens the Tailscale admin console. */
+  if (tsRefreshBtn) tsRefreshBtn.addEventListener("click", () => refreshTailscaleStatus());
+  if (tsSetupBtn) {
+    tsSetupBtn.addEventListener("click", async () => {
+      tsSetupBtn.disabled = true;
+      try {
+        const r = await fetch("http://localhost:8766/tailscale/launch-installer", { method: "POST" });
+        const j = await r.json();
+        if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        /* Give Terminal a beat to come up + start the install, then re-poll
+         * so the operator sees state change without manually clicking REFRESH. */
+        setTimeout(() => refreshTailscaleStatus(), 4000);
+      } catch (e) {
+        alert(`Could not open Terminal: ${e.message}\n\nRun this in Terminal yourself:\n  cd ~/Desktop/Jarvis && ./tools/install-tailscale.sh`);
+      } finally {
+        tsSetupBtn.disabled = false;
+      }
+    });
+  }
+  if (tsAdminBtn) {
+    /* admin.tailscale.com is the canonical machines view; safe to hard-code. */
+    tsAdminBtn.addEventListener("click", () => {
+      window.open("https://login.tailscale.com/admin/machines", "_blank", "noopener");
+    });
+  }
 
   /* Load template — fetches the example creative-style.md from the static
    * server so the operator can start from the Flat-Out baseline + tweak.
