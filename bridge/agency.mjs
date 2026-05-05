@@ -16,6 +16,7 @@ import path from "node:path";
 import { readdirSync, statSync, existsSync } from "node:fs";
 import * as Memory from "./memory.mjs";
 import * as Paths from "./paths.mjs";
+import { primarySocialHandle } from "./brand.mjs";
 
 /* Why: ES-module imports hoist BEFORE server.mjs's loadEnvFile() runs, so reading
  * process.env at top-level freezes the value as undefined → fallback to 32b → blew the
@@ -390,7 +391,10 @@ function deriveBoilerplate(brand) {
   const name = agency.name || "Flat-Out Media";
   const tagline = agency.tagline || "we live and breathe automotive";
   const domain = agency.domain || "";
-  const social = agency.social || "";
+  /* primarySocialHandle picks Instagram → X → TikTok → Facebook from agency.socials,
+   * with fallback to the legacy single `social` string for brand.json files written
+   * before the per-platform schema. */
+  const social = primarySocialHandle(agency);
   const trailer = [domain, social].filter(Boolean).join(" · ");
   return `${name} — ${tagline}.${trailer ? ` ${trailer}` : ""}`;
 }

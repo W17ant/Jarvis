@@ -538,6 +538,31 @@
           <small>Default off for privacy; switch on when demoing or you want the operator inlay</small>
         </div>
 
+        <!-- Social handles — per-platform fields. Replaces the old "Social handle"
+             single string. Each platform is optional; blank = "we don't post there".
+             Saved to brand.json as agency.socials.{platform}; the watermark + agency
+             boilerplate code picks Instagram → X → TikTok → Facebook as the primary. -->
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Social handles</label>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Instagram</span>
+            <input id="settingsSocialInstagram" type="text" placeholder="@flatoutmediauk" autocomplete="off" />
+          </div>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Facebook</span>
+            <input id="settingsSocialFacebook" type="text" placeholder="flatoutmedia (page slug)" autocomplete="off" />
+          </div>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">X</span>
+            <input id="settingsSocialX" type="text" placeholder="@flatoutmediauk" autocomplete="off" />
+          </div>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">TikTok</span>
+            <input id="settingsSocialTiktok" type="text" placeholder="@flatoutmedia" autocomplete="off" />
+          </div>
+          <small>Used in watermark credit lines, contact-sheet footers, and agency boilerplate. Skip any platform you don't use.</small>
+        </div>
+
         <div class="settings-modal__field">
           <label><img src="assets/icons/folder.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Folders</label>
           <div class="settings-modal__row settings-modal__row--folder">

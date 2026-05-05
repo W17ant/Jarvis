@@ -21,7 +21,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import * as Vision from "./vision.mjs";
-import { loadBrand } from "./brand.mjs";
+import { loadBrand, primarySocialHandle } from "./brand.mjs";
 import * as Paths from "./paths.mjs";
 
 const execFileP = promisify(execFile);
@@ -71,7 +71,7 @@ function creditBody(srcBasename) {
   const agency = brand?.agency || {};
   const name = agency.name || "Flat-Out Media";
   const tagline = agency.tagline || "";
-  const handle = agency.social || "";
+  const handle = primarySocialHandle(agency);
   const date = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
   return [
     `Image: ${srcBasename}`,

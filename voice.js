@@ -2056,6 +2056,10 @@ function wireSettingsModal() {
   const styleTextarea = document.getElementById("settingsCreativeStyle");
   const styleLoadTemplateBtn = document.getElementById("settingsStyleLoadTemplate");
   const styleStatus = document.getElementById("settingsStyleStatus");
+  const socialInstagram = document.getElementById("settingsSocialInstagram");
+  const socialFacebook = document.getElementById("settingsSocialFacebook");
+  const socialX = document.getElementById("settingsSocialX");
+  const socialTiktok = document.getElementById("settingsSocialTiktok");
 
   /* Stash the selected geocode hit so save can skip the second API call when the
    * operator picked an explicit suggestion. Cleared whenever the input mutates. */
@@ -2143,6 +2147,22 @@ function wireSettingsModal() {
       const activeId = window.__profiles?.activeId?.() || "default";
       for (const p of profiles) appendOption(profileSel, p.id, p.name);
       profileSel.value = activeId;
+    }
+
+    /* Social handles — fetch from /brand and pre-fill the four platform inputs.
+     * Empty = not configured. Saved back via /settings POST { socials: {…} }. */
+    if (socialInstagram) {
+      try {
+        const r = await fetch("http://localhost:8766/brand", { cache: "no-store" });
+        if (r.ok) {
+          const b = await r.json();
+          const s = b.agency?.socials || {};
+          socialInstagram.value = s.instagram || b.agency?.social || "";
+          socialFacebook.value = s.facebook || "";
+          socialX.value = s.x || "";
+          socialTiktok.value = s.tiktok || "";
+        }
+      } catch { /* bridge offline — leave blank */ }
     }
 
     /* Creative-style markdown — fetch the operator's CLAUDE.md equivalent.
@@ -2354,6 +2374,38 @@ function wireSettingsModal() {
       applyCameraVisibility(currentState);
     }
 
+    /* Social handles — diff against what /brand currently reports, only attach
+     * to payload if any of the four changed. Sending the whole object is fine
+     * (the bridge merges field-by-field) but skipping the round-trip on no-op
+     * keeps the "no changes" status accurate. */
+    if (socialInstagram) {
+      try {
+        const r = await fetch("http://localhost:8766/brand", { cache: "no-store" });
+        if (r.ok) {
+          const b = await r.json();
+          const cur = b.agency?.socials || {};
+          const newSocials = {
+            instagram: (socialInstagram.value || "").trim(),
+            facebook: (socialFacebook.value || "").trim(),
+            x: (socialX.value || "").trim(),
+            tiktok: (socialTiktok.value || "").trim(),
+          };
+          const dirty = ["instagram", "facebook", "x", "tiktok"].some(
+            k => newSocials[k] !== ((cur[k] || (k === "instagram" ? b.agency?.social : "")) || "")
+          );
+          if (dirty) payload.socials = newSocials;
+        } else {
+          /* Bridge didn't return /brand — be safe and send anyway. */
+          payload.socials = {
+            instagram: (socialInstagram.value || "").trim(),
+            facebook: (socialFacebook.value || "").trim(),
+            x: (socialX.value || "").trim(),
+            tiktok: (socialTiktok.value || "").trim(),
+          };
+        }
+      } catch { /* bridge offline — skip; main save will catch it */ }
+    }
+
     /* Folders — only POST if either input changed. Send paths separately because they
      * are validated (mkdir-tested) before brand.json is rewritten; combining with the
      * /settings POST would mean a folder typo blocks unrelated saves like voice change. */
@@ -2472,6 +2524,7 @@ function wireSettingsModal() {
       if (projectChanged) parts.push(`project → ${projectSel.value || "(none)"}`);
       if (foldersChanged) parts.push("folders updated");
       if (styleChanged) parts.push("style guide updated");
+      if (d.updated.socials) parts.push("socials updated");
       setStatus(parts.length ? `saved · ${parts.join(", ")}` : "no changes", "ok");
       /* Don't revert colour on close — operator just confirmed it. */
       pendingColour = null;

@@ -3338,6 +3338,31 @@ const httpServer = createServer(async (req, res) => {
           updated.color = hex;
         }
 
+        if (j.socials && typeof j.socials === "object") {
+          /* Per-platform social handles. Only the four we currently surface in the
+           * settings panel are accepted — third-party additions land via direct
+           * brand.json edits, not the API. Each value is trimmed + capped at 64
+           * chars to keep watermark renders predictable. The legacy single
+           * `social` string is kept in lock-step with Instagram so any tooling
+           * that hasn't migrated still gets a sensible value. */
+          const ALLOWED = ["facebook", "instagram", "x", "tiktok"];
+          const cleaned = {};
+          for (const k of ALLOWED) {
+            if (typeof j.socials[k] === "string") cleaned[k] = j.socials[k].trim().slice(0, 64);
+          }
+          const brandPath = new URL("../config/brand.json", import.meta.url);
+          let raw = {};
+          try { raw = JSON.parse(await fs.readFile(brandPath, "utf8")); } catch {}
+          raw.agency = {
+            ...(raw.agency || {}),
+            socials: { ...(raw.agency?.socials || {}), ...cleaned },
+          };
+          if (cleaned.instagram !== undefined) raw.agency.social = cleaned.instagram;
+          await fs.writeFile(brandPath, JSON.stringify(raw, null, 2));
+          invalidateBrandCache();
+          updated.socials = cleaned;
+        }
+
         if (j.location && typeof j.location === "object") {
           /* Reuses the existing /config/override behaviour: writes through to config.json,
            * sets lockLocation:true so IP autodetect on next boot won't overwrite. */

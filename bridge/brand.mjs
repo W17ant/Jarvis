@@ -24,7 +24,19 @@ const FALLBACK = {
     wakeMishears: ["hey flat-out", "flat-out"],
     voice: "bm_daniel",
   },
-  agency: { name: "Flat-Out Media", tagline: "", social: "", domain: "" },
+  agency: {
+    name: "Flat-Out Media",
+    tagline: "",
+    domain: "",
+    /* Per-platform social handles. Replaces the legacy single `social` string —
+     * loadBrand() migrates the old field into socials.instagram on read so
+     * existing installs don't break. Empty strings = "not configured" and the
+     * primary-handle picker (used by watermarks + boilerplate) falls through. */
+    socials: { facebook: "", instagram: "", x: "", tiktok: "" },
+    /* Kept for backwards compat in any tooling that read the old key directly.
+     * loadBrand() will keep this in sync with socials.instagram. */
+    social: "",
+  },
   colors: {
     primary: "#E10600", primaryDeep: "#8F0003",
     primaryGlow: "rgba(225,6,0,0.55)", primaryTint: "rgba(225,6,0,0.06)",
@@ -57,6 +69,16 @@ export function loadBrand() {
       fonts:   { ...FALLBACK.fonts,   ...(raw.fonts || {}) },
       logo:    { ...FALLBACK.logo,    ...(raw.logo || {}) },
     };
+    /* Migrate legacy `agency.social` (single handle string) → `agency.socials.instagram`.
+     * Done on read so old brand.json files keep working without a manual edit. The
+     * single-string field is most often an Instagram handle in practice (matches what
+     * the Flat-Out example shipped with). Settings panel saves the new shape going
+     * forward; the legacy field is kept in lock-step for any third-party reader. */
+    cached.agency.socials = { ...FALLBACK.agency.socials, ...(raw.agency?.socials || {}) };
+    if (!raw.agency?.socials && raw.agency?.social && !cached.agency.socials.instagram) {
+      cached.agency.socials.instagram = String(raw.agency.social).trim();
+    }
+    cached.agency.social = cached.agency.socials.instagram || raw.agency?.social || "";
     /* Why: if the operator sets a custom name but doesn't touch wakePhrase, derive it. */
     if (!raw.agent?.wakePhrase && raw.agent?.name) {
       cached.agent.wakePhrase = `hey ${raw.agent.name.toLowerCase()}`;
@@ -93,3 +115,17 @@ export function expandMishears(name) {
 
 /** Force a re-read on next loadBrand() — used after the wizard writes a new config. */
 export function invalidateBrandCache() { cached = null; }
+
+/**
+ * Pick the agency's primary social handle for places that need a single string
+ * (watermark credit lines, agency boilerplate). Priority order: Instagram → X →
+ * TikTok → Facebook — Instagram first because that's where automotive content
+ * agencies most commonly point credit. Returns "" if nothing is configured.
+ *
+ * @param {object} agency - the brand.agency object
+ * @returns {string} the first non-empty handle, or ""
+ */
+export function primarySocialHandle(agency) {
+  const s = agency?.socials || {};
+  return s.instagram || s.x || s.tiktok || s.facebook || agency?.social || "";
+}

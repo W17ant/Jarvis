@@ -173,9 +173,40 @@ async function main() {
   const tagline = flags.tagline || (interactive
     ? await ask("Tagline", agencyChanged ? "" : (existing.agency?.tagline || "we live and breathe automotive"))
     : (agencyChanged ? "" : (existing.agency?.tagline || "")));
-  const social = flags.social || (interactive
-    ? await ask("Social handle (optional)", agencyChanged ? "" : (existing.agency?.social || ""))
-    : (agencyChanged ? "" : (existing.agency?.social || "")));
+  /* Per-platform social handles. Asked individually because operators consistently
+   * struggled with the old single "Social handle" prompt — they'd type one and
+   * skip the others, ending up with credit-line gaps in watermarks + boilerplate.
+   * Defaults respect agencyChanged so a re-skin doesn't inherit Flat-Out's handles.
+   *
+   * The legacy `social` field is migrated to socials.instagram on read; if that's
+   * the only one set, default Instagram to it so the operator doesn't lose it. */
+  const existingSocials = existing.agency?.socials || {};
+  const legacySocial = !agencyChanged ? (existing.agency?.social || "") : "";
+  const socialDefaults = agencyChanged ? {} : {
+    instagram: existingSocials.instagram || legacySocial || "",
+    facebook: existingSocials.facebook || "",
+    x: existingSocials.x || "",
+    tiktok: existingSocials.tiktok || "",
+  };
+  console.log(C.dim + "  Press Enter to skip a platform you don't use." + C.reset);
+  const igHandle = flags.instagram ?? (interactive
+    ? await ask("  Instagram (e.g. @flatoutmediauk)", socialDefaults.instagram)
+    : socialDefaults.instagram);
+  const fbHandle = flags.facebook ?? (interactive
+    ? await ask("  Facebook (page slug, e.g. flatoutmedia)", socialDefaults.facebook)
+    : socialDefaults.facebook);
+  const xHandle = flags.x ?? (interactive
+    ? await ask("  X / Twitter (e.g. @flatoutmediauk)", socialDefaults.x)
+    : socialDefaults.x);
+  const ttHandle = flags.tiktok ?? (interactive
+    ? await ask("  TikTok (e.g. @flatoutmedia)", socialDefaults.tiktok)
+    : socialDefaults.tiktok);
+  const socials = {
+    facebook: (fbHandle || "").trim(),
+    instagram: (igHandle || "").trim(),
+    x: (xHandle || "").trim(),
+    tiktok: (ttHandle || "").trim(),
+  };
   const domain = flags.domain || (interactive
     ? await ask("Website / domain (optional)", agencyChanged ? "" : (existing.agency?.domain || ""))
     : (agencyChanged ? "" : (existing.agency?.domain || "")));
@@ -215,7 +246,10 @@ async function main() {
         : expandMishears(agentName),
       voice,
     },
-    agency: { name: agencyName, tagline, social, domain },
+    /* socials is the canonical store; `social` is kept in lock-step with the
+     * Instagram handle for legacy readers (third-party tooling, watermark code
+     * that hasn't migrated yet). brand.mjs's loadBrand() also re-syncs this. */
+    agency: { name: agencyName, tagline, domain, socials, social: socials.instagram },
     colors: {
       primary,
       primaryDeep,
