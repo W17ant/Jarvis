@@ -8,8 +8,8 @@
  *  Usage:
  *    node tools/setup-wizard.mjs
  *    node tools/setup-wizard.mjs --non-interactive --name "Jarvis" --agency "Acme" --primary "#FF6600"
- *    node tools/setup-wizard.mjs --skip-keys     # don't prompt for FAL_KEY / FRAMEIO_TOKEN
- *    node tools/setup-wizard.mjs --falKey fal-… --frameioToken fio-…   # set keys non-interactively
+ *    node tools/setup-wizard.mjs --skip-keys     # don't prompt for FRAMEIO_TOKEN / SERPAPI / Hunter
+ *    node tools/setup-wizard.mjs --frameioToken fio-…   # set keys non-interactively
  */
 
 import { readFile, writeFile, copyFile, stat } from "node:fs/promises";
@@ -414,18 +414,11 @@ async function main() {
 
   console.log(C.dim + "  Press Enter to skip any key — set later by editing .env." + C.reset);
 
-  let falKey = flags.falKey ?? existingEnv.FAL_KEY ?? "";
   let frameioToken = flags.frameioToken ?? existingEnv.FRAMEIO_TOKEN ?? "";
   let serpapiKey = flags.serpapiKey ?? existingEnv.SERPAPI_KEY ?? "";
   let hunterKey = flags.hunterKey ?? existingEnv.HUNTER_API_KEY ?? "";
 
   if (!skipKeys) {
-    console.log("");
-    console.log(C.dim + "  Fal.ai — needed only for image-to-video generation (Kling). Free tier: https://fal.ai" + C.reset);
-    const falInput = await ask("FAL_KEY", falKey ? `${falKey.slice(0, 6)}…(unchanged, press Enter)` : "(skip)");
-    if (falInput && !falInput.includes("…")) falKey = falInput;
-    else if (falInput === "(skip)" || falInput === "") { /* keep */ }
-
     console.log("");
     console.log(C.dim + "  Frame.io — voice review/comment workflow. Token: https://developer.frame.io/app" + C.reset);
     const fioInput = await ask("FRAMEIO_TOKEN", frameioToken ? `${frameioToken.slice(0, 8)}…(unchanged, press Enter)` : "(skip)");
@@ -446,8 +439,6 @@ async function main() {
   }
 
   /* Status lines. */
-  if (falKey) ok(`FAL_KEY set (${falKey.slice(0, 6)}…)`);
-  else warn("FAL_KEY not set — image-to-video disabled");
   if (frameioToken) ok(`FRAMEIO_TOKEN set (${frameioToken.slice(0, 8)}…)`);
   else warn("FRAMEIO_TOKEN not set — frameio_* tools disabled");
   if (serpapiKey) ok(`SERPAPI_KEY set (${serpapiKey.slice(0, 8)}…)`);
@@ -456,7 +447,10 @@ async function main() {
   else warn("HUNTER_API_KEY not set — outreach pack will fail at enrichment step");
 
   const newEnv = { ...existingEnv };
-  if (falKey) newEnv.FAL_KEY = falKey;
+  /* Strip any legacy FAL_KEY left over from earlier installs — image-to-video
+   * is no longer part of the build, and leaving it in .env makes the bridge
+   * load a key it'll never use. */
+  delete newEnv.FAL_KEY;
   if (frameioToken) newEnv.FRAMEIO_TOKEN = frameioToken;
   if (serpapiKey) newEnv.SERPAPI_KEY = serpapiKey;
   if (hunterKey) newEnv.HUNTER_API_KEY = hunterKey;
@@ -508,6 +502,12 @@ async function main() {
    * reload — kiosk is fully configured. NOW it's safe to optionally hand off to the
    * Tailscale installer, which has its own prompts and may take a minute or two while
    * the operator authenticates in the browser. */
+  /* Tailscale prompt is OPTIONAL and ALWAYS falls through to the final
+   * completion message below. Earlier versions `return`ed inside this block
+   * the moment install-tailscale.sh exited, which meant operators who said
+   * "y" then bailed out of the SSO flow never saw the "Start: ./launch.sh
+   * kiosk" line — they assumed setup was incomplete and never launched the
+   * kiosk, then hit "bridge not connected" in the HUD. */
   if (promptTailscale) {
     heading("Remote access (optional)");
     console.log(C.dim + "  Tailscale gives you a private mesh between your devices — open the HUD on\n  your phone in Safari from anywhere, no port forwarding or public exposure. Free." + C.reset);
@@ -518,27 +518,31 @@ async function main() {
         warn(`installer missing: ${installer} — skipping`);
       } else {
         /* Hand the terminal to the installer — it has interactive prompts of its own.
-         * Close readline first so its keystrokes don't fight ours. */
+         * Close readline first so its keystrokes don't fight ours. We re-open is
+         * unnecessary because the wizard is about to print + exit. */
         rl.close();
         try {
           const { spawnSync } = await import("node:child_process");
           const r = spawnSync("bash", [installer], { stdio: "inherit" });
-          if (r.status !== 0) warn(`Tailscale installer exited with status ${r.status}.`);
+          if (r.status !== 0) {
+            warn(`Tailscale installer exited with status ${r.status} — that's fine, the kiosk works without it.`);
+            console.log(C.dim + "  Re-run later with: ./tools/install-tailscale.sh, or open Settings → Remote access in the HUD." + C.reset);
+          }
         } catch (e) {
           warn(`could not run installer: ${e.message}`);
+          console.log(C.dim + "  Re-run later with: ./tools/install-tailscale.sh" + C.reset);
         }
-        console.log(`\n${C.bold}${C.green}  Setup complete.${C.reset}\n  Start: ./launch.sh kiosk\n`);
-        return;
       }
     } else {
-      ok("skipped — set up later with: ./tools/install-tailscale.sh");
+      ok("skipped — set up later with: ./tools/install-tailscale.sh, or via Settings → Remote access in the HUD");
     }
   }
 
   console.log(`\n${C.bold}${C.green}  Setup complete.${C.reset}`);
-  console.log(`\n  Next:`);
-  console.log(`    ./launch.sh kiosk     # start in fullscreen`);
-  console.log(`    ./launch.sh           # windowed test\n`);
+  console.log(`\n  ${C.bold}Now run this to start the kiosk:${C.reset}`);
+  console.log(`    ${C.cyan || ""}./launch.sh kiosk${C.reset}     # full-screen kiosk mode`);
+  console.log(`    ${C.cyan || ""}./launch.sh${C.reset}           # windowed test`);
+  console.log(`\n  If the HUD says "bridge not connected", run: ./launch.sh restart\n`);
 
   await printAuthorCredit();
   rl.close();

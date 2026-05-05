@@ -1,4 +1,4 @@
-/** usage.js - Usage telemetry overlay (queries today, tool breakdown, errors, fal spend).
+/** usage.js - Usage telemetry overlay (queries today, tool breakdown, errors).
  *
  *  Why: operators want a quick "what's the kiosk been up to today?" read without
  *  digging through the audit log entry-by-entry. Surfaces:
@@ -6,7 +6,6 @@
  *    - Error count + rate
  *    - Top tools (by volume) with avg duration
  *    - Operator breakdown
- *    - Fal.ai call count (multiply by your per-call rate for spend)
  *
  *  Opens from settings footer's "VIEW USAGE" button. Read-only, fetched on open. */
 
@@ -76,7 +75,6 @@ function render(snapshot) {
     { label: "Errors", value: snapshot.errors ?? 0, accent: snapshot.errors > 0 ? "warn" : null },
     { label: "Error rate", value: `${snapshot.errorRate ?? 0}%`, accent: snapshot.errorRate > 5 ? "warn" : null },
     { label: "Avg dur", value: fmtMs(snapshot.avgDurationMs) },
-    { label: "Fal calls", value: snapshot.falCalls ?? 0, accent: snapshot.falCalls > 0 ? "spend" : null },
   ];
   for (const t of tileSpec) {
     const tile = document.createElement("div");
@@ -124,12 +122,6 @@ function render(snapshot) {
 
       const tags = document.createElement("span");
       tags.className = "usage-overlay__tool-tags";
-      if (t.isFal) {
-        const tag = document.createElement("span");
-        tag.className = "usage-overlay__tag usage-overlay__tag--fal";
-        tag.textContent = "FAL";
-        tags.appendChild(tag);
-      }
       if (t.errors > 0) {
         const tag = document.createElement("span");
         tag.className = "usage-overlay__tag usage-overlay__tag--err";
@@ -178,13 +170,6 @@ function render(snapshot) {
     panel.appendChild(opList);
   }
 
-  /* Fal.ai cost note — direct billing link belongs in operator hands. */
-  if (snapshot.falCalls > 0) {
-    const note = document.createElement("div");
-    note.className = "usage-overlay__note";
-    note.textContent = `${snapshot.falCalls} fal.ai call${snapshot.falCalls === 1 ? "" : "s"} this window. Check fal.ai/dashboard for billed usage.`;
-    panel.appendChild(note);
-  }
 }
 
 async function open() {

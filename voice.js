@@ -2064,6 +2064,9 @@ function wireSettingsModal() {
   const tsSetupBtn = document.getElementById("settingsTailscaleSetupBtn");
   const tsAdminBtn = document.getElementById("settingsTailscaleAdminBtn");
   const tsRefreshBtn = document.getElementById("settingsTailscaleRefreshBtn");
+  const keyFrameio = document.getElementById("settingsKeyFrameio");
+  const keySerpapi = document.getElementById("settingsKeySerpapi");
+  const keyHunter = document.getElementById("settingsKeyHunter");
 
   /* Stash the selected geocode hit so save can skip the second API call when the
    * operator picked an explicit suggestion. Cleared whenever the input mutates. */
@@ -2215,6 +2218,26 @@ function wireSettingsModal() {
       const activeId = window.__profiles?.activeId?.() || "default";
       for (const p of profiles) appendOption(profileSel, p.id, p.name);
       profileSel.value = activeId;
+    }
+
+    /* External API keys — fetch presence info from /api-keys and render the
+     * inputs as placeholders ("set · …abcd") when configured. The actual key
+     * value is NEVER returned by the bridge — operator types a new value to
+     * change it, leaves blank to keep the existing one. */
+    if (keyFrameio) {
+      try {
+        const r = await fetch("http://localhost:8766/api-keys", { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          const apply = (input, info) => {
+            input.value = "";
+            if (info?.set) input.placeholder = `(set ${info.hint || ""}) — type to change`;
+          };
+          apply(keyFrameio, j.keys?.frameio);
+          apply(keySerpapi, j.keys?.serpapi);
+          apply(keyHunter, j.keys?.hunter);
+        }
+      } catch { /* bridge offline — leave default placeholders */ }
     }
 
     /* Tailscale status — fetch + render. Three states (missing / logged-out /
@@ -2450,6 +2473,33 @@ function wireSettingsModal() {
       applyCameraVisibility(currentState);
     }
 
+    /* External API keys — collect any non-empty inputs and POST to /api-keys.
+     * Empty input = "leave existing value alone" (we never trash an existing
+     * key by accident). The bridge writes to .env + updates process.env so
+     * the change is live without restart. */
+    let apiKeysChanged = false;
+    if (keyFrameio) {
+      const payload2 = {};
+      if (keyFrameio.value.trim()) payload2.frameio = keyFrameio.value.trim();
+      if (keySerpapi.value.trim()) payload2.serpapi = keySerpapi.value.trim();
+      if (keyHunter.value.trim())  payload2.hunter  = keyHunter.value.trim();
+      if (Object.keys(payload2).length) {
+        try {
+          const r = await fetch("http://localhost:8766/api-keys", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload2),
+          });
+          if (r.ok) {
+            apiKeysChanged = true;
+            /* Clear the inputs so the operator doesn't accidentally re-submit
+             * on next save; the masked placeholder will refresh on next open. */
+            [keyFrameio, keySerpapi, keyHunter].forEach(el => { el.value = ""; });
+          }
+        } catch { /* surfaced via the main save status */ }
+      }
+    }
+
     /* Social handles — diff against what /brand currently reports, only attach
      * to payload if any of the four changed. Sending the whole object is fine
      * (the bridge merges field-by-field) but skipping the round-trip on no-op
@@ -2601,6 +2651,7 @@ function wireSettingsModal() {
       if (foldersChanged) parts.push("folders updated");
       if (styleChanged) parts.push("style guide updated");
       if (d.updated.socials) parts.push("socials updated");
+      if (apiKeysChanged) parts.push("API keys updated");
       setStatus(parts.length ? `saved · ${parts.join(", ")}` : "no changes", "ok");
       /* Don't revert colour on close — operator just confirmed it. */
       pendingColour = null;
@@ -2771,6 +2822,17 @@ function wireSettingsModal() {
   saveBtn.addEventListener("click", save);
   previewBtn.addEventListener("click", previewVoice);
   locateBtn.addEventListener("click", redetectLocation);
+
+  /* API-key show/hide toggles. Each toggle button has data-target=<input id>;
+   * we just flip the input's type between password and text. Single delegated
+   * listener so adding more keys later doesn't need new wiring. */
+  document.querySelectorAll(".settings-modal__key-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = document.getElementById(btn.dataset.target);
+      if (!target) return;
+      target.type = target.type === "password" ? "text" : "password";
+    });
+  });
 
   /* Tailscale buttons — refresh re-fetches status, setup pops Terminal at
    * the install wrapper, admin opens the Tailscale admin console. */

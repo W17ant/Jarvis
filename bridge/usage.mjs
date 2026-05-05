@@ -10,19 +10,15 @@
  *  the panel. The audit log is small (JSONL, append-only) so a full-day scan is sub-
  *  100ms even on a busy kiosk.
  *
- *  Out of scope for v1: per-call fal.ai pricing. The fal API doesn't return cost on
- *  the request, and pre-pricing every model would drift as fal updates rates. We
- *  surface the COUNT of fal-using calls so the operator can multiply by their known
- *  per-call rate; full integration with fal's billing endpoint is a future task. */
+ *  Local-only build: every tool runs on the operator's Mac, so there are no
+ *  per-call costs to track. The panel surfaces volume + latency + error rate
+ *  for the operator's own visibility. */
 
 import * as Audit from "./audit.mjs";
 
-/* The set of tools that hit fal.ai. Bumping new ones into this set lets the call
- * counter pick them up automatically without changing the consumer. */
-const FAL_TOOLS = new Set(["fal_image_to_video", "fal_image_gen"]);
-
 /* Tools that are pure-local and "free" — listing them here lets the UI separate
- * "free local work" from "potentially-billed external work". */
+ * "free local work" from "potentially-billed external work" (currently no
+ * external-billed tools exist; the prefix list is kept for future use). */
 const LOCAL_TOOLS_PREFIX = ["caption_", "describe_", "find_", "list_", "get_", "remember", "recall", "add_"];
 
 /**
@@ -42,13 +38,12 @@ export async function getUsage({ windowHours = 24 } = {}) {
    * is microseconds of work. */
   const byTool = new Map();        // tool → { count, errors, totalMs, avgMs, lastTs }
   const byOperator = new Map();
-  let total = 0, errors = 0, falCalls = 0, totalDurationMs = 0;
+  let total = 0, errors = 0, totalDurationMs = 0;
   let firstTs = Infinity, lastTs = 0;
 
   for (const row of rows) {
     total++;
     if (row.error) errors++;
-    if (FAL_TOOLS.has(row.tool)) falCalls++;
     if (row.durationMs) totalDurationMs += row.durationMs;
     if (row.ts < firstTs) firstTs = row.ts;
     if (row.ts > lastTs) lastTs = row.ts;
@@ -75,7 +70,6 @@ export async function getUsage({ windowHours = 24 } = {}) {
       errors: m.errors,
       avgMs: m.count > 0 ? Math.round(m.totalMs / m.count) : 0,
       lastTs: m.lastTs,
-      isFal: FAL_TOOLS.has(name),
       isLocal: LOCAL_TOOLS_PREFIX.some((p) => name.startsWith(p)),
     }))
     .sort((a, b) => b.count - a.count)
@@ -93,7 +87,6 @@ export async function getUsage({ windowHours = 24 } = {}) {
     total,
     errors,
     errorRate: total > 0 ? Math.round((errors / total) * 1000) / 10 : 0,  // pct, 1 dp
-    falCalls,
     /* Average wall time per dispatch — useful "is the kiosk responsive?" metric. */
     avgDurationMs: total > 0 ? Math.round(totalDurationMs / total) : 0,
     /* Activity span — first/last timestamps in the window so the UI can show the

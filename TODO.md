@@ -65,7 +65,7 @@ Right rail becomes "ACTIVE PROJECTS" — cards for the most-recent 3 shoot folde
 🟩 **Keyboard navigation pass** (~1 day) — skip-links, focus rings, ARIA polish
 🟩 **Reduced motion / high contrast / font scale toggles** (~1 day) — accessibility chrome for visitors
 🟩 **Tablet/iPad responsive variant** (~2-3 days) — operator's iPad mirrors HUD when away from desk
-🟩 **Cost / usage telemetry** (~1 day) — queries today, tokens, fal.ai £, model swap suggestions
+🟩 **Cost / usage telemetry** (~1 day) — queries today, tokens, model swap suggestions
 🟩 **Layout customisation** (~3 days) — drag panels to reposition, save per-profile
 
 ---

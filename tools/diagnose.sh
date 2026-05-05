@@ -44,9 +44,14 @@ META_DIR="$(mktemp -d)"
   echo "=== /healthz ==="
   curl -s -m 3 http://localhost:8766/healthz 2>&1 || echo "(bridge unreachable)"
   echo ""
-  echo "=== Bound ports ==="
+  echo "=== Listening ports ==="
+  # Why -sTCP:LISTEN: lsof -ti :PORT returns ANY socket on that port — including
+  # CLOSE_WAIT / ESTABLISHED entries from clients (e.g. Chrome's HUD WebSocket
+  # connecting to :8766). The unfiltered output made it look like "two bridges
+  # running" when really one is the bridge and the other is the connected HUD.
+  # Only the LISTEN process is the actual server we care about.
   for p in 8765 8766 8767 8768 11434; do
-    pid=$(lsof -ti ":$p" 2>/dev/null || true)
+    pid=$(lsof -tiTCP:"$p" -sTCP:LISTEN 2>/dev/null | head -1 || true)
     echo "  :$p → ${pid:-(free)}"
   done
 } > "$META_DIR/snapshot.txt"

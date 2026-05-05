@@ -21,16 +21,17 @@ The kiosk only reaches outbound for these specific, opt-in features:
 
 | Feature | Endpoint | Trigger |
 |---|---|---|
-| Image-to-video (Fal.ai Kling) | `https://queue.fal.run/...` | Voice command + `FAL_KEY` set |
 | Frame.io review tools | `https://api.frame.io/v4/...` | Voice command + `FRAMEIO_TOKEN` set |
+| Press-radar Google search | `https://serpapi.com/...` | Daily sweep + `SERPAPI_KEY` set |
+| Press-contact lookup | `https://api.hunter.io/...` | Outreach pack + `HUNTER_API_KEY` set |
 | Weather | `https://api.open-meteo.com/...` | HUD widget refresh |
 | IP geolocation (first-run only) | `ipwho.is`, `ipinfo.io`, `ipapi.co` | Auto-detect operator location once |
 | Web search | DuckDuckGo HTML scrape | LLM tool call when operator asks current-events questions |
 | Google Fonts | `fonts.googleapis.com` | First page load |
 
-If the machine is fully air-gapped, the system still works — it loses image-to-video,
-Frame.io tools, weather, web search, and geolocation. Voice loop, memory, vision,
-teaser pipeline, Premiere, PDFs, mail drafts all keep working.
+If the machine is fully air-gapped, the system still works — it loses Frame.io tools,
+press radar, outreach enrichment, weather, web search, and geolocation. Voice loop,
+memory, vision, teaser pipeline, Premiere, PDFs, mail drafts all keep working.
 
 ## Files holding sensitive data
 
@@ -38,7 +39,7 @@ teaser pipeline, Premiere, PDFs, mail drafts all keep working.
 |---|---|---|
 | `data/memory.db` | Contacts (names, emails, phones, notes), projects, free-form facts, conversation summaries. SQLite WAL. | **No** — relies on disk-level FileVault. |
 | `data/backups/memory-*.db` | Daily snapshots of the above, 30-day retention. | No |
-| `.env` | `FAL_KEY`, `FRAMEIO_TOKEN` and any other API keys. | No |
+| `.env` | `FRAMEIO_TOKEN`, `SERPAPI_KEY`, `HUNTER_API_KEY` and any other API keys. | No |
 | `data/frame-cache/` | Extracted video keyframes for VL captioning. | No |
 
 **Required:** the disk hosting `~/Desktop/Jarvis` must be FileVault-encrypted. macOS
@@ -64,12 +65,13 @@ iCloud → Desktop & Documents Folders). If `~/Desktop/Jarvis` is iCloud-synced:
 
 Tokens live in `.env`. Practical rules:
 
-- **Never log them.** `bridge/server.mjs` logs `FAL_KEY: loaded ✓` not the value — keep this pattern in any new integration.
+- **Never log them.** Bridge logs only "(set)" / "(missing)" — never the value. Keep this pattern in any new integration.
 - **Never include them in screenshots.** The setup wizard prints first 6 characters then `…` — copy that pattern in any UI surfacing keys.
 - **Rotate after staff changes.** When someone leaves the agency:
-  - Revoke + re-issue Fal.ai key at https://fal.ai (account settings)
   - Revoke + re-issue Frame.io developer token at https://developer.frame.io/app
-  - Re-run `node tools/setup-wizard.mjs` to update `.env`
+  - Revoke + re-issue SerpAPI key at https://serpapi.com/manage-api-key
+  - Revoke + re-issue Hunter.io key at https://hunter.io/api-keys
+  - Re-run `node tools/setup-wizard.mjs` (or use the Settings panel) to update `.env`
 - **Don't commit `.env`.** It's gitignored — verify with `git status` before any push.
 
 ## Memory & personal data (GDPR-adjacent)

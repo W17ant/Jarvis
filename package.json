@@ -21,7 +21,6 @@
     "serve": "python3 -m http.server 8765"
   },
   "dependencies": {
-    "@fal-ai/client": "^1.10.0",
     "@sparticuz/chromium-min": "^148.0.0",
     "better-sqlite3": "^12.9.0",
     "puppeteer-core": "^24.42.0",

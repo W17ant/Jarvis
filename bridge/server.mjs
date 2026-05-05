@@ -1,9 +1,9 @@
 /** server.mjs - Flat-Out HUD bridge.
  *  Single Node process that the HUD frontend talks to over websocket.
- *  Provides: real system stats, Ollama LLM proxy, Fal.ai image-to-video, weather.
+ *  Provides: real system stats, Ollama LLM proxy, weather, calendar/mail
+ *  bridges, video edit pipeline, vision, brand-pack export, agency tools.
  *
- *  Run: node bridge/server.mjs    (from project root)
- *  Reads FAL_KEY from /Users/Antony/Desktop/AI-Custom-Cards/.env.local at startup. */
+ *  Run: node bridge/server.mjs    (from project root) */
 
 import { WebSocketServer } from "ws";
 import { createServer } from "node:http";
@@ -11,7 +11,6 @@ import { readFileSync } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
-import { buildInstagramTeaser } from "./video.mjs";
 import { buildProductionTeaser } from "./edit.mjs";
 import * as Premiere from "./premiere.mjs";
 import { createPdf, listTemplates as listPdfTemplates } from "./pdf.mjs";
@@ -72,9 +71,15 @@ function loadEnvFile(path) {
 loadEnvFile(FOM_ENV_PATH);
 /* Why: project-root .env (written by tools/setup-wizard.mjs) holds local overrides like
  * OLLAMA_MODEL, VL_MODEL, VL_KEEP_ALIVE, FRAMEIO_TOKEN. Loaded AFTER the FOM_ENV_PATH so
- * a per-install .env wins over the shared FAL key file when both define the same var. */
+ * a per-install .env wins over a shared key file when both define the same var. */
 const PROJECT_ENV_PATH = new URL("../.env", import.meta.url).pathname;
 loadEnvFile(PROJECT_ENV_PATH);
+
+/* Project root path — declared early so the boot summary block below can use
+ * it without hitting the temporal-dead-zone. The same value is also re-derived
+ * later in the file (one of those is now redundant; both expressions resolve
+ * to the same path). */
+const PROJECT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
 /** Parse "#RRGGBB" → { r, g, b }. Trusts caller-side regex validation. */
 function hexToRgb(hex) {
@@ -213,7 +218,6 @@ async function detectHardware() {
 }
 const hardwareDetected = detectHardware();
 
-const FAL_KEY = process.env.FAL_KEY || process.env.FAL_API_KEY || process.env.FAL_AI_KEY || "";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 /* Why: 32b text + 32b VL together exceed even M1/M2/M3 Max 64GB GPU headroom (verified
  * 2026-05-01 — VL alone consumed 46GB and stalled "Stopping..." for 30+s while text
@@ -235,8 +239,22 @@ function setModel(name) { _activeModel = name; process.env.OLLAMA_MODEL = name; 
 ModelRouter.setMainModelGetter(getModel);
 const PORT = Number(process.env.PORT || 8766);
 
-console.log(`[bridge] FAL_KEY: ${FAL_KEY ? "loaded ✓" : "MISSING ✗"}`);
 console.log(`[bridge] Ollama: ${OLLAMA_URL} (${getModel()})`);
+
+/* Boot summary — single block that prints the operator-relevant config so a
+ * non-developer reading /tmp/flat-out-bridge.log can see at a glance what's
+ * configured and what's missing. Avoids forcing them to grep across 20 lines
+ * for the bits that matter. Keys are reported as set/missing only, never the
+ * value, matching the no-secrets-in-logs rule from SECURITY.md. */
+const _bootKey = (name) => process.env[name] ? "set" : "(not set — feature disabled)";
+console.log("[bridge] ── boot summary ──");
+console.log(`[bridge]   Project root : ${PROJECT_ROOT}`);
+console.log(`[bridge]   Text model   : ${getModel()}`);
+console.log(`[bridge]   Vision model : ${process.env.VL_MODEL || "(unset)"}`);
+console.log(`[bridge]   FRAMEIO      : ${_bootKey("FRAMEIO_TOKEN")}`);
+console.log(`[bridge]   SERPAPI      : ${_bootKey("SERPAPI_KEY")}`);
+console.log(`[bridge]   HUNTER       : ${_bootKey("HUNTER_API_KEY")}`);
+console.log("[bridge] ──────────────────");
 
 /* ---------- SYSTEM STATS ----------
  * Why: browsers are sandboxed from real CPU/RAM/net. We poll the OS here and push to clients. */
@@ -2411,23 +2429,6 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
   return sb.emitted.trim() || "I tried a few searches but couldn't pull a clean answer together — try asking more specifically.";
 }
 
-/* ---------- FAL.AI IMAGE-TO-VIDEO ---------- */
-async function falImageToVideo({ imageUrl, prompt, model = "fal-ai/kling-video/v2.1/master/image-to-video", duration = 5 }) {
-  if (!FAL_KEY) throw new Error("FAL_KEY missing — check /Users/Antony/Desktop/AI-Custom-Cards/.env.local");
-  const res = await fetch(`https://queue.fal.run/${model}`, {
-    method: "POST",
-    headers: { "authorization": `Key ${FAL_KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({ image_url: imageUrl, prompt, duration }),
-  });
-  if (!res.ok) throw new Error(`Fal ${res.status}: ${await res.text()}`);
-  return await res.json();  // { request_id, status_url, response_url }
-}
-
-async function falPollResult(responseUrl) {
-  const res = await fetch(responseUrl, { headers: { "authorization": `Key ${FAL_KEY}` } });
-  return res.ok ? await res.json() : { status: "ERROR", body: await res.text() };
-}
-
 /* ---------- WEATHER (Open-Meteo, no API key needed) ---------- */
 async function getWeather(lat = CONFIG.operator.latitude, lon = CONFIG.operator.longitude) {
   try {
@@ -2453,7 +2454,8 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 
-const PROJECT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+/* PROJECT_ROOT is declared near the top of this file now (boot summary needs it).
+ * Re-imports from the same module are idempotent, so no second declaration here. */
 
 const httpServer = createServer(async (req, res) => {
   // CORS for everything — HUD on :8765 talks to bridge on :8766
@@ -2479,7 +2481,7 @@ const httpServer = createServer(async (req, res) => {
 
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, fal: !!FAL_KEY, model: getModel() }));
+    res.end(JSON.stringify({ ok: true, model: getModel() }));
     return;
   }
 
@@ -2694,6 +2696,59 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
+  /* GET /api-keys — surfaces which third-party API keys are currently set,
+   * so the settings panel can render their inputs with masked previews
+   * ("set · sk-abcd…") rather than empty boxes that suggest "not configured".
+   * NEVER returns the actual key value — only a presence flag + last-4 chars
+   * of the value when present, for visual identification only. */
+  if (req.url === "/api-keys" && req.method === "GET") {
+    const mask = (v) => v ? `…${String(v).slice(-4)}` : null;
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({
+      ok: true,
+      keys: {
+        frameio: { set: !!process.env.FRAMEIO_TOKEN,  hint: mask(process.env.FRAMEIO_TOKEN) },
+        serpapi: { set: !!process.env.SERPAPI_KEY,    hint: mask(process.env.SERPAPI_KEY) },
+        hunter:  { set: !!process.env.HUNTER_API_KEY, hint: mask(process.env.HUNTER_API_KEY) },
+      },
+    }));
+    return;
+  }
+
+  /* POST /api-keys — write FRAMEIO_TOKEN / SERPAPI_KEY / HUNTER_API_KEY to .env
+   * and update process.env so the value is live without a bridge restart.
+   * Body shape: { frameio?: string, serpapi?: string, hunter?: string }
+   *   - empty string  → clear the key (write empty value, kill from env)
+   *   - missing field → don't touch
+   *   - non-empty     → set it
+   * Allowlist of three keys keeps this from being a generic env-write API. */
+  if (req.url === "/api-keys" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      const MAP = {
+        frameio: "FRAMEIO_TOKEN",
+        serpapi: "SERPAPI_KEY",
+        hunter:  "HUNTER_API_KEY",
+      };
+      const updated = {};
+      for (const [shortKey, envKey] of Object.entries(MAP)) {
+        if (!Object.prototype.hasOwnProperty.call(parsed, shortKey)) continue;
+        const v = String(parsed[shortKey] ?? "").trim().slice(0, 256);
+        await persistEnvVar(envKey, v);
+        if (v) process.env[envKey] = v; else delete process.env[envKey];
+        updated[shortKey] = v ? "set" : "cleared";
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, updated }));
+    } catch (e) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
+    return;
+  }
+
   /* Tailscale status — read-only endpoint surfaced in the settings panel.
    * Tailscale doesn't use a password — auth is browser-based SSO via the
    * operator's identity provider (Google/GitHub/Apple/etc). The kiosk's job is
@@ -3439,11 +3494,54 @@ const httpServer = createServer(async (req, res) => {
            * brand.json edits, not the API. Each value is trimmed + capped at 64
            * chars to keep watermark renders predictable. The legacy single
            * `social` string is kept in lock-step with Instagram so any tooling
-           * that hasn't migrated still gets a sensible value. */
+           * that hasn't migrated still gets a sensible value.
+           *
+           * Operators commonly paste full URLs (https://www.facebook.com/foo) —
+           * we normalize each input down to just the handle/slug so the watermark
+           * + boilerplate code can render "@foo" or "foo" without parsing URLs
+           * itself. Per-platform rules:
+           *   - facebook  → bare slug (no @, no fb.com prefix)
+           *   - instagram → @handle
+           *   - x         → @handle (also accepts twitter.com)
+           *   - tiktok    → @handle */
+          const stripUrl = (raw) => {
+            return String(raw)
+              .trim()
+              .replace(/^https?:\/\//i, "")
+              .replace(/^www\./i, "")
+              .replace(/\/$/, "")             // trailing slash
+              .split("?")[0]                  // drop query string
+              .split("#")[0];                 // drop fragment
+          };
+          const normalize = (platform, raw) => {
+            if (!raw) return "";
+            let v = stripUrl(raw);
+            /* Strip the platform's own domain prefix(es). Twitter accepted as
+             * an X synonym; m.facebook.com / web.facebook.com etc. covered by
+             * the leading-www strip above. */
+            const domains = {
+              facebook:  ["facebook.com/", "fb.com/", "fb.me/"],
+              instagram: ["instagram.com/", "instagr.am/"],
+              x:         ["x.com/", "twitter.com/"],
+              tiktok:    ["tiktok.com/", "vm.tiktok.com/"],
+            };
+            for (const dom of (domains[platform] || [])) {
+              if (v.toLowerCase().startsWith(dom)) v = v.slice(dom.length);
+            }
+            /* Drop any "/posts" or "/photos/..." sub-path — keep just the
+             * first path segment (the handle). */
+            v = v.split("/")[0];
+            /* @-prefix policy:
+             *   facebook = bare slug (no @)
+             *   ig/x/tt  = always @handle */
+            v = v.replace(/^@+/, "");
+            if (platform !== "facebook" && v) v = "@" + v;
+            return v.slice(0, 64);
+          };
           const ALLOWED = ["facebook", "instagram", "x", "tiktok"];
           const cleaned = {};
           for (const k of ALLOWED) {
-            if (typeof j.socials[k] === "string") cleaned[k] = j.socials[k].trim().slice(0, 64);
+            if (typeof j.socials[k] === "string") cleaned[k] = normalize(k, j.socials[k]);
           }
           const brandPath = new URL("../config/brand.json", import.meta.url);
           let raw = {};
@@ -3562,26 +3660,7 @@ wss.on("connection", (ws) => {
           }
           break;
         }
-        case "fal.img2vid": reply(await falImageToVideo(payload)); break;
-        case "fal.poll":    reply(await falPollResult(payload.responseUrl)); break;
         case "weather":     reply(await getWeather(payload?.lat, payload?.lon)); break;
-        case "video.teaser": {
-          // Why: long-running pipeline (~2-3 min). Stream progress so the HUD can show what's happening.
-          const subject = (payload && payload.subject) || undefined;
-          const send = (stage, info = {}) => ws.send(JSON.stringify({ id, type: "video.teaser.progress", stage, subject, ...info }));
-          send("starting");
-          (async () => {
-            try {
-              send("generating-source-images");
-              const result = await buildInstagramTeaser({ subject });
-              send("done", { runId: result.runId, subject: result.subject, durationSec: result.durationSec, finalUrl: `/output/${result.runId}/final.mp4` });
-              reply({ ok: true, ...result, finalUrl: `/output/${result.runId}/final.mp4` });
-            } catch (e) {
-              fail(e);
-            }
-          })();
-          break;
-        }
         case "video.edit": {
           // Production mode: cut existing footage from a shoot folder, no Fal cost.
           const send = (stage, info = {}) => ws.send(JSON.stringify({ id, type: "video.edit.progress", stage, ...info }));
