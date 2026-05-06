@@ -973,7 +973,18 @@ function ensureAgentModal() {
   const picksHost = el("div", { className: "am-journal" });
   frame.appendChild(picksHost);
 
-  /* Section 4: purchase audit */
+  /* Section 4: token usage + cost */
+  frame.appendChild(el("h3", { text: "LLM usage — today / week" }));
+  const usageHeadlineEl = el("div", { className: "am-summary", text: "Loading…" });
+  frame.appendChild(usageHeadlineEl);
+  const usageRollupHost = el("div", { className: "am-journal" });
+  frame.appendChild(usageRollupHost);
+  const usageNoteEl = el("div", { className: "am-summary", text: "" });
+  usageNoteEl.style.fontSize = "9px";
+  usageNoteEl.style.fontStyle = "italic";
+  frame.appendChild(usageNoteEl);
+
+  /* Section 5: purchase audit */
   frame.appendChild(el("h3", { text: "Purchase audit log" }));
   const journalHost = el("div", { className: "am-journal" });
   const summaryEl = el("div", { className: "am-summary", text: "Loading…" });
@@ -981,7 +992,7 @@ function ensureAgentModal() {
   frame.appendChild(summaryEl);
 
   root.appendChild(frame);
-  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl, routerStatusEl, picksHost };
+  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl, routerStatusEl, picksHost, usageHeadlineEl, usageRollupHost, usageNoteEl };
   document.body.appendChild(root);
   _agentModalEl = root;
 
@@ -1042,6 +1053,38 @@ function renderToolPicks(host) {
   }
 }
 
+/** Render the LLM usage rollup — today's total cost up top, per-model breakdown
+ *  beneath, plus the pricing-estimate note at the bottom. Local Ollama always
+ *  shows $0 cost so the spotlight is on cloud spend. */
+function renderUsageSection(headlineEl, rollupHost, noteEl, payload) {
+  const today = payload?.today || { calls: 0, tokensIn: 0, tokensOut: 0, costUSD: 0, byModel: [] };
+  const week = payload?.week || { calls: 0, tokensIn: 0, tokensOut: 0, costUSD: 0 };
+  const fmtUSD = (n) => (n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
+  const fmtTokens = (n) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  headlineEl.textContent = `Today: ${today.calls} calls · ${fmtTokens(today.tokensIn + today.tokensOut)} tokens · ${fmtUSD(today.costUSD)} estimated · ${week.calls} calls / ${fmtUSD(week.costUSD)} this week`;
+  while (rollupHost.firstChild) rollupHost.removeChild(rollupHost.firstChild);
+  const rows = today.byModel || [];
+  if (!rows.length) {
+    rollupHost.appendChild(el("div", { className: "am-journal-empty", text: "No LLM activity today yet." }));
+  } else {
+    for (const r of rows) {
+      const row = el("div", { className: "am-journal-row" });
+      /* Provider badge: ollama=green, anthropic=red, openai=amber. */
+      const verb = el("span", { className: "verb" });
+      verb.textContent = r.provider.slice(0, 4).toUpperCase();
+      if (r.provider === "ollama") verb.classList.add("ok");
+      else if (r.provider === "anthropic") verb.classList.add("bad");
+      else verb.classList.add("sim");
+      row.appendChild(el("span", { text: `${r.calls}×` }));
+      row.appendChild(verb);
+      row.appendChild(el("span", { text: `${r.model.replace(/^qwen2\.5:/, "").replace(/^claude-/, "")} · ${fmtTokens(r.tokensIn + r.tokensOut)} tok` }));
+      row.appendChild(el("span", { className: "amt", text: r.costUSD > 0 ? fmtUSD(r.costUSD) : "—" }));
+      rollupHost.appendChild(row);
+    }
+  }
+  noteEl.textContent = payload?.pricingNote || "";
+}
+
 /** Render the journal rows. Pulls from /purchases/audit. Renders newest first. */
 function renderPurchaseJournal(host, summaryEl, journal, limits) {
   while (host.firstChild) host.removeChild(host.firstChild);
@@ -1076,21 +1119,26 @@ function renderPurchaseJournal(host, summaryEl, journal, limits) {
 
 async function openAgentModal() {
   const root = ensureAgentModal();
-  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl, routerStatusEl, picksHost } = root._refs;
+  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl, routerStatusEl, picksHost, usageHeadlineEl, usageRollupHost, usageNoteEl } = root._refs;
   status.textContent = ""; status.className = "am-status";
   keyAnthropic.value = ""; keyOpenai.value = "";
   root.hidden = false;
   /* Render the in-memory ring buffer immediately so the panel isn't blank
    * while the network fetches resolve. */
   renderToolPicks(picksHost);
-  /* Fetch current state in parallel — keys, audit, health for tool-router
-   * status. Bridge offline → leave placeholders + an empty journal. */
+  /* Fetch current state in parallel — keys, audit, health, usage. Bridge
+   * offline → leave placeholders + an empty journal. */
   try {
-    const [keysRes, auditRes, healthRes] = await Promise.all([
+    const [keysRes, auditRes, healthRes, usageRes] = await Promise.all([
       fetch("http://localhost:8766/api-keys", { cache: "no-store" }),
       fetch("http://localhost:8766/purchases/audit?limit=50", { cache: "no-store" }),
       fetch("http://localhost:8766/health", { cache: "no-store" }),
+      fetch("http://localhost:8766/usage?limit=30", { cache: "no-store" }),
     ]);
+    if (usageRes.ok) {
+      const u = await usageRes.json();
+      renderUsageSection(usageHeadlineEl, usageRollupHost, usageNoteEl, u);
+    }
     if (healthRes.ok) {
       const h = await healthRes.json();
       const tr = h.toolRouter || {};

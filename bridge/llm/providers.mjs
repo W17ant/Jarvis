@@ -26,6 +26,17 @@ const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const OPENAI_API = "https://api.openai.com/v1/chat/completions";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 
+/* Lazy-loaded usage logger — kept out of the import block to avoid a
+ * circular import risk when usage-log.mjs grows. Imported on first call,
+ * cached thereafter. */
+let _usageLogger = null;
+async function logUsage(entry) {
+  try {
+    if (!_usageLogger) _usageLogger = await import("../usage-log.mjs");
+    await _usageLogger.recordUsage(entry);
+  } catch { /* logging never breaks the chat path */ }
+}
+
 /** Default model per provider — overridable via env. Picked for Nov 2026 leaderboard:
  *  Claude Sonnet 4.6 is fast + has vision + tool use; GPT-4o is the OpenAI peer. */
 function defaultsFor(provider) {
@@ -104,6 +115,7 @@ async function anthropicChat({ model, messages, tools, maxTokens, signal }) {
     messages: convo,
   };
   if (tools?.length) body.tools = tools.map(toolToAnthropic);
+  const t0 = Date.now();
   const r = await fetch(ANTHROPIC_API, {
     method: "POST",
     headers: {
@@ -116,9 +128,19 @@ async function anthropicChat({ model, messages, tools, maxTokens, signal }) {
   });
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
+    /* Log even on failure — the operator wants to know about wasted retries. */
+    logUsage({ provider: "anthropic", model, elapsedMs: Date.now() - t0, source: "providers.chat", error: `${r.status}: ${txt.slice(0, 120)}` });
     throw new Error(`Anthropic ${r.status}: ${txt.slice(0, 400)}`);
   }
   const j = await r.json();
+  logUsage({
+    provider: "anthropic",
+    model: j.model || model,
+    tokensIn: j.usage?.input_tokens || 0,
+    tokensOut: j.usage?.output_tokens || 0,
+    elapsedMs: Date.now() - t0,
+    source: "providers.chat",
+  });
   /* Anthropic returns content as an array of blocks (text + tool_use). Normalise
    * to { text, toolCalls } so downstream code doesn't care which provider it hit. */
   let text = "";
@@ -164,6 +186,7 @@ async function openaiChat({ model, messages, tools, maxTokens, signal }) {
     messages: messages.map(adaptMessageForOpenAI),
   };
   if (tools?.length) body.tools = tools;
+  const t0 = Date.now();
   const r = await fetch(OPENAI_API, {
     method: "POST",
     headers: {
@@ -175,9 +198,18 @@ async function openaiChat({ model, messages, tools, maxTokens, signal }) {
   });
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
+    logUsage({ provider: "openai", model, elapsedMs: Date.now() - t0, source: "providers.chat", error: `${r.status}: ${txt.slice(0, 120)}` });
     throw new Error(`OpenAI ${r.status}: ${txt.slice(0, 400)}`);
   }
   const j = await r.json();
+  logUsage({
+    provider: "openai",
+    model: j.model || model,
+    tokensIn: j.usage?.prompt_tokens || 0,
+    tokensOut: j.usage?.completion_tokens || 0,
+    elapsedMs: Date.now() - t0,
+    source: "providers.chat",
+  });
   const choice = j.choices?.[0];
   const text = choice?.message?.content || "";
   const toolCalls = (choice?.message?.tool_calls || []).map((tc) => ({
@@ -206,6 +238,7 @@ function adaptMessageForOpenAI(msg) {
  * works regardless of provider. Tool calls use Qwen 2.5's OpenAI-compatible
  * shape, which matches what we already feed Anthropic post-translation. */
 async function ollamaChat({ model, messages, tools, signal }) {
+  const t0 = Date.now();
   const r = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -220,9 +253,18 @@ async function ollamaChat({ model, messages, tools, signal }) {
   });
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
+    logUsage({ provider: "ollama", model, elapsedMs: Date.now() - t0, source: "providers.chat", error: `${r.status}: ${txt.slice(0, 120)}` });
     throw new Error(`Ollama ${r.status}: ${txt.slice(0, 400)}`);
   }
   const j = await r.json();
+  logUsage({
+    provider: "ollama",
+    model,
+    tokensIn: j.prompt_eval_count || 0,
+    tokensOut: j.eval_count || 0,
+    elapsedMs: Date.now() - t0,
+    source: "providers.chat",
+  });
   const text = j.message?.content || "";
   const toolCalls = (j.message?.tool_calls || []).map((tc) => ({
     id: tc.id || `tc_${Math.random().toString(36).slice(2, 10)}`,

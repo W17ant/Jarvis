@@ -57,6 +57,7 @@ import * as LlmProviders from "./llm/providers.mjs";
 import * as Personal from "./personal.mjs";
 import * as VisualStyle from "./visual-style.mjs";
 import * as Transcribe from "./transcribe.mjs";
+import * as UsageLog from "./usage-log.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -2757,6 +2758,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
      * matters more than latency once a tool is already chosen). On lower-tier
      * hardware OLLAMA_FAST_MODEL is unset so both branches return main. */
     const modelForHop = hop === 0 ? ModelRouter.pick(query) : ModelRouter.pickForToolHop();
+    const hopT0 = Date.now();
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -2768,6 +2770,15 @@ When given [Context], use those facts verbatim. If asked to do something you don
     });
     if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
     const data = await res.json();
+    /* Per-hop usage row — Ollama returns token counts in the response. */
+    UsageLog.recordUsage({
+      provider: "ollama",
+      model: modelForHop,
+      tokensIn: data.prompt_eval_count || 0,
+      tokensOut: data.eval_count || 0,
+      elapsedMs: Date.now() - hopT0,
+      source: `askLLM.hop${hop}`,
+    }).catch(() => {});
     const msg = data.message || {};
     const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
 
@@ -2966,7 +2977,20 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
             console.log(`[stream] first sentence at ${Date.now() - t0}ms`);
           }
         }
-        if (evt.done) finalMsg = evt.message || finalMsg;
+        if (evt.done) {
+          finalMsg = evt.message || finalMsg;
+          /* Ollama emits prompt_eval_count + eval_count on the terminal
+           * (done) frame. Log the hop's usage here, mirroring the askLLM
+           * non-streaming path so /usage covers both. */
+          UsageLog.recordUsage({
+            provider: "ollama",
+            model: modelForHop,
+            tokensIn: evt.prompt_eval_count || 0,
+            tokensOut: evt.eval_count || 0,
+            elapsedMs: Date.now() - hopT0,
+            source: `askLLMStream.hop${hop}`,
+          }).catch(() => {});
+        }
       }
     }
 
@@ -3074,6 +3098,18 @@ const httpServer = createServer(async (req, res) => {
       toolCount: TOOLS.length,
       toolRouter: ToolRouter.indexStatus(),
     }));
+    return;
+  }
+
+  /* GET /usage — today/week token + cost rollups, plus recent calls.
+   * Read-only; the Agent Console renders the today bucket as a budget
+   * dial and the recent list as a paged scroll. */
+  if (req.url?.startsWith("/usage") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    const limit = Number(url.searchParams.get("limit")) || 30;
+    const summary = await UsageLog.getUsageSummary({ recentLimit: limit });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, ...summary }));
     return;
   }
 
