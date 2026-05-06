@@ -1203,6 +1203,145 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- HELP / CHEAT SHEET (?) ----------
+ *  Plain "?" key opens a searchable overlay listing every tool the LLM can
+ *  invoke. Pulls from /actions (the manifest endpoint shipped this round)
+ *  so it's always in sync with what's actually wired — no stale doc files.
+ *  Operator types to filter by name/description; Esc closes; ? toggles.
+ *
+ *  Why "?" without a modifier: this matches the convention from GitHub,
+ *  Slack, Linear and friends — it's the universal "help" shortcut and
+ *  costs nothing to bind. We guard against text-input focus so it doesn't
+ *  fire while the operator's typing in the typed-confirm modal or settings.
+ */
+
+let _helpModalEl = null;
+let _helpManifest = null;
+
+function ensureHelpModal() {
+  if (_helpModalEl) return _helpModalEl;
+  const root = el("div", { id: "helpModal" });
+  root.hidden = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    #helpModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10001; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
+    #helpModal .hm-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); padding: 24px 28px; width: 760px; max-width: 92vw; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(255,59,59,0.3); }
+    #helpModal h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #helpModal .hm-sub { color: #888; font-size: 11px; margin-bottom: 14px; }
+    #helpModal input.hm-search { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 10px 12px; width: 100%; font-family: inherit; font-size: 14px; box-sizing: border-box; margin-bottom: 14px; }
+    #helpModal input.hm-search:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #helpModal .hm-list { overflow-y: auto; flex: 1; min-height: 200px; }
+    #helpModal .hm-row { color: #ddd; font-size: 12px; padding: 8px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 220px 1fr 80px; gap: 12px; align-items: baseline; }
+    #helpModal .hm-row:last-child { border-bottom: none; }
+    #helpModal .hm-name { color: var(--brand-primary, #ff3b3b); font-weight: 600; letter-spacing: 0.04em; }
+    #helpModal .hm-desc { color: #aaa; line-height: 1.4; }
+    #helpModal .hm-flags { color: #555; font-size: 9px; letter-spacing: 0.12em; text-align: right; text-transform: uppercase; }
+    #helpModal .hm-flag-confirm { color: #ffaa00; }
+    #helpModal .hm-flag-always { color: #00ff88; }
+    #helpModal .hm-empty { color: #555; padding: 24px; text-align: center; }
+    #helpModal .hm-footer { color: #666; font-size: 10px; margin-top: 12px; letter-spacing: 0.05em; }
+  `;
+  root.appendChild(style);
+  const frame = el("div", { className: "hm-frame" });
+  frame.appendChild(el("h2", { text: "Voice command cheat sheet" }));
+  const sub = el("div", { className: "hm-sub", text: "Loading…" });
+  frame.appendChild(sub);
+  const search = el("input", { className: "hm-search", attrs: { type: "text", placeholder: "Filter — try 'send', 'remind', 'photo'…", autocomplete: "off" } });
+  frame.appendChild(search);
+  const list = el("div", { className: "hm-list" });
+  frame.appendChild(list);
+  frame.appendChild(el("div", { className: "hm-footer", text: "Esc or ? to close · CONFIRM = voice 'yes' required · ALWAYS = always available to the model regardless of query" }));
+  root.appendChild(frame);
+  root._refs = { search, list, sub };
+  document.body.appendChild(root);
+  _helpModalEl = root;
+  search.addEventListener("input", () => renderHelpList(root, search.value));
+  search.addEventListener("keydown", (e) => { if (e.key === "Escape") root.hidden = true; });
+  root.addEventListener("click", (e) => { if (e.target === root) root.hidden = true; });
+  return root;
+}
+
+function renderHelpList(root, filter = "") {
+  const { list, sub } = root._refs;
+  if (!_helpManifest) {
+    sub.textContent = "Loading manifest…";
+    return;
+  }
+  const q = filter.trim().toLowerCase();
+  const matches = _helpManifest.filter((a) => {
+    if (!q) return true;
+    return a.name.toLowerCase().includes(q) || (a.description || "").toLowerCase().includes(q);
+  });
+  while (list.firstChild) list.removeChild(list.firstChild);
+  sub.textContent = `${matches.length} of ${_helpManifest.length} commands`;
+  if (!matches.length) {
+    list.appendChild(el("div", { className: "hm-empty", text: `No matches for "${filter}".` }));
+    return;
+  }
+  for (const a of matches) {
+    const row = el("div", { className: "hm-row" });
+    row.appendChild(el("div", { className: "hm-name", text: a.name }));
+    row.appendChild(el("div", { className: "hm-desc", text: (a.description || "").slice(0, 200) }));
+    /* Compact flag column: CONFIRM and/or ALWAYS, comma-separated. Empty
+     * column when neither applies — keeps the eye scanning down the names. */
+    const flagBits = [];
+    if (a.flags?.requiresConfirmation) flagBits.push({ text: "confirm", cls: "hm-flag-confirm" });
+    if (a.flags?.alwaysOn) flagBits.push({ text: "always", cls: "hm-flag-always" });
+    const flagsCell = el("div", { className: "hm-flags" });
+    flagBits.forEach((b, i) => {
+      if (i) flagsCell.appendChild(document.createTextNode(" · "));
+      flagsCell.appendChild(el("span", { className: b.cls, text: b.text }));
+    });
+    row.appendChild(flagsCell);
+    list.appendChild(row);
+  }
+}
+
+async function openHelpModal() {
+  const root = ensureHelpModal();
+  root.hidden = false;
+  setTimeout(() => root._refs.search.focus(), 50);
+  /* Lazy-load + cache. The manifest is small (~30KB at 97 tools); fetching
+   * once per session is fine. Reload after a bridge restart by closing &
+   * reopening the modal — we could be cleverer with a stale check but this
+   * works and is dead simple. */
+  if (!_helpManifest) {
+    try {
+      const r = await fetch("http://localhost:8766/actions", { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        _helpManifest = (j.actions || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+      } else {
+        root._refs.sub.textContent = `Failed to load — bridge returned ${r.status}.`;
+        return;
+      }
+    } catch (e) {
+      root._refs.sub.textContent = `Bridge offline — ${e.message}`;
+      return;
+    }
+  }
+  renderHelpList(root, "");
+}
+
+document.addEventListener("keydown", (e) => {
+  /* Don't fire while typing in any input/textarea — would make filling the
+   * typed-confirm modal or settings forms infuriating. Match Slack/Linear
+   * behaviour: ? in chat means literal "?", ? in body means open help. */
+  const tag = (e.target?.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    if (_helpModalEl && !_helpModalEl.hidden) {
+      _helpModalEl.hidden = true;
+    } else {
+      openHelpModal();
+    }
+  }
+  if (e.key === "Escape" && _helpModalEl && !_helpModalEl.hidden) {
+    _helpModalEl.hidden = true;
+  }
+});
+
 /* ---------- BOOT ---------- */
 function boot() {
   buildTicks();
