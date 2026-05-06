@@ -2694,6 +2694,21 @@ When given [Context], use those facts verbatim. If asked to do something you don
   if (!filtered.fallback) {
     console.log(`[tool-router] ${query.slice(0, 40).replace(/\n/g, " ")} → ${filtered.picked.length}/${TOOLS.length} tools (${filtered.elapsedMs}ms)`);
   }
+  /* Broadcast for the Agent Console's live debug pane. Trims the score table
+   * to the picked tools only — no point sending 97 numbers when 18 of them
+   * are what actually went to the model. */
+  broadcastToClients({
+    type: "tool.picked",
+    data: {
+      query: query.slice(0, 120),
+      picked: filtered.picked,
+      scores: filtered.scores,
+      elapsedMs: filtered.elapsedMs,
+      fallback: filtered.fallback || null,
+      total: TOOLS.length,
+      stream: false,
+    },
+  });
   const toolsForLLM = filtered.tools;
 
   /* Why: tool-calling loop — model may emit tool_calls, we run them, append results, ask again.
@@ -2835,6 +2850,18 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
   if (!filtered.fallback) {
     console.log(`[tool-router] (stream) → ${filtered.picked.length}/${TOOLS.length} tools (${filtered.elapsedMs}ms)`);
   }
+  broadcastToClients({
+    type: "tool.picked",
+    data: {
+      query: query.slice(0, 120),
+      picked: filtered.picked,
+      scores: filtered.scores,
+      elapsedMs: filtered.elapsedMs,
+      fallback: filtered.fallback || null,
+      total: TOOLS.length,
+      stream: true,
+    },
+  });
   const toolsForLLM = filtered.tools;
 
   /* Up to 3 hops, same cap as askLLM(). Each hop streams; tool_calls in the terminal

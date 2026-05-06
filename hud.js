@@ -242,6 +242,11 @@ function connectBridge() {
      * first event so the DOM cost is zero until a typed-tier purchase happens. */
     if (m.type === "purchase.typed_confirm.required") openPurchaseTypedConfirm(m.data);
     if (m.type === "purchase.recorded") flashPurchaseAuditBadge(m.data);
+    /* Tool-router live transparency — collect a ring buffer of the last 12
+     * tool-picks so the Agent Console can render them on demand. We don't
+     * render directly here (the modal might not exist yet); the ring buffer
+     * is read at modal-open time. */
+    if (m.type === "tool.picked") rememberToolPick(m.data);
   });
 
   bridgeWS.addEventListener("close", () => {
@@ -943,7 +948,14 @@ function ensureAgentModal() {
   const buttons = el("div", { className: "am-buttons" }, status, cancelBtn, saveBtn);
   frame.appendChild(buttons);
 
-  /* Section 3: purchase audit */
+  /* Section 3: tool router live picks */
+  frame.appendChild(el("h3", { text: "Tool router — live picks" }));
+  const routerStatusEl = el("div", { className: "am-summary", text: "Loading index status…" });
+  frame.appendChild(routerStatusEl);
+  const picksHost = el("div", { className: "am-journal" });
+  frame.appendChild(picksHost);
+
+  /* Section 4: purchase audit */
   frame.appendChild(el("h3", { text: "Purchase audit log" }));
   const journalHost = el("div", { className: "am-journal" });
   const summaryEl = el("div", { className: "am-summary", text: "Loading…" });
@@ -951,7 +963,7 @@ function ensureAgentModal() {
   frame.appendChild(summaryEl);
 
   root.appendChild(frame);
-  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl };
+  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl, routerStatusEl, picksHost };
   document.body.appendChild(root);
   _agentModalEl = root;
 
@@ -960,6 +972,52 @@ function ensureAgentModal() {
   saveBtn.addEventListener("click", () => saveAgentModal(root));
 
   return root;
+}
+
+/* Ring buffer of recent tool-picks. Capped at 12 entries — enough to spot a
+ * pattern, small enough not to grow unbounded. Live-renders into the Agent
+ * Console if it's open; otherwise the modal pulls the buffer on next open. */
+const _toolPicksRing = [];
+const TOOL_PICKS_MAX = 12;
+
+function rememberToolPick(data) {
+  _toolPicksRing.unshift({ ts: Date.now(), ...data });
+  if (_toolPicksRing.length > TOOL_PICKS_MAX) _toolPicksRing.length = TOOL_PICKS_MAX;
+  /* Live re-render if the modal is open. */
+  if (_agentModalEl && !_agentModalEl.hidden) {
+    renderToolPicks(_agentModalEl._refs.picksHost);
+  }
+}
+
+function renderToolPicks(host) {
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  if (!_toolPicksRing.length) {
+    host.appendChild(el("div", { className: "am-journal-empty", text: "No queries yet — say something to Jarvis." }));
+    return;
+  }
+  for (const pick of _toolPicksRing) {
+    const row = el("div", { className: "am-journal-row" });
+    const ts = new Date(pick.ts);
+    const tsLabel = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}`;
+    row.appendChild(el("span", { text: tsLabel }));
+    /* Stream tag — visual cue distinguishing streaming chat from the
+     * non-streaming tool-dispatch path. Streaming dominates the voice loop
+     * so this is the common case. */
+    const verb = el("span", { className: "verb" });
+    if (pick.fallback) { verb.textContent = "FULL"; verb.classList.add("bad"); }
+    else if (pick.stream) { verb.textContent = "STRM"; verb.classList.add("ok"); }
+    else { verb.textContent = "ASK";  verb.classList.add("sim"); }
+    row.appendChild(verb);
+    /* Detail: trimmed query + the ratio of picked tools. */
+    const ratio = `${pick.picked?.length ?? 0}/${pick.total ?? 0}`;
+    const detail = el("span", { text: `"${(pick.query || "").slice(0, 40)}" → ${ratio} tools` });
+    detail.title = (pick.picked || []).slice(0, 30).join(", ");
+    row.appendChild(detail);
+    const ms = el("span", { className: "amt", text: `${pick.elapsedMs ?? "?"}ms` });
+    row.appendChild(ms);
+    host.appendChild(row);
+  }
 }
 
 /** Render the journal rows. Pulls from /purchases/audit. Renders newest first. */
@@ -996,17 +1054,32 @@ function renderPurchaseJournal(host, summaryEl, journal, limits) {
 
 async function openAgentModal() {
   const root = ensureAgentModal();
-  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl } = root._refs;
+  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl, routerStatusEl, picksHost } = root._refs;
   status.textContent = ""; status.className = "am-status";
   keyAnthropic.value = ""; keyOpenai.value = "";
   root.hidden = false;
-  /* Fetch current state in parallel — keys + audit. Bridge offline → leave
-   * placeholders + an empty journal with a clear hint. */
+  /* Render the in-memory ring buffer immediately so the panel isn't blank
+   * while the network fetches resolve. */
+  renderToolPicks(picksHost);
+  /* Fetch current state in parallel — keys, audit, health for tool-router
+   * status. Bridge offline → leave placeholders + an empty journal. */
   try {
-    const [keysRes, auditRes] = await Promise.all([
+    const [keysRes, auditRes, healthRes] = await Promise.all([
       fetch("http://localhost:8766/api-keys", { cache: "no-store" }),
       fetch("http://localhost:8766/purchases/audit?limit=50", { cache: "no-store" }),
+      fetch("http://localhost:8766/health", { cache: "no-store" }),
     ]);
+    if (healthRes.ok) {
+      const h = await healthRes.json();
+      const tr = h.toolRouter || {};
+      if (tr.ready) {
+        routerStatusEl.textContent = `Index ready · ${tr.toolCount} tools indexed · always-on: ${tr.alwaysOn?.length || 0} · hash ${tr.hash || "?"}`;
+      } else {
+        routerStatusEl.textContent = `Index not ready — chat is using the full ${h.toolCount || "?"}-tool catalogue (slower, less accurate).`;
+      }
+    } else {
+      routerStatusEl.textContent = "Could not fetch index status.";
+    }
     if (keysRes.ok) {
       const j = await keysRes.json();
       keyAnthropic.placeholder = j.keys?.anthropic?.set ? `(set ${j.keys.anthropic.hint || ""}) — type to change` : "sk-ant-…";
