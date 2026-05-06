@@ -895,7 +895,7 @@ function ensureAgentModal() {
     #agentModal button.primary { background: var(--brand-primary, #ff3b3b); color: #000; border-color: var(--brand-primary, #ff3b3b); font-weight: 700; }
     #agentModal button:hover { filter: brightness(1.18); }
     #agentModal .am-journal { max-height: 240px; overflow-y: auto; background: #050505; border: 1px solid #1c1c1c; padding: 10px 12px; }
-    #agentModal .am-journal-row { color: #ccc; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 56px 70px 1fr 70px; gap: 8px; align-items: baseline; }
+    #agentModal .am-journal-row { color: #ccc; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 56px 70px 1fr 130px; gap: 8px; align-items: baseline; }
     #agentModal .am-journal-row:last-child { border-bottom: none; }
     #agentModal .am-journal-row .verb { font-weight: 700; letter-spacing: 0.08em; }
     #agentModal .am-journal-row .verb.ok { color: #00ff88; }
@@ -1009,12 +1009,16 @@ function renderToolPicks(host) {
     else if (pick.stream) { verb.textContent = "STRM"; verb.classList.add("ok"); }
     else { verb.textContent = "ASK";  verb.classList.add("sim"); }
     row.appendChild(verb);
-    /* Detail: trimmed query + the ratio of picked tools. */
+    /* Detail: trimmed query + the ratio of picked tools. The model name
+     * goes in the right column so cascade-router behaviour is visible at
+     * a glance — the operator sees 3b for chat queries vs 14b for drafts. */
     const ratio = `${pick.picked?.length ?? 0}/${pick.total ?? 0}`;
     const detail = el("span", { text: `"${(pick.query || "").slice(0, 40)}" → ${ratio} tools` });
     detail.title = (pick.picked || []).slice(0, 30).join(", ");
     row.appendChild(detail);
-    const ms = el("span", { className: "amt", text: `${pick.elapsedMs ?? "?"}ms` });
+    /* Compact model badge: drop the "qwen2.5:" prefix so "qwen2.5:3b" → "3b". */
+    const modelShort = (pick.modelUsed || "").replace(/^qwen2\.5:/, "").replace(/^claude-/, "").slice(0, 14);
+    const ms = el("span", { className: "amt", text: `${modelShort || "?"} · ${pick.elapsedMs ?? "?"}ms` });
     row.appendChild(ms);
     host.appendChild(row);
   }
