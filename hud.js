@@ -1972,6 +1972,105 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- FIRST-RUN ONBOARDING TIPS ----------
+ *  Tiny cheat panel pinned to the bottom-left for ~60 seconds the FIRST
+ *  time a profile loads the HUD. Lists 6-8 voice commands worth trying
+ *  so the operator (or a visiting team member) discovers what's possible
+ *  without reading docs. Dismissed by:
+ *    - Auto-fade after 60s
+ *    - Click anywhere on the panel
+ *    - Esc
+ *    - Detection of any wake-word activity (operator's gone past
+ *      "discovery" mode — the panel becomes noise)
+ *
+ *  Persists a per-profile flag in localStorage so it never re-appears for
+ *  the same operator. Each profile gets its own onboarding (a new operator
+ *  on a shared kiosk gets the panel even if Adam's seen it before).
+ *
+ *  Why pinned bottom-left rather than a centred modal: discovery should
+ *  whisper, not interrupt. Operator can ignore it and use the kiosk
+ *  normally; the panel hangs around in the corner as a reference. */
+
+const ONBOARDING_TIPS = [
+  { say: '"Hey Flat-Out, what\'s in the diary today?"',  why: "Today's calendar — get_upcoming_events" },
+  { say: '"Open Google Maps for Manchester."',           why: "Fast URL launcher — open_url" },
+  { say: '"Text Adam I\'ll be ten minutes late."',       why: "iMessage with confirmation gate" },
+  { say: '"Set a 25-minute timer for the chicken."',     why: "In-HUD countdown + chime" },
+  { say: '"Find me a 50mm prime under £400 on WEX."',    why: "Vision-driven product browse" },
+  { say: '"Summarise my day."',                          why: "End-of-day activity digest" },
+  { say: '"Shut down."',                                  why: "Mutes mic + dims HUD" },
+];
+
+const ONBOARDING_KEY_PREFIX = "flatout.onboardingSeen.";
+
+function shouldShowOnboarding() {
+  try {
+    const profileId = localStorage.getItem("flatout.activeProfile") || "default";
+    return localStorage.getItem(ONBOARDING_KEY_PREFIX + profileId) !== "1";
+  } catch { return false; }
+}
+
+function markOnboardingSeen() {
+  try {
+    const profileId = localStorage.getItem("flatout.activeProfile") || "default";
+    localStorage.setItem(ONBOARDING_KEY_PREFIX + profileId, "1");
+  } catch {}
+}
+
+function maybeShowOnboarding() {
+  if (!shouldShowOnboarding()) return;
+  /* Defer to next tick so the rest of boot has finished mounting — we don't
+   * want the panel painting before the HUD's actual chrome. */
+  setTimeout(renderOnboarding, 800);
+}
+
+function renderOnboarding() {
+  const root = document.createElement("div");
+  root.id = "onboardingTips";
+  const style = document.createElement("style");
+  style.textContent = `
+    #onboardingTips { position: fixed; bottom: 18px; left: 18px; z-index: 9990; background: rgba(11, 11, 11, 0.92); border: 1px solid var(--brand-primary, #ff3b3b); padding: 14px 18px 12px; max-width: 360px; font-family: var(--mono, "JetBrains Mono", monospace); cursor: pointer; box-shadow: 0 0 30px rgba(255, 59, 59, 0.22); animation: onboardingSlide 320ms ease forwards; }
+    #onboardingTips.is-fading { opacity: 0; transition: opacity 600ms ease; }
+    @keyframes onboardingSlide { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    #onboardingTips h4 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #onboardingTips .obt-sub { color: #888; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 10px; }
+    #onboardingTips .obt-row { padding: 4px 0; border-bottom: 1px dashed #1a1a1a; }
+    #onboardingTips .obt-row:last-child { border-bottom: none; }
+    #onboardingTips .obt-say { color: #eee; font-size: 11px; line-height: 1.4; }
+    #onboardingTips .obt-why { color: #555; font-size: 9px; letter-spacing: 0.06em; }
+    #onboardingTips .obt-foot { color: #555; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; margin-top: 10px; padding-top: 8px; border-top: 1px solid #1a1a1a; }
+  `;
+  root.appendChild(style);
+  const h = document.createElement("h4"); h.textContent = "Try saying"; root.appendChild(h);
+  const sub = document.createElement("div"); sub.className = "obt-sub"; sub.textContent = "First-run cheat sheet · click to dismiss"; root.appendChild(sub);
+  for (const tip of ONBOARDING_TIPS) {
+    const row = document.createElement("div"); row.className = "obt-row";
+    const say = document.createElement("div"); say.className = "obt-say"; say.textContent = tip.say; row.appendChild(say);
+    const why = document.createElement("div"); why.className = "obt-why"; why.textContent = tip.why; row.appendChild(why);
+    root.appendChild(row);
+  }
+  const foot = document.createElement("div"); foot.className = "obt-foot"; foot.textContent = "Press ? anytime for the full command catalogue."; root.appendChild(foot);
+  document.body.appendChild(root);
+
+  let dismissed = false;
+  function dismiss() {
+    if (dismissed) return;
+    dismissed = true;
+    markOnboardingSeen();
+    root.classList.add("is-fading");
+    setTimeout(() => root.remove(), 700);
+    document.removeEventListener("keydown", onKey, true);
+  }
+  function onKey(e) {
+    if (e.key === "Escape") dismiss();
+  }
+  root.addEventListener("click", dismiss);
+  document.addEventListener("keydown", onKey, true);
+  /* Auto-fade after 60s. Operator who hasn't engaged by then has either
+   * already moved on or doesn't need the prompt. */
+  setTimeout(dismiss, 60_000);
+}
+
 /* ---------- BOOT ---------- */
 async function boot() {
   /* Multi-operator profile lock-screen — only renders if the registry has
@@ -1980,6 +2079,9 @@ async function boot() {
    * profile switch (which reloads the page) doesn't race with the rest of
    * boot. */
   await maybeShowProfileLockScreen();
+  /* First-run onboarding tips — per-profile. Quiet pinned panel; never shown
+   * twice for the same operator. */
+  maybeShowOnboarding();
   buildTicks();
   buildNumerals();
   renderCalendar();
