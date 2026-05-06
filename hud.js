@@ -837,9 +837,27 @@ function openPurchaseTypedConfirm({ pendingId, merchant, item, amountGbp }) {
   authBtn.addEventListener("click", confirm);
 }
 
+/** Refresh the Agent Console's purchase audit list if the modal is currently
+ *  open. Called whenever a purchase.recorded event fires so the journal
+ *  appears live; otherwise the operator would have to close + reopen to see
+ *  what just happened. Best-effort — bridge offline silently leaves the
+ *  existing list. */
+async function refreshAgentModalPurchaseAudit() {
+  if (!_agentModalEl || _agentModalEl.hidden) return;
+  const refs = _agentModalEl._refs;
+  if (!refs?.journalHost || !refs?.summaryEl) return;
+  try {
+    const r = await fetch("http://localhost:8766/purchases/audit?limit=50", { cache: "no-store" });
+    if (!r.ok) return;
+    const a = await r.json();
+    renderPurchaseJournal(refs.journalHost, refs.summaryEl, a.journal || [], a.limits);
+  } catch { /* bridge offline — keep stale list rather than blanking it */ }
+}
+
 /** Brief audit badge — appears in the corner for ~5s every time a purchase
  *  request was settled or rejected. Lets the operator catch the LLM trying
- *  things in the background without staring at a log. */
+ *  things in the background without staring at a log. Also kicks the Agent
+ *  Console refresh so an open modal stays live. */
 function flashPurchaseAuditBadge(data) {
   let host = document.getElementById("purchaseAuditBadge");
   if (!host) {
