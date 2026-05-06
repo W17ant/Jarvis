@@ -41,8 +41,21 @@ Living todo list. Everything discussed in our planning sessions that hasn't ship
 
 ### Outstanding from this session — deferred / not safe to ship blind
 
-- 🟧 **Argos adapter checkout-step wiring** — selectors need real verification on argos.co.uk. Scaffold has product search + cap-check + basket; checkout form-fill is intentionally stubbed. Bring up the bridge headed-Chromium session, complete one purchase manually so cookies persist, then use Playwright codegen to record selectors and wire them in.
+- 🟧 **Argos / Amazon UK / MPB checkout form-fill** — three adapter scaffolds shipped (search → product pick → basket cap-check), checkout-step click-by-click intentionally stubbed. Each needs one-off Playwright codegen on a real logged-in session so the form selectors are verified against the live DOM. Bot-detection severity: Argos low, MPB low, Amazon medium (captchas + interstitials).
 - 🟨 **`set_lights({scene, room})`** — Philips Hue API integration. Skipped because it needs per-install Hue bridge IP + bridge user token, plus the operator may not have Hue at all. Add when there's a known target setup.
+
+### Shipped after the first commit pair
+
+- ✅ **Category-tiered spending caps** — replaced flat per-tx cap with category-specific limits. Photography £1500/tx, electronics £300, travel £500, groceries £50, takeaway £40, default £75. Plus per-category daily/weekly/monthly + a global cross-category daily ceiling of £2000.
+- ✅ **Expanded merchant allowlist** — 25 UK retailers across 8 categories: groceries (Tesco/Sainsbury's/Ocado/Waitrose), takeaway (Uber Eats/Deliveroo/Just Eat), electronics (Currys/AO), photography (WEX/Park Cameras/MPB/Calumet), homeware (John Lewis/IKEA/Wayfair), travel (Skyscanner/Kayak/Booking/Trainline/National Rail), office (Ryman/Viking), default (Amazon/Argos).
+- ✅ **`search_products` tool** — uses request_browse to compare options on a merchant without buying. Returns shortlist; operator picks; LLM follows up with request_purchase. Lets the operator say "find me a 50mm prime under £400" without committing.
+- ✅ **`find_flights` tool** — drives Skyscanner search via request_browse. Read-only — does NOT book. Operator goes to airline directly via open_url after picking.
+- ✅ **`learn_visual_style` tool** (`bridge/visual-style.mjs`) — folder OR list of paths, both stills AND videos. ffmpeg samples 4 keyframes per video file. Vision LLM produces structured prose (palette/lighting/contrast/framing/grading/mood) alongside the existing numerical signature. Stored in style-memory's edit_styles table.
+
+### What's needed for video-style learning to work end-to-end
+
+- The local `qwen2.5vl:7b` can ingest the extracted keyframes but produces less-detailed prose than Claude / GPT-4o. For best results, set `LLM_PROVIDER_VISION=anthropic` (or `openai`) in the Agent Console — falls back to Ollama silently if no key is set.
+- Adam needs `ffmpeg` on PATH (already required by Jarvis for video editing — should already be there via Homebrew).
 
 ---
 

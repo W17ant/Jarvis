@@ -31,36 +31,65 @@ const ALLOWLIST_PATH = path.join(DATA_DIR, "merchant-allowlist.json");
 const JOURNAL_PATH = path.join(DATA_DIR, "purchase-log.jsonl");
 
 /** Conservative defaults — used if the JSON files are missing or malformed.
- *  Numbers are deliberately small so a fresh install can never overspend. */
+ *  Numbers are deliberately small so a fresh install can never overspend.
+ *  This shape mirrors data/spending-limits.json — categories + globalCaps +
+ *  tiers — so a missing file behaves identically to one that loads cleanly. */
 const DEFAULT_LIMITS = {
   currency: "GBP",
-  perTransactionMaxGbp: 30,
-  dailyCapGbp: 50,
-  weeklyCapGbp: 150,
+  categories: {
+    default: { perTransactionMaxGbp: 30, dailyCapGbp: 50, weeklyCapGbp: 150, monthlyCapGbp: 400 },
+  },
+  globalCaps: { dailyCapGbp: 100, weeklyCapGbp: 300, monthlyCapGbp: 800 },
   tiers: { autoMaxGbp: 5, voiceMaxGbp: 25 },
   simulatorMode: true,
 };
 
 /** Load + sanitise spending limits. Falls back to DEFAULT_LIMITS on any I/O or
- *  parse error so a corrupted file can't bypass the caps. */
+ *  parse error so a corrupted file can't bypass the caps. Shape: categories
+ *  hash + globalCaps + tiers + simulatorMode flag. */
 async function loadLimits() {
   try {
     const raw = await fsp.readFile(LIMITS_PATH, "utf8");
     const j = JSON.parse(raw);
+    /* Sanitise each category — clamp into safe ranges so a typo in the JSON
+     * (e.g. £1500000 daily cap) can't widen the rails accidentally. */
+    const sanCategory = (c) => ({
+      perTransactionMaxGbp: clampNumber(c?.perTransactionMaxGbp, 0, 5000, 75),
+      dailyCapGbp:          clampNumber(c?.dailyCapGbp,          0, 10000, 100),
+      weeklyCapGbp:         clampNumber(c?.weeklyCapGbp,         0, 30000, 300),
+      monthlyCapGbp:        clampNumber(c?.monthlyCapGbp,        0, 100000, 800),
+    });
+    const cats = {};
+    for (const [name, cfg] of Object.entries(j.categories || {})) {
+      if (name.startsWith("_")) continue; // skip _comment fields
+      cats[name] = sanCategory(cfg);
+    }
+    if (!cats.default) cats.default = sanCategory(DEFAULT_LIMITS.categories.default);
     return {
       currency: j.currency || "GBP",
-      perTransactionMaxGbp: clampNumber(j.perTransactionMaxGbp, 0, 1000, DEFAULT_LIMITS.perTransactionMaxGbp),
-      dailyCapGbp: clampNumber(j.dailyCapGbp, 0, 5000, DEFAULT_LIMITS.dailyCapGbp),
-      weeklyCapGbp: clampNumber(j.weeklyCapGbp, 0, 20000, DEFAULT_LIMITS.weeklyCapGbp),
+      categories: cats,
+      globalCaps: {
+        dailyCapGbp:   clampNumber(j?.globalCaps?.dailyCapGbp,   0, 50000, DEFAULT_LIMITS.globalCaps.dailyCapGbp),
+        weeklyCapGbp:  clampNumber(j?.globalCaps?.weeklyCapGbp,  0, 200000, DEFAULT_LIMITS.globalCaps.weeklyCapGbp),
+        monthlyCapGbp: clampNumber(j?.globalCaps?.monthlyCapGbp, 0, 500000, DEFAULT_LIMITS.globalCaps.monthlyCapGbp),
+      },
       tiers: {
-        autoMaxGbp: clampNumber(j?.tiers?.autoMaxGbp, 0, 100, DEFAULT_LIMITS.tiers.autoMaxGbp),
-        voiceMaxGbp: clampNumber(j?.tiers?.voiceMaxGbp, 0, 500, DEFAULT_LIMITS.tiers.voiceMaxGbp),
+        autoMaxGbp:  clampNumber(j?.tiers?.autoMaxGbp,  0, 500,  DEFAULT_LIMITS.tiers.autoMaxGbp),
+        voiceMaxGbp: clampNumber(j?.tiers?.voiceMaxGbp, 0, 2500, DEFAULT_LIMITS.tiers.voiceMaxGbp),
       },
       simulatorMode: j.simulatorMode !== false, // default true — only false if explicitly so
     };
   } catch {
     return DEFAULT_LIMITS;
   }
+}
+
+/** Pick the spending caps for a merchant's category. Falls back to "default"
+ *  if the category is unknown — that's the catch-all so a new merchant
+ *  added without a category still gets reasonable rails. */
+function categoryCaps(limits, categoryName) {
+  const name = String(categoryName || "default");
+  return limits.categories[name] || limits.categories.default;
 }
 
 /** Load merchant allowlist. Returns [] on error so an absent file blocks ALL
@@ -132,12 +161,14 @@ async function loadJournal() {
   }
 }
 
-/** Sum settled charges in [sinceTs, now]. Returns 0 if no entries. */
-function sumSpendSince(journal, sinceTs) {
+/** Sum settled charges in [sinceTs, now]. Optional filter narrows to a subset
+ *  (e.g. only the same category). Returns 0 if no entries match. */
+function sumSpendSince(journal, sinceTs, filterFn) {
   let total = 0;
   for (const e of journal) {
     if (!e?.settled) continue;
     if (typeof e.ts !== "number" || e.ts < sinceTs) continue;
+    if (filterFn && !filterFn(e)) continue;
     const a = Number(e.amountGbp);
     if (Number.isFinite(a)) total += a;
   }
@@ -188,19 +219,9 @@ export async function requestPurchase({
     return { ok: false, code: "missing_fields", error: "Need item (string) and maxPriceGbp (positive number). Re-ask the operator with both." };
   }
 
-  /* 2. Per-transaction cap — first hard ceiling. */
-  if (amount > limits.perTransactionMaxGbp) {
-    const entry = baseEntry(ts, merchant, cleanItem, amount, "rejected", "over_per_tx_cap");
-    await appendJournal(entry);
-    return {
-      ok: false,
-      code: "over_per_tx_cap",
-      error: `£${amount.toFixed(2)} exceeds the per-transaction cap (£${limits.perTransactionMaxGbp.toFixed(2)}). Tell the operator and let them adjust the limits file or pick a cheaper option.`,
-    };
-  }
-
-  /* 3. Merchant allowlist. Normalise to host so 'https://www.amazon.co.uk/...' or
-   *    bare 'Amazon UK' both resolve. We accept a domain *or* a label match. */
+  /* 2. Merchant allowlist + category resolution. We pull category FIRST so
+   *    the per-transaction cap check below uses the right ceiling — a £1500
+   *    camera lens at WEX is fine, the same amount at Tesco is not. */
   const host = normaliseMerchant(merchant);
   let matched = findAllowedMerchant(host, allowlist);
   if (!matched && merchant) {
@@ -213,37 +234,67 @@ export async function requestPurchase({
     return {
       ok: false,
       code: "merchant_not_allowed",
-      error: `Merchant "${merchant}" is not on the allowlist. Tell the operator the request and ask if they want to add it to data/merchant-allowlist.json.`,
-      allowed: allowlist.map((m) => m.label || m.domain),
+      error: `Merchant "${merchant}" is not on the allowlist. Tell the operator and ask if they want to add it to data/merchant-allowlist.json.`,
+      allowed: allowlist.map((m) => `${m.label || m.domain} (${m.category || "default"})`),
+    };
+  }
+  const caps = categoryCaps(limits, matched.category);
+
+  /* 3. Per-transaction cap — bound by category. */
+  if (amount > caps.perTransactionMaxGbp) {
+    const entry = baseEntry(ts, merchant, cleanItem, amount, "rejected", "over_per_tx_cap");
+    await appendJournal({ ...entry, category: matched.category || "default" });
+    return {
+      ok: false,
+      code: "over_per_tx_cap",
+      error: `£${amount.toFixed(2)} exceeds the ${matched.category || "default"} per-transaction cap (£${caps.perTransactionMaxGbp.toFixed(2)}). Pick something cheaper or ask the operator to bump the cap in data/spending-limits.json.`,
     };
   }
 
-  /* 4. Budget windows. Daily = last 24h rolling, weekly = last 7d rolling.
-   *    Rolling windows are friendlier than calendar boundaries — a midnight
-   *    dispatch can't suddenly double the daily allowance. */
+  /* 4. Budget windows. Two layers: per-category rolling totals AND a global
+   *    cap that sums every category. Either one tripping rejects the spend. */
   const journal = await loadJournal();
   const dayAgo = ts - 24 * 60 * 60 * 1000;
   const weekAgo = ts - 7 * 24 * 60 * 60 * 1000;
-  const spentToday = sumSpendSince(journal, dayAgo);
-  const spentThisWeek = sumSpendSince(journal, weekAgo);
-  if (spentToday + amount > limits.dailyCapGbp) {
-    const entry = baseEntry(ts, merchant, cleanItem, amount, "rejected", "over_daily_cap");
-    await appendJournal(entry);
-    return {
-      ok: false,
-      code: "over_daily_cap",
-      error: `Would push today's spend to £${(spentToday + amount).toFixed(2)} (cap £${limits.dailyCapGbp.toFixed(2)}, already spent £${spentToday.toFixed(2)}). Tell the operator.`,
-    };
+  const monthAgo = ts - 30 * 24 * 60 * 60 * 1000;
+  const cat = matched.category || "default";
+  const sumCategory = (sinceTs) => sumSpendSince(journal, sinceTs, (e) => (e.category || "default") === cat);
+  const spentDayCat   = sumCategory(dayAgo);
+  const spentWeekCat  = sumCategory(weekAgo);
+  const spentMonthCat = sumCategory(monthAgo);
+  const spentDayAll   = sumSpendSince(journal, dayAgo);
+  const spentWeekAll  = sumSpendSince(journal, weekAgo);
+  const spentMonthAll = sumSpendSince(journal, monthAgo);
+
+  /* Category caps. */
+  if (spentDayCat + amount > caps.dailyCapGbp) {
+    return rejectOverCap(ts, merchant, cleanItem, amount, cat, "over_daily_cat_cap",
+      `Would push today's ${cat} spend to £${(spentDayCat + amount).toFixed(2)} (cap £${caps.dailyCapGbp.toFixed(2)}, already £${spentDayCat.toFixed(2)}).`);
   }
-  if (spentThisWeek + amount > limits.weeklyCapGbp) {
-    const entry = baseEntry(ts, merchant, cleanItem, amount, "rejected", "over_weekly_cap");
-    await appendJournal(entry);
-    return {
-      ok: false,
-      code: "over_weekly_cap",
-      error: `Would push this week's spend to £${(spentThisWeek + amount).toFixed(2)} (cap £${limits.weeklyCapGbp.toFixed(2)}, already spent £${spentThisWeek.toFixed(2)}). Tell the operator.`,
-    };
+  if (spentWeekCat + amount > caps.weeklyCapGbp) {
+    return rejectOverCap(ts, merchant, cleanItem, amount, cat, "over_weekly_cat_cap",
+      `Would push this week's ${cat} spend to £${(spentWeekCat + amount).toFixed(2)} (cap £${caps.weeklyCapGbp.toFixed(2)}, already £${spentWeekCat.toFixed(2)}).`);
   }
+  if (spentMonthCat + amount > caps.monthlyCapGbp) {
+    return rejectOverCap(ts, merchant, cleanItem, amount, cat, "over_monthly_cat_cap",
+      `Would push this month's ${cat} spend to £${(spentMonthCat + amount).toFixed(2)} (cap £${caps.monthlyCapGbp.toFixed(2)}, already £${spentMonthCat.toFixed(2)}).`);
+  }
+  /* Global caps — final safety net. */
+  if (spentDayAll + amount > limits.globalCaps.dailyCapGbp) {
+    return rejectOverCap(ts, merchant, cleanItem, amount, cat, "over_daily_global_cap",
+      `Would push today's TOTAL spend (across all categories) to £${(spentDayAll + amount).toFixed(2)} (global cap £${limits.globalCaps.dailyCapGbp.toFixed(2)}).`);
+  }
+  if (spentWeekAll + amount > limits.globalCaps.weeklyCapGbp) {
+    return rejectOverCap(ts, merchant, cleanItem, amount, cat, "over_weekly_global_cap",
+      `Would push this week's TOTAL spend to £${(spentWeekAll + amount).toFixed(2)} (global cap £${limits.globalCaps.weeklyCapGbp.toFixed(2)}).`);
+  }
+  if (spentMonthAll + amount > limits.globalCaps.monthlyCapGbp) {
+    return rejectOverCap(ts, merchant, cleanItem, amount, cat, "over_monthly_global_cap",
+      `Would push this month's TOTAL spend to £${(spentMonthAll + amount).toFixed(2)} (global cap £${limits.globalCaps.monthlyCapGbp.toFixed(2)}).`);
+  }
+  /* Helpers below define the journal envelopes that the success branch needs. */
+  const spentToday = spentDayAll;
+  const spentThisWeek = spentWeekAll;
 
   /* 5. Confirmation tier. The 'auto' tier passes through to step 6; 'voice'
    *    triggers the existing NEEDS_CONFIRMATION gate in server.mjs (which
@@ -281,6 +332,7 @@ export async function requestPurchase({
     transactionId,
     merchantLabel: matched.label || matched.domain,
     merchantDomain: matched.domain,
+    category: matched.category || "default",
     justification: cleanJustification.slice(0, 240),
     tier,
     spentTodayGbp: Number((spentToday + amount).toFixed(2)),
@@ -393,6 +445,15 @@ function baseEntry(ts, merchant, item, amount, status, reason) {
     settled: false,
     simulated: null,
   };
+}
+
+/** Helper for the over-cap rejection paths — DRY for the eight similar branches
+ *  in requestPurchase. Journals the rejection with category metadata so the
+ *  audit panel can group spend by category later. */
+async function rejectOverCap(ts, merchant, item, amount, category, code, message) {
+  const entry = baseEntry(ts, merchant, item, amount, "rejected", code);
+  await appendJournal({ ...entry, category });
+  return { ok: false, code, error: `${message} Tell the operator.` };
 }
 
 /** Public read-only helpers used by the HUD's audit panel + by NEEDS_CONFIRMATION. */

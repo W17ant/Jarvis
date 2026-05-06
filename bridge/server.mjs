@@ -55,6 +55,7 @@ import * as Purchases from "./purchases.mjs";
 import * as Browse from "./browse.mjs";
 import * as LlmProviders from "./llm/providers.mjs";
 import * as Personal from "./personal.mjs";
+import * as VisualStyle from "./visual-style.mjs";
 
 const execp = promisify(exec);
 
@@ -1747,6 +1748,57 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_products",
+      description: "Search a merchant for products WITHOUT buying — uses request_browse internally to compare options. Use BEFORE request_purchase when the operator hasn't picked a specific item yet. Returns a shortlist with prices the operator can choose from. Example: 'find me a 50mm prime under £400 on WEX' → returns 3-5 candidates. Ask the operator which one to buy.",
+      parameters: {
+        type: "object",
+        properties: {
+          merchant: { type: "string", description: "Merchant domain or label from the allowlist (e.g. 'wexphotovideo.com', 'mpb.com', 'amazon.co.uk')." },
+          query:    { type: "string", description: "Product description in natural language." },
+          maxPriceGbp: { type: "number", description: "Optional upper bound for filtering results." },
+        },
+        required: ["merchant", "query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_flights",
+      description: "Search Skyscanner for flights — read-only. Use for: 'find me a return to Madrid next weekend', 'cheapest flight to JFK in March'. Returns top results the operator can review. Does NOT book — booking requires going to the airline directly via open_url after the operator picks one.",
+      parameters: {
+        type: "object",
+        properties: {
+          from:      { type: "string", description: "Origin — IATA code or city. e.g. 'MAN', 'Manchester'." },
+          to:        { type: "string", description: "Destination — IATA code or city. e.g. 'BCN', 'Barcelona'." },
+          depart:    { type: "string", description: "Departure date (YYYY-MM-DD or natural language like 'next Friday')." },
+          returnDate:{ type: "string", description: "Optional return date for a round trip." },
+          adults:    { type: "number", description: "Number of adults. Default 1." },
+        },
+        required: ["from", "to", "depart"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "learn_visual_style",
+      description: "Analyse a folder, file, or list of reference frames/videos to capture the operator's visual style. Combines numerical metrics (brightness/contrast/saturation curves via ImageMagick) with a vision-LLM prose description (palette, lighting, framing, grading). Use for: 'learn my style from these reference shoots', 'capture the FOM look from output/heroes/'. For videos, ffmpeg samples 4 keyframes per file. Stored alongside the existing style memory so 'apply my style' tools can recall it later.",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string", description: "Folder path (preferred — ships numerical + prose), or single file path. For multiple unrelated files, call once per file." },
+          name:   { type: "string", description: "Style identifier — e.g. 'fom-signature', 'editorial-warm'. Existing styles with the same name are overwritten." },
+          sampleCount:    { type: "number", description: "Max frames sent to the vision model. Default 12." },
+          framesPerVideo: { type: "number", description: "Keyframes extracted per video file. Default 4." },
+        },
+        required: ["target", "name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "request_purchase",
       description:
         "Request a small online purchase on behalf of the operator using the pre-funded virtual debit card. Hard limits enforced by the bridge: per-transaction cap, daily/weekly budget, merchant allowlist. Currently runs in SIMULATOR MODE — no real money moves until the operator flips data/spending-limits.json.simulatorMode to false. Use ONLY when the operator explicitly asks to buy something (e.g. 'order me a pint of milk from Tesco', 'get an Uber Eats curry'). Never auto-trigger a purchase from passive context. The merchant must be in the allowlist; if it isn't, do not retry — instead tell the operator and ask if they want to add it.",
@@ -1941,6 +1993,12 @@ function summariseToolCall(name, args) {
       const amt = Number.isFinite(Number(a.maxPriceGbp)) ? `£${Number(a.maxPriceGbp).toFixed(2)}` : "(no price)";
       return `Buy ${a.item || "(item)"} from ${a.merchant || "(merchant)"} for up to ${amt}`;
     }
+    case "search_products":
+      return `Compare on ${a.merchant || "(?)"}: ${(a.query || "").slice(0, 50)}`;
+    case "find_flights":
+      return `Find flights ${a.from || "?"} → ${a.to || "?"} on ${a.depart || "?"}${a.returnDate ? ` returning ${a.returnDate}` : ""}`;
+    case "learn_visual_style":
+      return `Learn style "${a.name || "?"}" from ${typeof a.target === "string" ? a.target.slice(0, 50) : "(reference set)"}`;
     case "request_browse":
       return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
     case "open_url":
@@ -2061,6 +2119,28 @@ async function _executeToolInner(name, args) {
         return { ok: false, error: `open failed: ${e.message}` };
       }
     }
+    case "search_products": {
+      /* Wraps request_browse with a structured goal so the operator sees
+       * candidates without a purchase ever firing. We compose a narrow
+       * goal string the vision LLM can follow. */
+      const visionProvider = LlmProviders.pickProvider("vision");
+      if (visionProvider === "ollama") {
+        return { ok: false, error: "search_products needs a vision-capable cloud provider (Anthropic or OpenAI). Configure in the Agent Console (Shift+Cmd+J)." };
+      }
+      const cap = Number.isFinite(Number(args.maxPriceGbp)) ? ` under £${Number(args.maxPriceGbp).toFixed(2)}` : "";
+      const goal = `On ${args.merchant}, find 3-5 candidate products matching: "${args.query}"${cap}. Report each candidate with its price, model name, and key spec. Do NOT add anything to a basket. Output only the shortlist as a markdown list.`;
+      return await Browse.requestBrowse({ goal, maxSteps: 14 });
+    }
+    case "find_flights": {
+      const visionProvider = LlmProviders.pickProvider("vision");
+      if (visionProvider === "ollama") {
+        return { ok: false, error: "find_flights needs a vision-capable cloud provider. Configure in the Agent Console (Shift+Cmd+J)." };
+      }
+      const goal = `Open Skyscanner. Search flights from ${args.from} to ${args.to}, departing ${args.depart}${args.returnDate ? `, returning ${args.returnDate}` : ", one-way"}, ${args.adults || 1} adult(s). Read the top 3-5 results — for each, report: airline, total price (£), departure time, duration, stops. Do NOT click through to booking; the operator will do that themselves.`;
+      const startUrl = "https://www.skyscanner.net/";
+      return await Browse.requestBrowse({ goal, startUrl, maxSteps: 18 });
+    }
+    case "learn_visual_style": return await VisualStyle.learnVisualStyle(args);
     case "request_browse": {
       /* Sanity-check: refuse if no vision-capable provider has an API key —
        * driving a browser from text only would burn tokens for poor results. */

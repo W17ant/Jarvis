@@ -1,12 +1,37 @@
 {
-  "_comment": "Allowlist of merchant domains the LLM may purchase from. Match is performed on the registrable domain (amazon.co.uk matches https://www.amazon.co.uk/dp/...). Add merchants by editing this file directly — the LLM cannot edit it at runtime. Anything outside this list is rejected with a clear error so the LLM knows to ask the operator first.",
+  "_comment": "Allowlist of merchant domains the LLM may purchase from. Match is performed on the registrable domain (amazon.co.uk matches https://www.amazon.co.uk/dp/...). Each entry carries a category that maps into spending-limits.json — 'photography' merchants get the £1500 per-tx cap, 'groceries' get £50, etc. Add merchants by editing this file directly; the LLM cannot edit it at runtime.",
   "merchants": [
-    { "domain": "amazon.co.uk", "label": "Amazon UK" },
-    { "domain": "argos.co.uk", "label": "Argos" },
-    { "domain": "tesco.com", "label": "Tesco Online" },
-    { "domain": "sainsburys.co.uk", "label": "Sainsbury's" },
-    { "domain": "ubereats.com", "label": "Uber Eats" },
-    { "domain": "deliveroo.co.uk", "label": "Deliveroo" },
-    { "domain": "justeat.co.uk", "label": "Just Eat" }
+    { "domain": "amazon.co.uk",     "label": "Amazon UK",       "category": "default" },
+    { "domain": "argos.co.uk",      "label": "Argos",           "category": "default" },
+
+    { "domain": "tesco.com",        "label": "Tesco Online",    "category": "groceries" },
+    { "domain": "sainsburys.co.uk", "label": "Sainsbury's",     "category": "groceries" },
+    { "domain": "ocado.com",        "label": "Ocado",           "category": "groceries" },
+    { "domain": "waitrose.com",     "label": "Waitrose",        "category": "groceries" },
+
+    { "domain": "ubereats.com",     "label": "Uber Eats",       "category": "takeaway" },
+    { "domain": "deliveroo.co.uk",  "label": "Deliveroo",       "category": "takeaway" },
+    { "domain": "justeat.co.uk",    "label": "Just Eat",        "category": "takeaway" },
+
+    { "domain": "currys.co.uk",     "label": "Currys",          "category": "electronics" },
+    { "domain": "ao.com",           "label": "AO",              "category": "electronics" },
+
+    { "domain": "wexphotovideo.com","label": "WEX Photo Video", "category": "photography" },
+    { "domain": "parkcameras.com",  "label": "Park Cameras",    "category": "photography" },
+    { "domain": "mpb.com",          "label": "MPB",             "category": "photography" },
+    { "domain": "calphoto.co.uk",   "label": "Calumet",         "category": "photography" },
+
+    { "domain": "johnlewis.com",    "label": "John Lewis",      "category": "homeware" },
+    { "domain": "ikea.com",         "label": "IKEA",            "category": "homeware" },
+    { "domain": "wayfair.co.uk",    "label": "Wayfair",         "category": "homeware" },
+
+    { "domain": "skyscanner.net",   "label": "Skyscanner",      "category": "travel" },
+    { "domain": "kayak.co.uk",      "label": "Kayak",           "category": "travel" },
+    { "domain": "booking.com",      "label": "Booking.com",     "category": "travel" },
+    { "domain": "trainline.com",    "label": "Trainline",       "category": "travel" },
+    { "domain": "nationalrail.co.uk","label":"National Rail",   "category": "travel" },
+
+    { "domain": "ryman.co.uk",      "label": "Ryman",           "category": "office" },
+    { "domain": "viking-direct.co.uk","label":"Viking",         "category": "office" }
   ]
 }
