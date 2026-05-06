@@ -1149,6 +1149,60 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- DEMO / CLEAN MODE (Shift+Cmd+D) ----------
+ *  Shift+Cmd+D toggles `body.is-demo`. CSS rules in styles.css hide the
+ *  numeric readouts, REC indicator, history drawer, notification timestamps
+ *  and conversation timestamps — leaving a cinematic surface for client
+ *  visits. A tiny DEMO badge top-right is added so the operator can see
+ *  at a glance what mode they're in (demo mode is otherwise quiet about
+ *  itself by design). The shortcut is symmetric — same combo exits.
+ *
+ *  Why Shift+Cmd+D: plain Cmd+D is bookmark in Chrome. Shift+Cmd+D matches
+ *  the Shift+Cmd+J pattern of the Agent Console for muscle-memory consistency. */
+
+let _demoBadgeEl = null;
+
+function ensureDemoBadge() {
+  if (_demoBadgeEl) return _demoBadgeEl;
+  const badge = document.createElement("div");
+  badge.id = "demoBadge";
+  badge.textContent = "DEMO";
+  badge.style.cssText = "position:fixed;top:12px;right:12px;z-index:10000;font-family:var(--mono,monospace);font-size:9px;letter-spacing:0.24em;color:#888;border:1px solid #333;padding:3px 8px;background:rgba(0,0,0,0.6);pointer-events:none;display:none;";
+  document.body.appendChild(badge);
+  _demoBadgeEl = badge;
+  return badge;
+}
+
+function toggleDemoMode() {
+  const badge = ensureDemoBadge();
+  const wasDemo = document.body.classList.toggle("is-demo");
+  badge.style.display = wasDemo ? "block" : "none";
+  /* Persist across HUD reloads so a kiosk left in demo mode for a session
+   * doesn't reset on Cmd+R. localStorage is per-origin so each install is
+   * independent. */
+  try { localStorage.setItem("flatout.demoMode", wasDemo ? "1" : "0"); } catch {}
+  console.log(`[Flat-Out] demo mode ${wasDemo ? "ON" : "OFF"}`);
+}
+
+/* Restore on reload. */
+try {
+  if (localStorage.getItem("flatout.demoMode") === "1") {
+    /* Defer to after DOMContentLoaded so the badge can be appended cleanly. */
+    document.addEventListener("DOMContentLoaded", () => {
+      document.body.classList.add("is-demo");
+      const b = ensureDemoBadge();
+      b.style.display = "block";
+    });
+  }
+} catch {}
+
+document.addEventListener("keydown", (e) => {
+  if (e.shiftKey && (e.metaKey || e.ctrlKey) && (e.key === "D" || e.key === "d")) {
+    e.preventDefault();
+    toggleDemoMode();
+  }
+});
+
 /* ---------- BOOT ---------- */
 function boot() {
   buildTicks();

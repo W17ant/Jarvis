@@ -3010,6 +3010,47 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  /* GET /actions — machine-readable manifest of every tool the LLM exposes,
+   * plus its operational metadata (confirmation-gated? plan-broadcast? always-on
+   * in the router?). The HUD's future command palette + help cheat-sheet read
+   * this; doc generation reads this; the audit-log filter UI reads this.
+   *
+   * Computed on-demand from in-memory TOOLS so adding a tool in code is the
+   * only place you ever need to declare it — the manifest stays fresh without
+   * a build step. */
+  if (req.url === "/actions" && req.method === "GET") {
+    const alwaysOnSet = new Set(ToolRouter.indexStatus().alwaysOn);
+    const manifest = TOOLS.map((t) => {
+      const fn = t.function || t;
+      return {
+        name: fn.name,
+        description: fn.description || "",
+        parameters: fn.parameters?.properties || {},
+        required: fn.parameters?.required || [],
+        flags: {
+          alwaysOn: alwaysOnSet.has(fn.name),
+          planProposed: PLAN_PROPOSED_TOOLS.has(fn.name),
+          requiresConfirmation: typeof NEEDS_CONFIRMATION[fn.name] === "function",
+        },
+        /* Hint of how the bridge would summarise a call — useful for the
+         * palette to show "what does this do?" with actual operator phrasing.
+         * Some summarisers branch on args; calling with empty args gives a
+         * generic shape that's still readable. */
+        sampleSummary: (() => {
+          try { return summariseToolCall(fn.name, {}); } catch { return null; }
+        })(),
+      };
+    });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({
+      ok: true,
+      total: manifest.length,
+      generatedAt: new Date().toISOString(),
+      actions: manifest,
+    }));
+    return;
+  }
+
   if (req.url?.startsWith("/audit") && req.method === "GET") {
     /* Query the JSONL audit log. URL format:
      *   /audit?operator=marcus&tool=draft_email&fromTs=...&toTs=...&limit=200
