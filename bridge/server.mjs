@@ -55,6 +55,11 @@ import * as Purchases from "./purchases.mjs";
 import * as Browse from "./browse.mjs";
 import * as LlmProviders from "./llm/providers.mjs";
 import * as Personal from "./personal.mjs";
+import * as VisualStyle from "./visual-style.mjs";
+import * as Transcribe from "./transcribe.mjs";
+import * as UsageLog from "./usage-log.mjs";
+import * as EodDigest from "./eod-digest.mjs";
+import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
 
@@ -1747,6 +1752,94 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_products",
+      description: "Search a merchant for products WITHOUT buying — uses request_browse internally to compare options. Use BEFORE request_purchase when the operator hasn't picked a specific item yet. Returns a shortlist with prices the operator can choose from. Example: 'find me a 50mm prime under £400 on WEX' → returns 3-5 candidates. Ask the operator which one to buy.",
+      parameters: {
+        type: "object",
+        properties: {
+          merchant: { type: "string", description: "Merchant domain or label from the allowlist (e.g. 'wexphotovideo.com', 'mpb.com', 'amazon.co.uk')." },
+          query:    { type: "string", description: "Product description in natural language." },
+          maxPriceGbp: { type: "number", description: "Optional upper bound for filtering results." },
+        },
+        required: ["merchant", "query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_flights",
+      description: "Search Skyscanner for flights — read-only. Use for: 'find me a return to Madrid next weekend', 'cheapest flight to JFK in March'. Returns top results the operator can review. Does NOT book — booking requires going to the airline directly via open_url after the operator picks one.",
+      parameters: {
+        type: "object",
+        properties: {
+          from:      { type: "string", description: "Origin — IATA code or city. e.g. 'MAN', 'Manchester'." },
+          to:        { type: "string", description: "Destination — IATA code or city. e.g. 'BCN', 'Barcelona'." },
+          depart:    { type: "string", description: "Departure date (YYYY-MM-DD or natural language like 'next Friday')." },
+          returnDate:{ type: "string", description: "Optional return date for a round trip." },
+          adults:    { type: "number", description: "Number of adults. Default 1." },
+        },
+        required: ["from", "to", "depart"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_active_jobs",
+      description: "Cancel any in-flight long-running operation (active browse_web loop, caption_shoot_folder batch). Use when the operator says 'stop', 'cancel', 'abort', or hits Esc. Idempotent — calling when nothing is running is harmless.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_eod_digest",
+      description: "Generate the operator's end-of-day activity digest — replies count, purchases made (settled + blocked), renders shipped, files dropped into the inbox, top tools used, LLM spend. Use when operator says 'what did I do today', 'summarise my day', 'daily wrap'. Returns a structured JSON plus a plain-text version the LLM can read aloud verbatim.",
+      parameters: {
+        type: "object",
+        properties: {
+          sinceTs: { type: "number", description: "Optional cutoff timestamp ms. Default = midnight today." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "transcribe_video",
+      description: "Transcribe a video file end-to-end. Strips audio with ffmpeg → local Whisper for timestamped speech segments → samples N keyframes → vision LLM captions each one. Returns timestamped speech + frame captions + a single interleaved narrative. Use for: 'transcribe yesterday's interview', 'what's said in the press-launch clip', 'summarise this raw rushes file'. Slower than text tools (30-90s for a 5-minute clip) so use sparingly.",
+      parameters: {
+        type: "object",
+        properties: {
+          path:          { type: "string", description: "Filesystem path — absolute or relative to project root. Must be a video file (mp4/mov/m4v/mkv/avi/webm)." },
+          includeVisual: { type: "boolean", description: "Sample frames + caption them via the vision LLM. Default true. Set false for audio-only transcription (faster, no API cost)." },
+          sampleFrames:  { type: "number", description: "How many keyframes to caption when includeVisual is true. Default 8, max 20. More frames = more API spend." },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "learn_visual_style",
+      description: "Analyse a folder, file, or list of reference frames/videos to capture the operator's visual style. Combines numerical metrics (brightness/contrast/saturation curves via ImageMagick) with a vision-LLM prose description (palette, lighting, framing, grading). Use for: 'learn my style from these reference shoots', 'capture the FOM look from output/heroes/'. For videos, ffmpeg samples 4 keyframes per file. Stored alongside the existing style memory so 'apply my style' tools can recall it later.",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string", description: "Folder path (preferred — ships numerical + prose), or single file path. For multiple unrelated files, call once per file." },
+          name:   { type: "string", description: "Style identifier — e.g. 'fom-signature', 'editorial-warm'. Existing styles with the same name are overwritten." },
+          sampleCount:    { type: "number", description: "Max frames sent to the vision model. Default 12." },
+          framesPerVideo: { type: "number", description: "Keyframes extracted per video file. Default 4." },
+        },
+        required: ["target", "name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "request_purchase",
       description:
         "Request a small online purchase on behalf of the operator using the pre-funded virtual debit card. Hard limits enforced by the bridge: per-transaction cap, daily/weekly budget, merchant allowlist. Currently runs in SIMULATOR MODE — no real money moves until the operator flips data/spending-limits.json.simulatorMode to false. Use ONLY when the operator explicitly asks to buy something (e.g. 'order me a pint of milk from Tesco', 'get an Uber Eats curry'). Never auto-trigger a purchase from passive context. The merchant must be in the allowlist; if it isn't, do not retry — instead tell the operator and ask if they want to add it.",
@@ -1908,6 +2001,8 @@ const PLAN_PROPOSED_TOOLS = new Set([
    * kicks off. Doubles as transparency — they know the bot's about to drive
    * a browser around. */
   "request_browse",
+  /* Transcribe: 30-90s job. Plan-stage so operator sees what's happening. */
+  "transcribe_video",
   /* Personal-assistant tools that touch the operator's wider digital life —
    * iMessage and music are visible to other people / out of the HUD. Plan-stage
    * the intent so the operator can interrupt before send/play. */
@@ -1941,6 +2036,16 @@ function summariseToolCall(name, args) {
       const amt = Number.isFinite(Number(a.maxPriceGbp)) ? `£${Number(a.maxPriceGbp).toFixed(2)}` : "(no price)";
       return `Buy ${a.item || "(item)"} from ${a.merchant || "(merchant)"} for up to ${amt}`;
     }
+    case "search_products":
+      return `Compare on ${a.merchant || "(?)"}: ${(a.query || "").slice(0, 50)}`;
+    case "find_flights":
+      return `Find flights ${a.from || "?"} → ${a.to || "?"} on ${a.depart || "?"}${a.returnDate ? ` returning ${a.returnDate}` : ""}`;
+    case "learn_visual_style":
+      return `Learn style "${a.name || "?"}" from ${typeof a.target === "string" ? a.target.slice(0, 50) : "(reference set)"}`;
+    case "transcribe_video":
+      return `Transcribe video: ${(a.path || "(?)").slice(0, 60)}${a.includeVisual === false ? " (audio only)" : ""}`;
+    case "request_eod_digest":
+      return `End-of-day digest`;
     case "request_browse":
       return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
     case "open_url":
@@ -2060,6 +2165,39 @@ async function _executeToolInner(name, args) {
       } catch (e) {
         return { ok: false, error: `open failed: ${e.message}` };
       }
+    }
+    case "search_products": {
+      /* Wraps request_browse with a structured goal so the operator sees
+       * candidates without a purchase ever firing. We compose a narrow
+       * goal string the vision LLM can follow. */
+      const visionProvider = LlmProviders.pickProvider("vision");
+      if (visionProvider === "ollama") {
+        return { ok: false, error: "search_products needs a vision-capable cloud provider (Anthropic or OpenAI). Configure in the Agent Console (Shift+Cmd+J)." };
+      }
+      const cap = Number.isFinite(Number(args.maxPriceGbp)) ? ` under £${Number(args.maxPriceGbp).toFixed(2)}` : "";
+      const goal = `On ${args.merchant}, find 3-5 candidate products matching: "${args.query}"${cap}. Report each candidate with its price, model name, and key spec. Do NOT add anything to a basket. Output only the shortlist as a markdown list.`;
+      return await Browse.requestBrowse({ goal, maxSteps: 14 });
+    }
+    case "find_flights": {
+      const visionProvider = LlmProviders.pickProvider("vision");
+      if (visionProvider === "ollama") {
+        return { ok: false, error: "find_flights needs a vision-capable cloud provider. Configure in the Agent Console (Shift+Cmd+J)." };
+      }
+      const goal = `Open Skyscanner. Search flights from ${args.from} to ${args.to}, departing ${args.depart}${args.returnDate ? `, returning ${args.returnDate}` : ", one-way"}, ${args.adults || 1} adult(s). Read the top 3-5 results — for each, report: airline, total price (£), departure time, duration, stops. Do NOT click through to booking; the operator will do that themselves.`;
+      const startUrl = "https://www.skyscanner.net/";
+      return await Browse.requestBrowse({ goal, startUrl, maxSteps: 18 });
+    }
+    case "learn_visual_style": return await VisualStyle.learnVisualStyle(args);
+    case "transcribe_video":   return await Transcribe.transcribeVideo(args);
+    case "request_eod_digest": {
+      const digest = await EodDigest.buildDigest(args || {});
+      digest.spoken = EodDigest.digestToText(digest);
+      return digest;
+    }
+    case "cancel_active_jobs": {
+      Vision.raiseAbort();
+      Browse.raiseAbort();
+      return { ok: true, note: "Cancellation raised on Vision + Browse modules. Active loops will bail at the next safe checkpoint." };
     }
     case "request_browse": {
       /* Sanity-check: refuse if no vision-capable provider has an API key —
@@ -2498,7 +2636,7 @@ async function _executeToolInner(name, args) {
   }
 }
 
-async function askLLM(query, history = []) {
+async function askLLM(query, history = [], { sessionId = null } = {}) {
   const brand = loadBrand();
   const agencyName = brand.agency.name || CONFIG.agency.name;
   const agentName = brand.agent.name || "Flat-Out";
@@ -2605,6 +2743,47 @@ When given [Context], use those facts verbatim. If asked to do something you don
     { role: "user", content: userContent },
   ];
 
+  /* Per-turn persistence — the operator's raw query goes in immediately so
+   * even a crashed reply leaves a record. The assistant turn is written
+   * after the reply resolves, with the list of tools that fired. sessionId
+   * is supplied by the HUD; we tolerate its absence by skipping persistence
+   * (e.g. for MCP / smoke-test entry points that don't carry one). */
+  const toolsThisQuery = [];
+  if (sessionId) {
+    try { Memory.appendTurn({ sessionId, role: "user", content: query }); }
+    catch (e) { console.warn(`[bridge] turn persist (user) failed: ${e.message}`); }
+  }
+
+  /* Embedding-based tool filter — at 97 tools the full catalogue is too much
+   * context for the 14b selector. Pick the top-K most-similar by nomic-embed
+   * cosine + always-on core. Resolved once per query, reused across hops so
+   * the second hop's filtered set matches the first. */
+  const filtered = await ToolRouter.pickRelevant(query, TOOLS, { topK: 20 });
+  if (!filtered.fallback) {
+    console.log(`[tool-router] ${query.slice(0, 40).replace(/\n/g, " ")} → ${filtered.picked.length}/${TOOLS.length} tools (${filtered.elapsedMs}ms)`);
+  }
+  /* Pre-resolve the cascade-router model so the broadcast carries it
+   * alongside the tool filter result. The actual chat call below repeats
+   * this lookup for hop 0 — cheap (no I/O, just regex/length checks). */
+  const modelForFirstHop = ModelRouter.pick(query);
+  /* Broadcast for the Agent Console's live debug pane. Trims the score table
+   * to the picked tools only — no point sending 97 numbers when 18 of them
+   * are what actually went to the model. */
+  broadcastToClients({
+    type: "tool.picked",
+    data: {
+      query: query.slice(0, 120),
+      picked: filtered.picked,
+      scores: filtered.scores,
+      elapsedMs: filtered.elapsedMs,
+      fallback: filtered.fallback || null,
+      total: TOOLS.length,
+      stream: false,
+      modelUsed: modelForFirstHop,
+    },
+  });
+  const toolsForLLM = filtered.tools;
+
   /* Why: tool-calling loop — model may emit tool_calls, we run them, append results, ask again.
    * Cap at 3 round trips to prevent infinite loops on a confused tool-happy model. */
   for (let hop = 0; hop < 3; hop++) {
@@ -2613,6 +2792,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
      * matters more than latency once a tool is already chosen). On lower-tier
      * hardware OLLAMA_FAST_MODEL is unset so both branches return main. */
     const modelForHop = hop === 0 ? ModelRouter.pick(query) : ModelRouter.pickForToolHop();
+    const hopT0 = Date.now();
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -2620,15 +2800,29 @@ When given [Context], use those facts verbatim. If asked to do something you don
        * wizard's OLLAMA_KEEP_ALIVE setting so the model doesn't unload between
        * turns. Lower-tier installs stick to "30s" so the model can free memory
        * for other work. */
-      body: JSON.stringify({ model: modelForHop, messages, stream: false, tools: TOOLS, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
+      body: JSON.stringify({ model: modelForHop, messages, stream: false, tools: toolsForLLM, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
     });
     if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
     const data = await res.json();
+    /* Per-hop usage row — Ollama returns token counts in the response. */
+    UsageLog.recordUsage({
+      provider: "ollama",
+      model: modelForHop,
+      tokensIn: data.prompt_eval_count || 0,
+      tokensOut: data.eval_count || 0,
+      elapsedMs: Date.now() - hopT0,
+      source: `askLLM.hop${hop}`,
+    }).catch(() => {});
     const msg = data.message || {};
     const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
 
     if (calls.length === 0) {
-      return (msg.content || "").trim();
+      const finalReply = (msg.content || "").trim();
+      if (sessionId && finalReply) {
+        try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
+        catch (e) { console.warn(`[bridge] turn persist (assistant) failed: ${e.message}`); }
+      }
+      return finalReply;
     }
 
     // Append the assistant's tool-call message + execute each tool, append their results
@@ -2638,6 +2832,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
       let args = c.function?.arguments;
       if (typeof args === "string") { try { args = JSON.parse(args); } catch { args = {}; } }
       console.log(`[bridge] tool call: ${fname}(${JSON.stringify(args).slice(0, 120)})`);
+      toolsThisQuery.push(fname);
       let result;
       try { result = await executeTool(fname, args || {}); }
       catch (e) { result = { error: String(e.message || e) }; }
@@ -2670,7 +2865,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
  *  @returns {Promise<string>} the fully-assembled reply (caller can also persist this
  *  to history without missing anything that was streamed).
  */
-async function askLLMStream({ query, history = [], onSentence }) {
+async function askLLMStream({ query, history = [], onSentence, sessionId = null }) {
   /* Why log: when the kiosk goes silent mid-turn, the bridge log was empty —
    * no entry for the inbound query, no entry for hop boundaries. Every later
    * "is it stuck?" debug starts blind. One concise line per hop + the first
@@ -2706,6 +2901,16 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     { role: "user", content: userContent },
   ];
 
+  /* Per-turn persistence (streaming path). User turn gets logged immediately
+   * so a stream that fails partway still leaves a record. Assistant turn is
+   * written below once the stream finishes (or after the last hop completes,
+   * with the full accumulated text). */
+  const toolsThisQuery = [];
+  if (sessionId) {
+    try { Memory.appendTurn({ sessionId, role: "user", content: query }); }
+    catch (e) { console.warn(`[bridge] turn persist (user, stream) failed: ${e.message}`); }
+  }
+
   /* Sentence boundary state — accumulates streamed tokens, flushes on terminal punctuation.
    * Boundary regex keeps it simple: ".", "?", or "!" followed by whitespace or end-of-string.
    * Sentences shorter than MIN_LEN merge into the next so "Yes." doesn't synth a 200ms clip. */
@@ -2737,6 +2942,29 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     sb.text = "";
   }
 
+  /* Embedding-based tool filter — same as askLLM(). Resolved once before the
+   * hop loop so all hops share the same filtered set; otherwise the model
+   * could pick tool A on hop 1 then find it absent on hop 2. */
+  const filtered = await ToolRouter.pickRelevant(query, TOOLS, { topK: 20 });
+  if (!filtered.fallback) {
+    console.log(`[tool-router] (stream) → ${filtered.picked.length}/${TOOLS.length} tools (${filtered.elapsedMs}ms)`);
+  }
+  const modelForFirstHopStream = ModelRouter.pick(query);
+  broadcastToClients({
+    type: "tool.picked",
+    data: {
+      query: query.slice(0, 120),
+      picked: filtered.picked,
+      scores: filtered.scores,
+      elapsedMs: filtered.elapsedMs,
+      fallback: filtered.fallback || null,
+      total: TOOLS.length,
+      stream: true,
+      modelUsed: modelForFirstHopStream,
+    },
+  });
+  const toolsForLLM = filtered.tools;
+
   /* Up to 3 hops, same cap as askLLM(). Each hop streams; tool_calls in the terminal
    * frame trigger an extra hop with the tool results appended to messages. Model
    * routing matches the non-streaming path: first hop picks via query content,
@@ -2749,7 +2977,7 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: modelForHop, messages, stream: true, tools: TOOLS, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
+      body: JSON.stringify({ model: modelForHop, messages, stream: true, tools: toolsForLLM, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
     });
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
@@ -2783,7 +3011,20 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
             console.log(`[stream] first sentence at ${Date.now() - t0}ms`);
           }
         }
-        if (evt.done) finalMsg = evt.message || finalMsg;
+        if (evt.done) {
+          finalMsg = evt.message || finalMsg;
+          /* Ollama emits prompt_eval_count + eval_count on the terminal
+           * (done) frame. Log the hop's usage here, mirroring the askLLM
+           * non-streaming path so /usage covers both. */
+          UsageLog.recordUsage({
+            provider: "ollama",
+            model: modelForHop,
+            tokensIn: evt.prompt_eval_count || 0,
+            tokensOut: evt.eval_count || 0,
+            elapsedMs: Date.now() - hopT0,
+            source: `askLLMStream.hop${hop}`,
+          }).catch(() => {});
+        }
       }
     }
 
@@ -2792,7 +3033,12 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     if (calls.length === 0) {
       flushFinal();
       console.log(`[stream] complete in ${Date.now() - t0}ms (${sb.emitted.length} chars total)`);
-      return sb.emitted.trim();
+      const finalReply = sb.emitted.trim();
+      if (sessionId && finalReply) {
+        try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
+        catch (e) { console.warn(`[bridge] turn persist (assistant, stream) failed: ${e.message}`); }
+      }
+      return finalReply;
     }
 
     /* Tool-calling hop: append the assistant message + each tool's result, then loop.
@@ -2805,6 +3051,7 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
       let args = c.function?.arguments;
       if (typeof args === "string") { try { args = JSON.parse(args); } catch { args = {}; } }
       console.log(`[bridge] tool call (stream): ${fname}(${JSON.stringify(args).slice(0, 120)})`);
+      toolsThisQuery.push(fname);
       let result;
       try { result = await executeTool(fname, args || {}); }
       catch (e) { result = { error: String(e.message || e) }; }
@@ -2819,7 +3066,12 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
   }
 
   flushFinal();
-  return sb.emitted.trim() || "I tried a few searches but couldn't pull a clean answer together — try asking more specifically.";
+  const finalReply = sb.emitted.trim();
+  if (sessionId && finalReply) {
+    try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
+    catch (e) { console.warn(`[bridge] turn persist (assistant, stream end) failed: ${e.message}`); }
+  }
+  return finalReply || "I tried a few searches but couldn't pull a clean answer together — try asking more specifically.";
 }
 
 /* ---------- WEATHER (Open-Meteo, no API key needed) ---------- */
@@ -2874,7 +3126,91 @@ const httpServer = createServer(async (req, res) => {
 
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, model: getModel() }));
+    res.end(JSON.stringify({
+      ok: true,
+      model: getModel(),
+      toolCount: TOOLS.length,
+      toolRouter: ToolRouter.indexStatus(),
+    }));
+    return;
+  }
+
+  /* GET /usage — today/week token + cost rollups, plus recent calls.
+   * Read-only; the Agent Console renders the today bucket as a budget
+   * dial and the recent list as a paged scroll. */
+  if (req.url?.startsWith("/usage") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    const limit = Number(url.searchParams.get("limit")) || 30;
+    const summary = await UsageLog.getUsageSummary({ recentLimit: limit });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, ...summary }));
+    return;
+  }
+
+  /* GET /history — paginated conversation turns. Query params:
+   *    limit       max rows (default 50, hard cap 500)
+   *    beforeTs    paginate older than this ms timestamp
+   *    sessionId   filter to one HUD session
+   * GET /history/sessions — distinct sessions in last N days with turn counts
+   * Used by the HUD's history drawer for "what did I ask yesterday" lookups. */
+  if (req.url?.startsWith("/history") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    if (url.pathname === "/history/sessions") {
+      const days = Number(url.searchParams.get("days")) || 14;
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ ok: true, sessions: Memory.listSessions({ days }) }));
+      return;
+    }
+    if (url.pathname === "/history") {
+      const turns = Memory.recentTurns({
+        limit: Number(url.searchParams.get("limit")) || 50,
+        beforeTs: url.searchParams.get("beforeTs") ? Number(url.searchParams.get("beforeTs")) : null,
+        sessionId: url.searchParams.get("sessionId") || null,
+      });
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ ok: true, turns }));
+      return;
+    }
+  }
+
+  /* GET /actions — machine-readable manifest of every tool the LLM exposes,
+   * plus its operational metadata (confirmation-gated? plan-broadcast? always-on
+   * in the router?). The HUD's future command palette + help cheat-sheet read
+   * this; doc generation reads this; the audit-log filter UI reads this.
+   *
+   * Computed on-demand from in-memory TOOLS so adding a tool in code is the
+   * only place you ever need to declare it — the manifest stays fresh without
+   * a build step. */
+  if (req.url === "/actions" && req.method === "GET") {
+    const alwaysOnSet = new Set(ToolRouter.indexStatus().alwaysOn);
+    const manifest = TOOLS.map((t) => {
+      const fn = t.function || t;
+      return {
+        name: fn.name,
+        description: fn.description || "",
+        parameters: fn.parameters?.properties || {},
+        required: fn.parameters?.required || [],
+        flags: {
+          alwaysOn: alwaysOnSet.has(fn.name),
+          planProposed: PLAN_PROPOSED_TOOLS.has(fn.name),
+          requiresConfirmation: typeof NEEDS_CONFIRMATION[fn.name] === "function",
+        },
+        /* Hint of how the bridge would summarise a call — useful for the
+         * palette to show "what does this do?" with actual operator phrasing.
+         * Some summarisers branch on args; calling with empty args gives a
+         * generic shape that's still readable. */
+        sampleSummary: (() => {
+          try { return summariseToolCall(fn.name, {}); } catch { return null; }
+        })(),
+      };
+    });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({
+      ok: true,
+      total: manifest.length,
+      generatedAt: new Date().toISOString(),
+      actions: manifest,
+    }));
     return;
   }
 
@@ -3505,13 +3841,17 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
   if (req.url === "/cancel" && req.method === "POST") {
-    /* Operator said "stop" / "cancel" mid-task. Long-running tools (currently
-     * caption_shoot_folder) check Vision.isAborted() between iterations and bail
-     * cleanly with partial results. The teaser pipeline is more complex and not
-     * yet abort-aware — document that to the operator instead of pretending. */
+    /* Operator said "stop" / "cancel" mid-task. Raises every long-running
+     * module's abort flag in parallel; each module's loop checks isAborted()
+     * at its safe-to-bail boundary. Currently:
+     *  - Vision.raiseAbort  — caption batches between frames
+     *  - Browse.raiseAbort  — browse_web inner loop between LLM calls
+     * The teaser pipeline is more complex and not yet abort-aware — operator
+     * has to ride that one out or kill the whole bridge. */
     Vision.raiseAbort();
+    Browse.raiseAbort();
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, note: "Cancellation requested. Active caption batch will stop at next frame." }));
+    res.end(JSON.stringify({ ok: true, note: "Cancellation requested. Active caption batch / browse loop will stop at next safe checkpoint." }));
     return;
   }
   if (req.url === "/brand" && req.method === "POST") {
@@ -4140,13 +4480,16 @@ wss.on("connection", (ws) => {
 
     try {
       switch (type) {
-        case "llm.ask":     reply(await askLLM(payload.query, payload.history || [])); break;
+        case "llm.ask":     reply(await askLLM(payload.query, payload.history || [], { sessionId: payload?.sessionId })); break;
 
         /* Streaming variant — emits llm.sentence events as the model generates, then
          * resolves the request promise with the full text. The caller can either await
          * the reply (legacy path, gets the same string) OR subscribe to llm.sentence
          * for sentence-by-sentence TTS. RunId correlates events to a single utterance
-         * so a stale stream's sentences don't bleed into a new one. */
+         * so a stale stream's sentences don't bleed into a new one.
+         *
+         * sessionId (passed from the HUD's localStorage) groups turns from the same
+         * HUD load so the history drawer can show "this session" vs older sessions. */
         case "llm.askStream": {
           const runId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           const send = (subType, data) => ws.send(JSON.stringify({ type: subType, runId, ts: Date.now(), data }));
@@ -4155,6 +4498,7 @@ wss.on("connection", (ws) => {
             const text = await askLLMStream({
               query: payload.query,
               history: payload.history || [],
+              sessionId: payload?.sessionId,
               onSentence: (s) => send("llm.sentence", { runId, text: s }),
             });
             send("llm.streamDone", { runId, text });
@@ -4266,6 +4610,11 @@ httpServer.listen(PORT, () => {
     vlKeepAlive: process.env.VL_KEEP_ALIVE || "30s",
     skipVL: isLiteTier,
   }).catch(() => { /* warmUpAll already logs internally */ });
+
+  /* Build the embedding-based tool index. Fire-and-forget — pickRelevant()
+   * falls back to the full TOOLS array until this resolves, so no chat call
+   * is blocked. Subsequent boots load from data/tool-index.json instantly. */
+  ToolRouter.buildIndex(TOOLS).catch((e) => console.warn(`[tool-router] index build failed: ${e.message} — chat will use full TOOLS catalogue`));
 
   /* Pre-warm the fast model too if hardware tier opted into routing. Most weight
    * is on the main model so this second warm is cheap (small model, small RAM). */

@@ -242,6 +242,11 @@ function connectBridge() {
      * first event so the DOM cost is zero until a typed-tier purchase happens. */
     if (m.type === "purchase.typed_confirm.required") openPurchaseTypedConfirm(m.data);
     if (m.type === "purchase.recorded") flashPurchaseAuditBadge(m.data);
+    /* Tool-router live transparency — collect a ring buffer of the last 12
+     * tool-picks so the Agent Console can render them on demand. We don't
+     * render directly here (the modal might not exist yet); the ring buffer
+     * is read at modal-open time. */
+    if (m.type === "tool.picked") rememberToolPick(m.data);
   });
 
   bridgeWS.addEventListener("close", () => {
@@ -832,9 +837,27 @@ function openPurchaseTypedConfirm({ pendingId, merchant, item, amountGbp }) {
   authBtn.addEventListener("click", confirm);
 }
 
+/** Refresh the Agent Console's purchase audit list if the modal is currently
+ *  open. Called whenever a purchase.recorded event fires so the journal
+ *  appears live; otherwise the operator would have to close + reopen to see
+ *  what just happened. Best-effort — bridge offline silently leaves the
+ *  existing list. */
+async function refreshAgentModalPurchaseAudit() {
+  if (!_agentModalEl || _agentModalEl.hidden) return;
+  const refs = _agentModalEl._refs;
+  if (!refs?.journalHost || !refs?.summaryEl) return;
+  try {
+    const r = await fetch("http://localhost:8766/purchases/audit?limit=50", { cache: "no-store" });
+    if (!r.ok) return;
+    const a = await r.json();
+    renderPurchaseJournal(refs.journalHost, refs.summaryEl, a.journal || [], a.limits);
+  } catch { /* bridge offline — keep stale list rather than blanking it */ }
+}
+
 /** Brief audit badge — appears in the corner for ~5s every time a purchase
  *  request was settled or rejected. Lets the operator catch the LLM trying
- *  things in the background without staring at a log. */
+ *  things in the background without staring at a log. Also kicks the Agent
+ *  Console refresh so an open modal stays live. */
 function flashPurchaseAuditBadge(data) {
   let host = document.getElementById("purchaseAuditBadge");
   if (!host) {
@@ -890,7 +913,7 @@ function ensureAgentModal() {
     #agentModal button.primary { background: var(--brand-primary, #ff3b3b); color: #000; border-color: var(--brand-primary, #ff3b3b); font-weight: 700; }
     #agentModal button:hover { filter: brightness(1.18); }
     #agentModal .am-journal { max-height: 240px; overflow-y: auto; background: #050505; border: 1px solid #1c1c1c; padding: 10px 12px; }
-    #agentModal .am-journal-row { color: #ccc; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 56px 70px 1fr 70px; gap: 8px; align-items: baseline; }
+    #agentModal .am-journal-row { color: #ccc; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 56px 70px 1fr 130px; gap: 8px; align-items: baseline; }
     #agentModal .am-journal-row:last-child { border-bottom: none; }
     #agentModal .am-journal-row .verb { font-weight: 700; letter-spacing: 0.08em; }
     #agentModal .am-journal-row .verb.ok { color: #00ff88; }
@@ -943,7 +966,25 @@ function ensureAgentModal() {
   const buttons = el("div", { className: "am-buttons" }, status, cancelBtn, saveBtn);
   frame.appendChild(buttons);
 
-  /* Section 3: purchase audit */
+  /* Section 3: tool router live picks */
+  frame.appendChild(el("h3", { text: "Tool router — live picks" }));
+  const routerStatusEl = el("div", { className: "am-summary", text: "Loading index status…" });
+  frame.appendChild(routerStatusEl);
+  const picksHost = el("div", { className: "am-journal" });
+  frame.appendChild(picksHost);
+
+  /* Section 4: token usage + cost */
+  frame.appendChild(el("h3", { text: "LLM usage — today / week" }));
+  const usageHeadlineEl = el("div", { className: "am-summary", text: "Loading…" });
+  frame.appendChild(usageHeadlineEl);
+  const usageRollupHost = el("div", { className: "am-journal" });
+  frame.appendChild(usageRollupHost);
+  const usageNoteEl = el("div", { className: "am-summary", text: "" });
+  usageNoteEl.style.fontSize = "9px";
+  usageNoteEl.style.fontStyle = "italic";
+  frame.appendChild(usageNoteEl);
+
+  /* Section 5: purchase audit */
   frame.appendChild(el("h3", { text: "Purchase audit log" }));
   const journalHost = el("div", { className: "am-journal" });
   const summaryEl = el("div", { className: "am-summary", text: "Loading…" });
@@ -951,7 +992,7 @@ function ensureAgentModal() {
   frame.appendChild(summaryEl);
 
   root.appendChild(frame);
-  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl };
+  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl, routerStatusEl, picksHost, usageHeadlineEl, usageRollupHost, usageNoteEl };
   document.body.appendChild(root);
   _agentModalEl = root;
 
@@ -960,6 +1001,88 @@ function ensureAgentModal() {
   saveBtn.addEventListener("click", () => saveAgentModal(root));
 
   return root;
+}
+
+/* Ring buffer of recent tool-picks. Capped at 12 entries — enough to spot a
+ * pattern, small enough not to grow unbounded. Live-renders into the Agent
+ * Console if it's open; otherwise the modal pulls the buffer on next open. */
+const _toolPicksRing = [];
+const TOOL_PICKS_MAX = 12;
+
+function rememberToolPick(data) {
+  _toolPicksRing.unshift({ ts: Date.now(), ...data });
+  if (_toolPicksRing.length > TOOL_PICKS_MAX) _toolPicksRing.length = TOOL_PICKS_MAX;
+  /* Live re-render if the modal is open. */
+  if (_agentModalEl && !_agentModalEl.hidden) {
+    renderToolPicks(_agentModalEl._refs.picksHost);
+  }
+}
+
+function renderToolPicks(host) {
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  if (!_toolPicksRing.length) {
+    host.appendChild(el("div", { className: "am-journal-empty", text: "No queries yet — say something to Jarvis." }));
+    return;
+  }
+  for (const pick of _toolPicksRing) {
+    const row = el("div", { className: "am-journal-row" });
+    const ts = new Date(pick.ts);
+    const tsLabel = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}:${String(ts.getSeconds()).padStart(2, "0")}`;
+    row.appendChild(el("span", { text: tsLabel }));
+    /* Stream tag — visual cue distinguishing streaming chat from the
+     * non-streaming tool-dispatch path. Streaming dominates the voice loop
+     * so this is the common case. */
+    const verb = el("span", { className: "verb" });
+    if (pick.fallback) { verb.textContent = "FULL"; verb.classList.add("bad"); }
+    else if (pick.stream) { verb.textContent = "STRM"; verb.classList.add("ok"); }
+    else { verb.textContent = "ASK";  verb.classList.add("sim"); }
+    row.appendChild(verb);
+    /* Detail: trimmed query + the ratio of picked tools. The model name
+     * goes in the right column so cascade-router behaviour is visible at
+     * a glance — the operator sees 3b for chat queries vs 14b for drafts. */
+    const ratio = `${pick.picked?.length ?? 0}/${pick.total ?? 0}`;
+    const detail = el("span", { text: `"${(pick.query || "").slice(0, 40)}" → ${ratio} tools` });
+    detail.title = (pick.picked || []).slice(0, 30).join(", ");
+    row.appendChild(detail);
+    /* Compact model badge: drop the "qwen2.5:" prefix so "qwen2.5:3b" → "3b". */
+    const modelShort = (pick.modelUsed || "").replace(/^qwen2\.5:/, "").replace(/^claude-/, "").slice(0, 14);
+    const ms = el("span", { className: "amt", text: `${modelShort || "?"} · ${pick.elapsedMs ?? "?"}ms` });
+    row.appendChild(ms);
+    host.appendChild(row);
+  }
+}
+
+/** Render the LLM usage rollup — today's total cost up top, per-model breakdown
+ *  beneath, plus the pricing-estimate note at the bottom. Local Ollama always
+ *  shows $0 cost so the spotlight is on cloud spend. */
+function renderUsageSection(headlineEl, rollupHost, noteEl, payload) {
+  const today = payload?.today || { calls: 0, tokensIn: 0, tokensOut: 0, costUSD: 0, byModel: [] };
+  const week = payload?.week || { calls: 0, tokensIn: 0, tokensOut: 0, costUSD: 0 };
+  const fmtUSD = (n) => (n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
+  const fmtTokens = (n) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  headlineEl.textContent = `Today: ${today.calls} calls · ${fmtTokens(today.tokensIn + today.tokensOut)} tokens · ${fmtUSD(today.costUSD)} estimated · ${week.calls} calls / ${fmtUSD(week.costUSD)} this week`;
+  while (rollupHost.firstChild) rollupHost.removeChild(rollupHost.firstChild);
+  const rows = today.byModel || [];
+  if (!rows.length) {
+    rollupHost.appendChild(el("div", { className: "am-journal-empty", text: "No LLM activity today yet." }));
+  } else {
+    for (const r of rows) {
+      const row = el("div", { className: "am-journal-row" });
+      /* Provider badge: ollama=green, anthropic=red, openai=amber. */
+      const verb = el("span", { className: "verb" });
+      verb.textContent = r.provider.slice(0, 4).toUpperCase();
+      if (r.provider === "ollama") verb.classList.add("ok");
+      else if (r.provider === "anthropic") verb.classList.add("bad");
+      else verb.classList.add("sim");
+      row.appendChild(el("span", { text: `${r.calls}×` }));
+      row.appendChild(verb);
+      row.appendChild(el("span", { text: `${r.model.replace(/^qwen2\.5:/, "").replace(/^claude-/, "")} · ${fmtTokens(r.tokensIn + r.tokensOut)} tok` }));
+      row.appendChild(el("span", { className: "amt", text: r.costUSD > 0 ? fmtUSD(r.costUSD) : "—" }));
+      rollupHost.appendChild(row);
+    }
+  }
+  noteEl.textContent = payload?.pricingNote || "";
 }
 
 /** Render the journal rows. Pulls from /purchases/audit. Renders newest first. */
@@ -996,17 +1119,37 @@ function renderPurchaseJournal(host, summaryEl, journal, limits) {
 
 async function openAgentModal() {
   const root = ensureAgentModal();
-  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl } = root._refs;
+  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl, routerStatusEl, picksHost, usageHeadlineEl, usageRollupHost, usageNoteEl } = root._refs;
   status.textContent = ""; status.className = "am-status";
   keyAnthropic.value = ""; keyOpenai.value = "";
   root.hidden = false;
-  /* Fetch current state in parallel — keys + audit. Bridge offline → leave
-   * placeholders + an empty journal with a clear hint. */
+  /* Render the in-memory ring buffer immediately so the panel isn't blank
+   * while the network fetches resolve. */
+  renderToolPicks(picksHost);
+  /* Fetch current state in parallel — keys, audit, health, usage. Bridge
+   * offline → leave placeholders + an empty journal. */
   try {
-    const [keysRes, auditRes] = await Promise.all([
+    const [keysRes, auditRes, healthRes, usageRes] = await Promise.all([
       fetch("http://localhost:8766/api-keys", { cache: "no-store" }),
       fetch("http://localhost:8766/purchases/audit?limit=50", { cache: "no-store" }),
+      fetch("http://localhost:8766/health", { cache: "no-store" }),
+      fetch("http://localhost:8766/usage?limit=30", { cache: "no-store" }),
     ]);
+    if (usageRes.ok) {
+      const u = await usageRes.json();
+      renderUsageSection(usageHeadlineEl, usageRollupHost, usageNoteEl, u);
+    }
+    if (healthRes.ok) {
+      const h = await healthRes.json();
+      const tr = h.toolRouter || {};
+      if (tr.ready) {
+        routerStatusEl.textContent = `Index ready · ${tr.toolCount} tools indexed · always-on: ${tr.alwaysOn?.length || 0} · hash ${tr.hash || "?"}`;
+      } else {
+        routerStatusEl.textContent = `Index not ready — chat is using the full ${h.toolCount || "?"}-tool catalogue (slower, less accurate).`;
+      }
+    } else {
+      routerStatusEl.textContent = "Could not fetch index status.";
+    }
     if (keysRes.ok) {
       const j = await keysRes.json();
       keyAnthropic.placeholder = j.keys?.anthropic?.set ? `(set ${j.keys.anthropic.hint || ""}) — type to change` : "sk-ant-…";
@@ -1076,8 +1219,869 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- DEMO / CLEAN MODE (Shift+Cmd+D) ----------
+ *  Shift+Cmd+D toggles `body.is-demo`. CSS rules in styles.css hide the
+ *  numeric readouts, REC indicator, history drawer, notification timestamps
+ *  and conversation timestamps — leaving a cinematic surface for client
+ *  visits. A tiny DEMO badge top-right is added so the operator can see
+ *  at a glance what mode they're in (demo mode is otherwise quiet about
+ *  itself by design). The shortcut is symmetric — same combo exits.
+ *
+ *  Why Shift+Cmd+D: plain Cmd+D is bookmark in Chrome. Shift+Cmd+D matches
+ *  the Shift+Cmd+J pattern of the Agent Console for muscle-memory consistency. */
+
+let _demoBadgeEl = null;
+
+function ensureDemoBadge() {
+  if (_demoBadgeEl) return _demoBadgeEl;
+  const badge = document.createElement("div");
+  badge.id = "demoBadge";
+  badge.textContent = "DEMO";
+  badge.style.cssText = "position:fixed;top:12px;right:12px;z-index:10000;font-family:var(--mono,monospace);font-size:9px;letter-spacing:0.24em;color:#888;border:1px solid #333;padding:3px 8px;background:rgba(0,0,0,0.6);pointer-events:none;display:none;";
+  document.body.appendChild(badge);
+  _demoBadgeEl = badge;
+  return badge;
+}
+
+function toggleDemoMode() {
+  const badge = ensureDemoBadge();
+  const wasDemo = document.body.classList.toggle("is-demo");
+  badge.style.display = wasDemo ? "block" : "none";
+  /* Persist across HUD reloads so a kiosk left in demo mode for a session
+   * doesn't reset on Cmd+R. localStorage is per-origin so each install is
+   * independent. */
+  try { localStorage.setItem("flatout.demoMode", wasDemo ? "1" : "0"); } catch {}
+  console.log(`[Flat-Out] demo mode ${wasDemo ? "ON" : "OFF"}`);
+}
+
+/* Restore on reload. */
+try {
+  if (localStorage.getItem("flatout.demoMode") === "1") {
+    /* Defer to after DOMContentLoaded so the badge can be appended cleanly. */
+    document.addEventListener("DOMContentLoaded", () => {
+      document.body.classList.add("is-demo");
+      const b = ensureDemoBadge();
+      b.style.display = "block";
+    });
+  }
+} catch {}
+
+document.addEventListener("keydown", (e) => {
+  if (e.shiftKey && (e.metaKey || e.ctrlKey) && (e.key === "D" || e.key === "d")) {
+    e.preventDefault();
+    toggleDemoMode();
+  }
+});
+
+/* ---------- ACCESSIBILITY TOGGLES ----------
+ *  Three independent body classes, each toggled by a keyboard chord:
+ *    Shift+Cmd+M → reduced-motion (kills transitions/animations)
+ *    Shift+Cmd+C → high-contrast (white text, red panel borders)
+ *    Shift+Cmd+T → bigger-text (15% bump on root font size)
+ *  Each persists via localStorage so a colleague's preference survives
+ *  Cmd+R. Tiny corner badge stack appears when any are on so the operator
+ *  sees their state without opening settings. */
+
+const A11Y_TOGGLES = [
+  { key: "M", cls: "is-reduced-motion", label: "REDUCED MOTION", storage: "flatout.reducedMotion" },
+  { key: "C", cls: "is-high-contrast",  label: "HIGH CONTRAST",  storage: "flatout.highContrast" },
+  { key: "T", cls: "is-bigger-text",    label: "BIGGER TEXT",    storage: "flatout.biggerText" },
+];
+
+let _a11yBadgeHost = null;
+function ensureA11yBadgeHost() {
+  if (_a11yBadgeHost) return _a11yBadgeHost;
+  const host = document.createElement("div");
+  host.id = "a11yBadges";
+  host.style.cssText = "position:fixed;top:42px;right:12px;z-index:9999;display:flex;flex-direction:column;gap:4px;align-items:flex-end;font-family:var(--mono,monospace);font-size:9px;letter-spacing:0.18em;color:#888;pointer-events:none;";
+  document.body.appendChild(host);
+  _a11yBadgeHost = host;
+  return host;
+}
+
+function refreshA11yBadges() {
+  const host = ensureA11yBadgeHost();
+  while (host.firstChild) host.removeChild(host.firstChild);
+  for (const t of A11Y_TOGGLES) {
+    if (document.body.classList.contains(t.cls)) {
+      const b = el("div", { text: t.label });
+      b.style.cssText = "border:1px solid #333;padding:2px 7px;background:rgba(0,0,0,0.55);";
+      host.appendChild(b);
+    }
+  }
+}
+
+function toggleA11y(toggle) {
+  const on = document.body.classList.toggle(toggle.cls);
+  try { localStorage.setItem(toggle.storage, on ? "1" : "0"); } catch {}
+  refreshA11yBadges();
+  console.log(`[Flat-Out] ${toggle.label} ${on ? "ON" : "OFF"}`);
+}
+
+/* Restore saved state on boot. */
+try {
+  for (const t of A11Y_TOGGLES) {
+    if (localStorage.getItem(t.storage) === "1") {
+      document.addEventListener("DOMContentLoaded", () => {
+        document.body.classList.add(t.cls);
+        refreshA11yBadges();
+      });
+    }
+  }
+} catch {}
+
+document.addEventListener("keydown", (e) => {
+  if (!(e.shiftKey && (e.metaKey || e.ctrlKey))) return;
+  /* Match exact (case-insensitive). Ignore the chord if a modifier we don't
+   * care about is held — prevents a stray Alt+Shift+Cmd+M binding from
+   * firing two toggles. */
+  const k = e.key.toUpperCase();
+  for (const t of A11Y_TOGGLES) {
+    if (k === t.key) {
+      e.preventDefault();
+      toggleA11y(t);
+      return;
+    }
+  }
+});
+
+/* ---------- HELP / CHEAT SHEET (?) ----------
+ *  Plain "?" key opens a searchable overlay listing every tool the LLM can
+ *  invoke. Pulls from /actions (the manifest endpoint shipped this round)
+ *  so it's always in sync with what's actually wired — no stale doc files.
+ *  Operator types to filter by name/description; Esc closes; ? toggles.
+ *
+ *  Why "?" without a modifier: this matches the convention from GitHub,
+ *  Slack, Linear and friends — it's the universal "help" shortcut and
+ *  costs nothing to bind. We guard against text-input focus so it doesn't
+ *  fire while the operator's typing in the typed-confirm modal or settings.
+ */
+
+let _helpModalEl = null;
+let _helpManifest = null;
+
+function ensureHelpModal() {
+  if (_helpModalEl) return _helpModalEl;
+  const root = el("div", { id: "helpModal" });
+  root.hidden = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    #helpModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10001; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
+    #helpModal .hm-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); padding: 24px 28px; width: 760px; max-width: 92vw; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(255,59,59,0.3); }
+    #helpModal h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #helpModal .hm-sub { color: #888; font-size: 11px; margin-bottom: 14px; }
+    #helpModal input.hm-search { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 10px 12px; width: 100%; font-family: inherit; font-size: 14px; box-sizing: border-box; margin-bottom: 14px; }
+    #helpModal input.hm-search:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #helpModal .hm-list { overflow-y: auto; flex: 1; min-height: 200px; }
+    #helpModal .hm-row { color: #ddd; font-size: 12px; padding: 8px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 220px 1fr 80px; gap: 12px; align-items: baseline; }
+    #helpModal .hm-row:last-child { border-bottom: none; }
+    #helpModal .hm-name { color: var(--brand-primary, #ff3b3b); font-weight: 600; letter-spacing: 0.04em; }
+    #helpModal .hm-desc { color: #aaa; line-height: 1.4; }
+    #helpModal .hm-flags { color: #555; font-size: 9px; letter-spacing: 0.12em; text-align: right; text-transform: uppercase; }
+    #helpModal .hm-flag-confirm { color: #ffaa00; }
+    #helpModal .hm-flag-always { color: #00ff88; }
+    #helpModal .hm-empty { color: #555; padding: 24px; text-align: center; }
+    #helpModal .hm-footer { color: #666; font-size: 10px; margin-top: 12px; letter-spacing: 0.05em; }
+  `;
+  root.appendChild(style);
+  const frame = el("div", { className: "hm-frame" });
+  frame.appendChild(el("h2", { text: "Voice command cheat sheet" }));
+  const sub = el("div", { className: "hm-sub", text: "Loading…" });
+  frame.appendChild(sub);
+  const search = el("input", { className: "hm-search", attrs: { type: "text", placeholder: "Filter — try 'send', 'remind', 'photo'…", autocomplete: "off" } });
+  frame.appendChild(search);
+  const list = el("div", { className: "hm-list" });
+  frame.appendChild(list);
+  frame.appendChild(el("div", { className: "hm-footer", text: "Esc or ? to close · CONFIRM = voice 'yes' required · ALWAYS = always available to the model regardless of query" }));
+  root.appendChild(frame);
+  root._refs = { search, list, sub };
+  document.body.appendChild(root);
+  _helpModalEl = root;
+  search.addEventListener("input", () => renderHelpList(root, search.value));
+  search.addEventListener("keydown", (e) => { if (e.key === "Escape") root.hidden = true; });
+  root.addEventListener("click", (e) => { if (e.target === root) root.hidden = true; });
+  return root;
+}
+
+function renderHelpList(root, filter = "") {
+  const { list, sub } = root._refs;
+  if (!_helpManifest) {
+    sub.textContent = "Loading manifest…";
+    return;
+  }
+  const q = filter.trim().toLowerCase();
+  const matches = _helpManifest.filter((a) => {
+    if (!q) return true;
+    return a.name.toLowerCase().includes(q) || (a.description || "").toLowerCase().includes(q);
+  });
+  while (list.firstChild) list.removeChild(list.firstChild);
+  sub.textContent = `${matches.length} of ${_helpManifest.length} commands`;
+  if (!matches.length) {
+    list.appendChild(el("div", { className: "hm-empty", text: `No matches for "${filter}".` }));
+    return;
+  }
+  for (const a of matches) {
+    const row = el("div", { className: "hm-row" });
+    row.appendChild(el("div", { className: "hm-name", text: a.name }));
+    row.appendChild(el("div", { className: "hm-desc", text: (a.description || "").slice(0, 200) }));
+    /* Compact flag column: CONFIRM and/or ALWAYS, comma-separated. Empty
+     * column when neither applies — keeps the eye scanning down the names. */
+    const flagBits = [];
+    if (a.flags?.requiresConfirmation) flagBits.push({ text: "confirm", cls: "hm-flag-confirm" });
+    if (a.flags?.alwaysOn) flagBits.push({ text: "always", cls: "hm-flag-always" });
+    const flagsCell = el("div", { className: "hm-flags" });
+    flagBits.forEach((b, i) => {
+      if (i) flagsCell.appendChild(document.createTextNode(" · "));
+      flagsCell.appendChild(el("span", { className: b.cls, text: b.text }));
+    });
+    row.appendChild(flagsCell);
+    list.appendChild(row);
+  }
+}
+
+async function openHelpModal() {
+  const root = ensureHelpModal();
+  root.hidden = false;
+  setTimeout(() => root._refs.search.focus(), 50);
+  /* Lazy-load + cache. The manifest is small (~30KB at 97 tools); fetching
+   * once per session is fine. Reload after a bridge restart by closing &
+   * reopening the modal — we could be cleverer with a stale check but this
+   * works and is dead simple. */
+  if (!_helpManifest) {
+    try {
+      const r = await fetch("http://localhost:8766/actions", { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        _helpManifest = (j.actions || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+      } else {
+        root._refs.sub.textContent = `Failed to load — bridge returned ${r.status}.`;
+        return;
+      }
+    } catch (e) {
+      root._refs.sub.textContent = `Bridge offline — ${e.message}`;
+      return;
+    }
+  }
+  renderHelpList(root, "");
+}
+
+document.addEventListener("keydown", (e) => {
+  /* Don't fire while typing in any input/textarea — would make filling the
+   * typed-confirm modal or settings forms infuriating. Match Slack/Linear
+   * behaviour: ? in chat means literal "?", ? in body means open help. */
+  const tag = (e.target?.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    if (_helpModalEl && !_helpModalEl.hidden) {
+      _helpModalEl.hidden = true;
+    } else {
+      openHelpModal();
+    }
+  }
+  if (e.key === "Escape" && _helpModalEl && !_helpModalEl.hidden) {
+    _helpModalEl.hidden = true;
+  }
+});
+
+/* ---------- COMMAND PALETTE (Cmd+K) ----------
+ *  Spotlight-style palette over the HUD. Two modes:
+ *    1. Free-text — operator types a sentence ("text Adam I'm running late"),
+ *       Enter routes it through the same llm.askStream path as voice.
+ *       Gets the operator parity with voice without a separate dispatch
+ *       surface — same tool router, same NEEDS_CONFIRMATION gates, same
+ *       persistence to conversation_turns.
+ *    2. Tool browse — type "/" to switch. Filters the live /actions
+ *       manifest by name/description. Selection prepopulates the input
+ *       with a hint so the operator knows what to type next ("/text adam"
+ *       → "text Adam ").
+ *
+ *  Why a palette on top of voice: noisy production studios kill mic
+ *  recognition. A keyboard fallback that uses the same backend keeps the
+ *  whole tool surface usable without rebuilding it. Cmd+K matches Linear,
+ *  GitHub, Slack — universal palette shortcut.
+ *
+ *  Persistence: last 20 queries cached in localStorage so operators don't
+ *  retype "draft an email to ben at..." every time. Up arrow walks history. */
+
+let _paletteEl = null;
+let _paletteHistory = [];
+
+function loadPaletteHistory() {
+  try { _paletteHistory = JSON.parse(localStorage.getItem("flatout.paletteHistory") || "[]"); }
+  catch { _paletteHistory = []; }
+}
+function savePaletteHistory() {
+  try { localStorage.setItem("flatout.paletteHistory", JSON.stringify(_paletteHistory.slice(0, 20))); } catch {}
+}
+
+function ensurePalette() {
+  if (_paletteEl) return _paletteEl;
+  loadPaletteHistory();
+  const root = el("div", { id: "commandPalette" });
+  root.hidden = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    #commandPalette { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10002; display: flex; align-items: flex-start; justify-content: center; padding-top: 18vh; font-family: var(--mono, "JetBrains Mono", monospace); }
+    #commandPalette .cp-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); width: 720px; max-width: 92vw; max-height: 70vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(255,59,59,0.35); }
+    #commandPalette .cp-prompt { padding: 14px 18px; border-bottom: 1px solid #1c1c1c; }
+    #commandPalette input.cp-input { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 12px 14px; width: 100%; font-family: inherit; font-size: 16px; box-sizing: border-box; }
+    #commandPalette input.cp-input:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #commandPalette .cp-mode { color: #888; font-size: 10px; letter-spacing: 0.16em; margin-top: 6px; text-transform: uppercase; }
+    #commandPalette .cp-mode strong { color: var(--brand-primary, #ff3b3b); }
+    #commandPalette .cp-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+    #commandPalette .cp-item { padding: 8px 18px; cursor: pointer; display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: baseline; color: #ddd; font-size: 12px; border-left: 2px solid transparent; }
+    #commandPalette .cp-item:hover, #commandPalette .cp-item.is-active { background: rgba(255,59,59,0.08); border-left-color: var(--brand-primary, #ff3b3b); }
+    #commandPalette .cp-name { color: var(--brand-primary, #ff3b3b); font-weight: 600; letter-spacing: 0.04em; }
+    #commandPalette .cp-desc { color: #888; line-height: 1.4; }
+    #commandPalette .cp-empty { color: #555; padding: 30px; text-align: center; font-size: 11px; }
+    #commandPalette .cp-foot { color: #555; font-size: 9px; padding: 8px 18px; border-top: 1px solid #1c1c1c; letter-spacing: 0.1em; text-transform: uppercase; }
+  `;
+  root.appendChild(style);
+  const frame = el("div", { className: "cp-frame" });
+  const promptHost = el("div", { className: "cp-prompt" });
+  const input = el("input", { className: "cp-input", attrs: { type: "text", placeholder: "Type a command — try 'text Adam I'm late' or '/' to browse tools", autocomplete: "off", spellcheck: "false" } });
+  const modeEl = el("div", { className: "cp-mode" });
+  modeEl.appendChild(document.createTextNode("Mode: "));
+  const modeStrong = el("strong", { text: "FREE TEXT" });
+  modeEl.appendChild(modeStrong);
+  modeEl.appendChild(document.createTextNode(" · Enter to send · ↑/↓ history · / for tools · Esc to close"));
+  promptHost.appendChild(input);
+  promptHost.appendChild(modeEl);
+  frame.appendChild(promptHost);
+  const list = el("div", { className: "cp-list" });
+  frame.appendChild(list);
+  frame.appendChild(el("div", { className: "cp-foot", text: "Free-text routes through the voice loop. Tool browse types the name into the prompt." }));
+  root.appendChild(frame);
+
+  let activeIdx = 0;
+  let mode = "free";        // "free" | "tools"
+  let lastFiltered = [];    // what's currently rendered in tools mode
+  let historyIdx = -1;
+
+  function setMode(next) {
+    mode = next;
+    modeStrong.textContent = next === "tools" ? "TOOL BROWSE" : "FREE TEXT";
+    while (list.firstChild) list.removeChild(list.firstChild);
+    if (next === "tools") drawTools(input.value.replace(/^\//, ""));
+  }
+
+  function drawTools(filter) {
+    while (list.firstChild) list.removeChild(list.firstChild);
+    if (!_helpManifest) {
+      list.appendChild(el("div", { className: "cp-empty", text: "Loading tool catalogue…" }));
+      return;
+    }
+    const q = (filter || "").trim().toLowerCase();
+    const matched = _helpManifest.filter((a) => {
+      if (!q) return true;
+      return a.name.toLowerCase().includes(q) || (a.description || "").toLowerCase().includes(q);
+    }).slice(0, 60);
+    lastFiltered = matched;
+    activeIdx = 0;
+    if (!matched.length) {
+      list.appendChild(el("div", { className: "cp-empty", text: `No tools matching "${q}".` }));
+      return;
+    }
+    matched.forEach((a, i) => {
+      const item = el("div", { className: "cp-item" + (i === 0 ? " is-active" : "") });
+      item.appendChild(el("div", { className: "cp-name", text: a.name }));
+      item.appendChild(el("div", { className: "cp-desc", text: (a.description || "").slice(0, 140) }));
+      item.addEventListener("mousedown", (e) => { e.preventDefault(); selectTool(a); });
+      list.appendChild(item);
+    });
+  }
+
+  function selectTool(action) {
+    /* When the operator picks a tool from browse mode, drop the leading "/"
+     * and prefix the tool name as a verb the LLM will recognise. The
+     * operator can append params naturally ("send_imessage to Adam Hello"). */
+    const verb = action.name.replace(/^request_/, "").replace(/_/g, " ");
+    input.value = `${verb} `;
+    setMode("free");
+    input.focus();
+  }
+
+  async function dispatchFreeText(text) {
+    if (!text.trim()) return;
+    /* Stash in history. Most-recent first; cap at 20. */
+    _paletteHistory = [text, ..._paletteHistory.filter((q) => q !== text)].slice(0, 20);
+    savePaletteHistory();
+    historyIdx = -1;
+    /* Close the palette before dispatch — the response shows up in the
+     * normal transcript bubble + speedo states, not in the palette. */
+    root.hidden = true;
+    /* Use the same WebSocket path voice uses. The handleHeard() in voice.js
+     * is the entry point; but it expects to be called from the wake/passive
+     * loop. Instead we go straight to bridge-client's askStream — same
+     * subscription pattern, no wake-word detection needed. */
+    if (window.__paletteDispatch) {
+      window.__paletteDispatch(text);
+    } else {
+      console.warn("[Flat-Out] palette dispatch hook not wired");
+    }
+  }
+
+  input.addEventListener("input", () => {
+    if (input.value.startsWith("/")) {
+      if (mode !== "tools") setMode("tools");
+      else drawTools(input.value.replace(/^\//, ""));
+    } else if (mode !== "free") {
+      setMode("free");
+    }
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { root.hidden = true; return; }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (mode === "tools" && lastFiltered.length) {
+        selectTool(lastFiltered[activeIdx]);
+      } else {
+        dispatchFreeText(input.value);
+      }
+      return;
+    }
+    if (mode === "tools") {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        activeIdx = Math.min(activeIdx + 1, lastFiltered.length - 1);
+        Array.from(list.children).forEach((c, i) => c.classList.toggle("is-active", i === activeIdx));
+        list.children[activeIdx]?.scrollIntoView({ block: "nearest" });
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        activeIdx = Math.max(activeIdx - 1, 0);
+        Array.from(list.children).forEach((c, i) => c.classList.toggle("is-active", i === activeIdx));
+        list.children[activeIdx]?.scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
+    /* Free-text mode — up/down walks history. */
+    if (e.key === "ArrowUp" && _paletteHistory.length) {
+      e.preventDefault();
+      historyIdx = Math.min(historyIdx + 1, _paletteHistory.length - 1);
+      input.value = _paletteHistory[historyIdx] || "";
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+    if (e.key === "ArrowDown" && historyIdx >= 0) {
+      e.preventDefault();
+      historyIdx -= 1;
+      input.value = historyIdx >= 0 ? _paletteHistory[historyIdx] : "";
+    }
+  });
+
+  root.addEventListener("click", (e) => { if (e.target === root) root.hidden = true; });
+  document.body.appendChild(root);
+  _paletteEl = root;
+  root._refs = { input, modeStrong, list, setMode, drawTools };
+  return root;
+}
+
+async function openPalette() {
+  const root = ensurePalette();
+  /* Pre-load tool manifest if we don't already have it from the help modal. */
+  if (!_helpManifest) {
+    try {
+      const r = await fetch("http://localhost:8766/actions", { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        _helpManifest = (j.actions || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+      }
+    } catch {}
+  }
+  root._refs.input.value = "";
+  root._refs.setMode("free");
+  root.hidden = false;
+  setTimeout(() => root._refs.input.focus(), 50);
+}
+
+/* ---------- PROFILE LOCK-SCREEN ----------
+ *  When more than one profile exists in the registry AND the last operator
+ *  activity is older than the lock threshold (default 30 min), show a
+ *  full-screen profile picker on boot. This is the multi-operator scenario
+ *  — agency kiosk shared by lead photographer / editor / MD, each with
+ *  their own voice / colour / brand / audit identity. Single-profile
+ *  installs never see this.
+ *
+ *  Why a lock-screen rather than a settings dropdown: the active profile
+ *  drives the Storage namespace prefix, the brand colour, the identity in
+ *  the audit log. Picking it should be the FIRST action of a session, not
+ *  buried in a settings modal. The picker can be skipped by setting
+ *  `flatout.skipLockScreen = "1"` for a single-operator install.
+ *
+ *  Picker logic:
+ *  - More than one profile registered (otherwise no point asking)
+ *  - Last activity timestamp > 30 min ago (otherwise it's a quick reload —
+ *    operator is already working, don't disrupt)
+ *  - Skip if `flatout.skipLockScreen` is set */
+
+const LOCK_TIMEOUT_MS = 30 * 60 * 1000;
+
+async function maybeShowProfileLockScreen() {
+  /* Read profiles + last-activity directly from localStorage to avoid an
+   * import cycle with the ESM profiles.js module — boot order matters. */
+  let profiles = [];
+  try {
+    const raw = localStorage.getItem("flatout.profiles");
+    profiles = raw ? JSON.parse(raw) : [];
+  } catch {}
+  if (!Array.isArray(profiles) || profiles.length < 2) return;
+  if (localStorage.getItem("flatout.skipLockScreen") === "1") return;
+  const lastActivity = Number(localStorage.getItem("flatout.lastActivity") || 0);
+  if (lastActivity && (Date.now() - lastActivity) < LOCK_TIMEOUT_MS) return;
+  /* Show the picker. Returns a promise that resolves when the operator picks
+   * (or skips with the bypass shortcut). */
+  await renderLockScreen(profiles);
+}
+
+function renderLockScreen(profiles) {
+  return new Promise((resolve) => {
+    const activeId = localStorage.getItem("flatout.activeProfile") || "default";
+    const root = el("div", { id: "lockScreen" });
+    const style = document.createElement("style");
+    style.textContent = `
+      #lockScreen { position: fixed; inset: 0; background: #000; z-index: 11000; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
+      #lockScreen h1 { color: var(--brand-primary, #ff3b3b); margin: 0 0 6px; font-size: 22px; letter-spacing: 0.32em; text-transform: uppercase; }
+      #lockScreen .ls-sub { color: #888; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 38px; }
+      #lockScreen .ls-grid { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; max-width: 1080px; }
+      #lockScreen .ls-card { background: #0b0b0b; border: 2px solid #1c1c1c; padding: 28px 32px; min-width: 220px; cursor: pointer; transition: transform 120ms ease, border-color 120ms ease; text-align: center; }
+      #lockScreen .ls-card:hover, #lockScreen .ls-card.is-active { border-color: var(--brand-primary, #ff3b3b); transform: translateY(-3px); box-shadow: 0 12px 40px rgba(255,59,59,0.35); }
+      #lockScreen .ls-card .ls-name { color: #fff; font-size: 18px; letter-spacing: 0.1em; margin-bottom: 6px; }
+      #lockScreen .ls-card .ls-id { color: #555; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+      #lockScreen .ls-card .ls-active-tag { color: var(--brand-primary, #ff3b3b); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 12px; }
+      #lockScreen .ls-foot { color: #555; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 38px; }
+      #lockScreen .ls-foot a { color: #888; text-decoration: none; cursor: pointer; }
+      #lockScreen .ls-foot a:hover { color: var(--brand-primary, #ff3b3b); }
+    `;
+    root.appendChild(style);
+    root.appendChild(el("h1", { text: "Who's at the wheel?" }));
+    root.appendChild(el("div", { className: "ls-sub", text: "Pick your operator profile to begin the session" }));
+    const grid = el("div", { className: "ls-grid" });
+    for (const p of profiles) {
+      const card = el("div", { className: "ls-card" });
+      if (p.id === activeId) card.classList.add("is-active");
+      card.appendChild(el("div", { className: "ls-name", text: p.name || p.id }));
+      card.appendChild(el("div", { className: "ls-id", text: p.id }));
+      if (p.id === activeId) card.appendChild(el("div", { className: "ls-active-tag", text: "Last session" }));
+      card.addEventListener("click", () => choose(p.id));
+      grid.appendChild(card);
+    }
+    root.appendChild(grid);
+    /* Bypass link — useful for single-operator scenarios where the registry
+     * happens to have stale entries. Sets the skip flag so it doesn't ask
+     * again until the operator clears localStorage. */
+    const foot = el("div", { className: "ls-foot" });
+    const bypass = el("a", { text: "Skip this screen for next time" });
+    bypass.addEventListener("click", () => {
+      try { localStorage.setItem("flatout.skipLockScreen", "1"); } catch {}
+      cleanup();
+      resolve();
+    });
+    foot.appendChild(bypass);
+    root.appendChild(foot);
+    document.body.appendChild(root);
+
+    function cleanup() { root.remove(); }
+    function choose(id) {
+      try { localStorage.setItem("flatout.activeProfile", id); } catch {}
+      try { localStorage.setItem("flatout.lastActivity", String(Date.now())); } catch {}
+      /* Reload — Storage namespacing changes mean the safest path is a full
+       * page reload rather than trying to re-init every module that already
+       * read from localStorage. */
+      cleanup();
+      window.location.reload();
+    }
+
+    /* Keyboard support: ↓ / ↑ navigate, Enter selects. Default focus on
+     * the active profile if any, otherwise the first card. */
+    let idx = Math.max(0, profiles.findIndex((p) => p.id === activeId));
+    const cards = grid.querySelectorAll(".ls-card");
+    cards[idx]?.classList.add("is-active");
+    function refocus() { cards.forEach((c, i) => c.classList.toggle("is-active", i === idx)); }
+    document.addEventListener("keydown", function lockKey(e) {
+      if (root.parentElement !== document.body) {
+        document.removeEventListener("keydown", lockKey);
+        return;
+      }
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); idx = (idx + 1) % cards.length; refocus(); }
+      if (e.key === "ArrowLeft"  || e.key === "ArrowUp"  ) { e.preventDefault(); idx = (idx - 1 + cards.length) % cards.length; refocus(); }
+      if (e.key === "Enter") { e.preventDefault(); choose(profiles[idx].id); }
+    });
+  });
+}
+
+/* Track activity on any keypress / click so the lock-screen knows when to
+ * stay quiet on a quick reload vs pop on a fresh session. */
+function bumpActivity() {
+  try { localStorage.setItem("flatout.lastActivity", String(Date.now())); } catch {}
+}
+document.addEventListener("keydown", bumpActivity, { capture: true, passive: true });
+document.addEventListener("click", bumpActivity, { capture: true, passive: true });
+
+/* Cmd+K (Ctrl+K elsewhere) toggles the palette. */
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target?.tagName || "").toLowerCase();
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === "k" || e.key === "K")) {
+    /* Allow opening from inside an input — the palette IS an input, no point
+     * making the operator click out first. */
+    e.preventDefault();
+    if (_paletteEl && !_paletteEl.hidden) {
+      _paletteEl.hidden = true;
+    } else {
+      openPalette();
+    }
+  }
+});
+
+/* ---------- HISTORY DRAWER (H) ----------
+ *  Slide-out from the right edge listing every conversation turn the bridge
+ *  has persisted (conversation_turns table — populated by askLLM and
+ *  askLLMStream). Each row: timestamp, role badge (HEARD / FLAT-OUT), the
+ *  content, plus chips for any tools that fired during that turn.
+ *
+ *  Why a drawer not a modal: history is something the operator skims while
+ *  Jarvis stays operational behind it. Modals stop the world; the drawer
+ *  lets the speedometer keep ticking and the wake mic stay live.
+ *
+ *  H key opens / closes (operator-input guarded same as ?). Escape closes. */
+
+let _historyDrawerEl = null;
+let _historyTurnsCache = null;
+
+function ensureHistoryDrawer() {
+  if (_historyDrawerEl) return _historyDrawerEl;
+  const root = el("aside", { id: "historyDrawer" });
+  root.hidden = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    #historyDrawer { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; max-width: 95vw; background: #050505; border-left: 2px solid var(--brand-primary, #ff3b3b); z-index: 9998; display: flex; flex-direction: column; font-family: var(--mono, "JetBrains Mono", monospace); transform: translateX(0); transition: transform 220ms ease; box-shadow: -10px 0 40px rgba(0,0,0,0.6); }
+    #historyDrawer[hidden] { display: flex; transform: translateX(110%); pointer-events: none; }
+    #historyDrawer .hd-head { padding: 18px 22px 10px; border-bottom: 1px solid #1c1c1c; }
+    #historyDrawer h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #historyDrawer .hd-sub { color: #888; font-size: 10px; margin-bottom: 12px; }
+    #historyDrawer input.hd-search { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 8px 10px; width: 100%; font-family: inherit; font-size: 12px; box-sizing: border-box; }
+    #historyDrawer input.hd-search:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #historyDrawer .hd-list { flex: 1; overflow-y: auto; padding: 8px 18px 18px; }
+    #historyDrawer .hd-turn { padding: 10px 0; border-bottom: 1px dashed #1a1a1a; }
+    #historyDrawer .hd-turn:last-child { border-bottom: none; }
+    #historyDrawer .hd-meta { display: flex; gap: 8px; align-items: baseline; font-size: 9px; letter-spacing: 0.1em; color: #555; margin-bottom: 4px; text-transform: uppercase; }
+    #historyDrawer .hd-role { color: var(--brand-primary, #ff3b3b); font-weight: 700; }
+    #historyDrawer .hd-role.user { color: #ccc; }
+    #historyDrawer .hd-content { color: #ddd; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
+    #historyDrawer .hd-tools { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+    #historyDrawer .hd-tool-chip { background: rgba(255,59,59,0.12); color: var(--brand-primary, #ff3b3b); border: 1px solid rgba(255,59,59,0.3); font-size: 9px; padding: 1px 6px; letter-spacing: 0.08em; }
+    #historyDrawer .hd-empty { color: #555; padding: 32px 0; text-align: center; font-size: 11px; }
+    #historyDrawer .hd-footer { color: #555; font-size: 9px; padding: 8px 22px; border-top: 1px solid #1c1c1c; letter-spacing: 0.08em; text-transform: uppercase; }
+  `;
+  root.appendChild(style);
+
+  const head = el("div", { className: "hd-head" });
+  head.appendChild(el("h2", { text: "Conversation history" }));
+  const sub = el("div", { className: "hd-sub", text: "Recent turns from this and previous sessions." });
+  head.appendChild(sub);
+  const search = el("input", { className: "hd-search", attrs: { type: "text", placeholder: "Filter — try a name, project, tool…", autocomplete: "off" } });
+  head.appendChild(search);
+  root.appendChild(head);
+  const list = el("div", { className: "hd-list" });
+  root.appendChild(list);
+  root.appendChild(el("div", { className: "hd-footer", text: "H or Esc to close · turns saved across reloads" }));
+
+  document.body.appendChild(root);
+  _historyDrawerEl = root;
+  root._refs = { search, list, sub };
+  search.addEventListener("input", () => renderHistoryList(root, search.value));
+  search.addEventListener("keydown", (e) => { if (e.key === "Escape") root.hidden = true; });
+  return root;
+}
+
+function renderHistoryList(root, filter = "") {
+  const { list, sub } = root._refs;
+  while (list.firstChild) list.removeChild(list.firstChild);
+  if (!_historyTurnsCache) {
+    list.appendChild(el("div", { className: "hd-empty", text: "Loading…" }));
+    return;
+  }
+  const q = filter.trim().toLowerCase();
+  const matches = _historyTurnsCache.filter((t) => {
+    if (!q) return true;
+    if ((t.content || "").toLowerCase().includes(q)) return true;
+    if ((t.tools || []).some((tool) => tool.toLowerCase().includes(q))) return true;
+    return false;
+  });
+  sub.textContent = `${matches.length} of ${_historyTurnsCache.length} turns${q ? ` matching "${q}"` : ""}`;
+  if (!matches.length) {
+    list.appendChild(el("div", { className: "hd-empty", text: q ? `No turns matching "${filter}".` : "No conversation history yet — say something to Jarvis." }));
+    return;
+  }
+  /* Render newest first (the bridge already sorts that way). */
+  const currentSession = (() => { try { return localStorage.getItem("flatout.sessionId"); } catch { return null; } })();
+  for (const t of matches) {
+    const row = el("div", { className: "hd-turn" });
+    const meta = el("div", { className: "hd-meta" });
+    const ts = new Date(t.ts);
+    const mark = ts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    const date = ts.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    const roleLabel = t.role === "assistant" ? "FLAT-OUT" : "HEARD";
+    const roleSpan = el("span", { className: `hd-role ${t.role === "user" ? "user" : ""}`, text: roleLabel });
+    meta.appendChild(roleSpan);
+    meta.appendChild(el("span", { text: `${date} ${mark}` }));
+    if (t.sessionId === currentSession) meta.appendChild(el("span", { text: "this session" }));
+    row.appendChild(meta);
+    row.appendChild(el("div", { className: "hd-content", text: t.content }));
+    if (t.tools && t.tools.length) {
+      const chips = el("div", { className: "hd-tools" });
+      for (const tool of t.tools) chips.appendChild(el("span", { className: "hd-tool-chip", text: tool }));
+      row.appendChild(chips);
+    }
+    list.appendChild(row);
+  }
+}
+
+async function openHistoryDrawer() {
+  const root = ensureHistoryDrawer();
+  root.hidden = false;
+  setTimeout(() => root._refs.search.focus(), 60);
+  /* Always re-fetch on open — turns accumulate while the drawer was closed.
+   * 200 turns is plenty for a typical week of use; cheap to grab fresh. */
+  try {
+    const r = await fetch("http://localhost:8766/history?limit=200", { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      _historyTurnsCache = j.turns || [];
+    } else {
+      _historyTurnsCache = [];
+    }
+  } catch { _historyTurnsCache = []; }
+  renderHistoryList(root, root._refs.search.value || "");
+}
+
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target?.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  if ((e.key === "h" || e.key === "H") && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    e.preventDefault();
+    if (_historyDrawerEl && !_historyDrawerEl.hidden) {
+      _historyDrawerEl.hidden = true;
+    } else {
+      openHistoryDrawer();
+    }
+  }
+  if (e.key === "Escape" && _historyDrawerEl && !_historyDrawerEl.hidden) {
+    _historyDrawerEl.hidden = true;
+  }
+});
+
+/* ---------- FIRST-RUN ONBOARDING TIPS ----------
+ *  Tiny cheat panel pinned to the bottom-left for ~60 seconds the FIRST
+ *  time a profile loads the HUD. Lists 6-8 voice commands worth trying
+ *  so the operator (or a visiting team member) discovers what's possible
+ *  without reading docs. Dismissed by:
+ *    - Auto-fade after 60s
+ *    - Click anywhere on the panel
+ *    - Esc
+ *    - Detection of any wake-word activity (operator's gone past
+ *      "discovery" mode — the panel becomes noise)
+ *
+ *  Persists a per-profile flag in localStorage so it never re-appears for
+ *  the same operator. Each profile gets its own onboarding (a new operator
+ *  on a shared kiosk gets the panel even if Adam's seen it before).
+ *
+ *  Why pinned bottom-left rather than a centred modal: discovery should
+ *  whisper, not interrupt. Operator can ignore it and use the kiosk
+ *  normally; the panel hangs around in the corner as a reference. */
+
+const ONBOARDING_TIPS = [
+  { say: '"Hey Flat-Out, what\'s in the diary today?"',  why: "Today's calendar — get_upcoming_events" },
+  { say: '"Open Google Maps for Manchester."',           why: "Fast URL launcher — open_url" },
+  { say: '"Text Adam I\'ll be ten minutes late."',       why: "iMessage with confirmation gate" },
+  { say: '"Set a 25-minute timer for the chicken."',     why: "In-HUD countdown + chime" },
+  { say: '"Find me a 50mm prime under £400 on WEX."',    why: "Vision-driven product browse" },
+  { say: '"Summarise my day."',                          why: "End-of-day activity digest" },
+  { say: '"Shut down."',                                  why: "Mutes mic + dims HUD" },
+];
+
+const ONBOARDING_KEY_PREFIX = "flatout.onboardingSeen.";
+
+function shouldShowOnboarding() {
+  try {
+    const profileId = localStorage.getItem("flatout.activeProfile") || "default";
+    return localStorage.getItem(ONBOARDING_KEY_PREFIX + profileId) !== "1";
+  } catch { return false; }
+}
+
+function markOnboardingSeen() {
+  try {
+    const profileId = localStorage.getItem("flatout.activeProfile") || "default";
+    localStorage.setItem(ONBOARDING_KEY_PREFIX + profileId, "1");
+  } catch {}
+}
+
+function maybeShowOnboarding() {
+  if (!shouldShowOnboarding()) return;
+  /* Defer to next tick so the rest of boot has finished mounting — we don't
+   * want the panel painting before the HUD's actual chrome. */
+  setTimeout(renderOnboarding, 800);
+}
+
+function renderOnboarding() {
+  const root = document.createElement("div");
+  root.id = "onboardingTips";
+  const style = document.createElement("style");
+  style.textContent = `
+    #onboardingTips { position: fixed; bottom: 18px; left: 18px; z-index: 9990; background: rgba(11, 11, 11, 0.92); border: 1px solid var(--brand-primary, #ff3b3b); padding: 14px 18px 12px; max-width: 360px; font-family: var(--mono, "JetBrains Mono", monospace); cursor: pointer; box-shadow: 0 0 30px rgba(255, 59, 59, 0.22); animation: onboardingSlide 320ms ease forwards; }
+    #onboardingTips.is-fading { opacity: 0; transition: opacity 600ms ease; }
+    @keyframes onboardingSlide { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    #onboardingTips h4 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #onboardingTips .obt-sub { color: #888; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 10px; }
+    #onboardingTips .obt-row { padding: 4px 0; border-bottom: 1px dashed #1a1a1a; }
+    #onboardingTips .obt-row:last-child { border-bottom: none; }
+    #onboardingTips .obt-say { color: #eee; font-size: 11px; line-height: 1.4; }
+    #onboardingTips .obt-why { color: #555; font-size: 9px; letter-spacing: 0.06em; }
+    #onboardingTips .obt-foot { color: #555; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; margin-top: 10px; padding-top: 8px; border-top: 1px solid #1a1a1a; }
+  `;
+  root.appendChild(style);
+  const h = document.createElement("h4"); h.textContent = "Try saying"; root.appendChild(h);
+  const sub = document.createElement("div"); sub.className = "obt-sub"; sub.textContent = "First-run cheat sheet · click to dismiss"; root.appendChild(sub);
+  for (const tip of ONBOARDING_TIPS) {
+    const row = document.createElement("div"); row.className = "obt-row";
+    const say = document.createElement("div"); say.className = "obt-say"; say.textContent = tip.say; row.appendChild(say);
+    const why = document.createElement("div"); why.className = "obt-why"; why.textContent = tip.why; row.appendChild(why);
+    root.appendChild(row);
+  }
+  const foot = document.createElement("div"); foot.className = "obt-foot"; foot.textContent = "Press ? anytime for the full command catalogue."; root.appendChild(foot);
+  document.body.appendChild(root);
+
+  let dismissed = false;
+  function dismiss() {
+    if (dismissed) return;
+    dismissed = true;
+    markOnboardingSeen();
+    root.classList.add("is-fading");
+    setTimeout(() => root.remove(), 700);
+    document.removeEventListener("keydown", onKey, true);
+  }
+  function onKey(e) {
+    if (e.key === "Escape") dismiss();
+  }
+  root.addEventListener("click", dismiss);
+  document.addEventListener("keydown", onKey, true);
+  /* Auto-fade after 60s. Operator who hasn't engaged by then has either
+   * already moved on or doesn't need the prompt. */
+  setTimeout(dismiss, 60_000);
+}
+
 /* ---------- BOOT ---------- */
-function boot() {
+async function boot() {
+  /* Multi-operator profile lock-screen — only renders if the registry has
+   * more than one profile AND the kiosk's been idle longer than the lock
+   * timeout. Returns immediately on single-profile installs. Awaited so a
+   * profile switch (which reloads the page) doesn't race with the rest of
+   * boot. */
+  await maybeShowProfileLockScreen();
+  /* First-run onboarding tips — per-profile. Quiet pinned panel; never shown
+   * twice for the same operator. */
+  maybeShowOnboarding();
   buildTicks();
   buildNumerals();
   renderCalendar();

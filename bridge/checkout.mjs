@@ -28,9 +28,13 @@
  */
 
 import * as Argos from "./checkout/argos.mjs";
+import * as AmazonUk from "./checkout/amazon-uk.mjs";
+import * as Mpb from "./checkout/mpb.mjs";
 
 const ADAPTERS = [
   Argos,
+  AmazonUk,
+  Mpb,
 ];
 
 /** Find an adapter for a registrable domain. Suffix-match so subdomains

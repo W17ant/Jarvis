@@ -1,8 +1,54 @@
 # Flat-Out HUD — Outstanding Work
 
-Living todo list. Everything discussed in our planning sessions that hasn't shipped yet. FOM-flavoured throughout — items are sequenced for an automotive PR/content agency's daily workflow, not generic kiosk polish.
+Living todo list. Honest reckoning: a lot of this list was stale by the time anyone read it — many items marked outstanding had already shipped. Cleaned up below.
 
 **Legend**: 🟥 critical · 🟧 high · 🟨 medium · 🟩 low · ⚙️ architecture · 🚀 FOM workflow win
+
+---
+
+## Genuinely outstanding
+
+These are NOT shipped and need real work:
+
+- 🟥 ⚙️ **voice.js extraction** (~2 days) — file is 2900+ LOC and growing every patch. Refactor into bridge-client / tts / state / modal-queue / drawer modules. Not user-visible; pure structural debt. Risky to do mid-sprint.
+- 🟧 🚀 **Multi-machine memory sync** (~3-5 days) — periodic backup of `data/memory.db` to NAS or shared encrypted folder. Operator A's contacts visible on operator B's kiosk. Agency-wide knowledge not personal. Needs conflict-resolution design first.
+- 🟧 🚀 **Live shoot mode (phone-as-mic)** (~1 week) — the one transformative piece of the original Phase 5 plan still missing. Phone walks the studio, real-time captions per shot, "flag this as hero" mid-frame, contact sheet ready by lunch.
+- 🟧 ⚙️ **Multi-operator profile picker** (~2-3 days) — namespace prep already exists; modal lock-screen picker on boot doesn't.
+- 🟧 **HUD command palette (Cmd+K)** (~1.5 days) — keyboard fallback for everything voice does. The `/actions` manifest endpoint already serves the data; just needs the palette UI.
+- 🟨 ⚙️ **Containerised render env** (~3-5 days) — Docker per video job with ffmpeg + ImageMagick + exiftool pre-baked. Concurrent renders stop fighting over `output/`. Already partially scaffolded behind `RENDER_USE_DOCKER=1` env var.
+- 🟨 **Lane-grouped progress viz** (~1-2 days) — video pipeline stages as parallel lanes in the task strip. Bonus for client demos: they watch the work happen.
+- 🟨 **Per-profile theming persisted** (~1 day) — each operator's brand colour persists per session.
+- 🟩 **Tablet/iPad responsive variant** (~2-3 days) — operator's iPad mirrors HUD when away from desk.
+- 🟩 **Layout customisation** (~3 days) — drag panels to reposition, save per-profile.
+
+---
+
+## Shipped (was previously listed as outstanding)
+
+The TODO had marked these critical / high / medium. They're all in the code now:
+
+- ✅ Embedding-based tool router (`bridge/tool-router.mjs` + nomic-embed)
+- ✅ Auto-cull a shoot folder (`auto_cull` tool, `bridge/autocull.mjs`)
+- ✅ Brand-pack auto-export (`build_brand_pack`, `bridge/brandpack.mjs`)
+- ✅ Pre-shoot kit checklist (`pre_shoot_checklist`)
+- ✅ Press-cycle radar (`press_cycle_radar`, daily schedule)
+- ✅ Manufacturer media-day calendar (`add_media_day` / `list_media_days`)
+- ✅ EOD activity digest (`request_eod_digest`, `bridge/eod-digest.mjs`)
+- ✅ Editorial style memory + visual style learner (`extract_style`, `learn_visual_style`)
+- ✅ Sentence-level TTS streaming + barge-in (`askLLMStream` + `startBargeInMonitor`)
+- ✅ Wake-flick on detected wake word (already wired in voice.js)
+- ✅ Demo / Clean mode toggle (Shift+Cmd+D)
+- ✅ Help / cheat sheet HUD (`?` opens searchable command list from `/actions`)
+- ✅ Action manifest (`GET /actions`)
+- ✅ Accessibility-tree primitive (`read_active_window`)
+- ✅ Per-turn conversation history persistence + drawer (`H` key, `bridge/memory.mjs`)
+- ✅ MCP server support (`POST /mcp` JSON-RPC)
+- ✅ Reduced motion / high contrast / bigger text (Shift+Cmd+M/C/T)
+- ✅ Containerised render env scaffold (`RENDER_USE_DOCKER=1`)
+- ✅ Cost / usage telemetry (`bridge/usage-log.mjs` + Agent Console)
+- ✅ Cancel active jobs (`cancel_active_jobs` tool, Vision + Browse cooperative abort)
+
+---
 
 ---
 
@@ -41,8 +87,26 @@ Living todo list. Everything discussed in our planning sessions that hasn't ship
 
 ### Outstanding from this session — deferred / not safe to ship blind
 
-- 🟧 **Argos adapter checkout-step wiring** — selectors need real verification on argos.co.uk. Scaffold has product search + cap-check + basket; checkout form-fill is intentionally stubbed. Bring up the bridge headed-Chromium session, complete one purchase manually so cookies persist, then use Playwright codegen to record selectors and wire them in.
+- 🟧 **Argos / Amazon UK / MPB checkout form-fill** — three adapter scaffolds shipped (search → product pick → basket cap-check), checkout-step click-by-click intentionally stubbed. Each needs one-off Playwright codegen on a real logged-in session so the form selectors are verified against the live DOM. Bot-detection severity: Argos low, MPB low, Amazon medium (captchas + interstitials).
 - 🟨 **`set_lights({scene, room})`** — Philips Hue API integration. Skipped because it needs per-install Hue bridge IP + bridge user token, plus the operator may not have Hue at all. Add when there's a known target setup.
+
+### Shipped after the first commit pair
+
+- ✅ **Category-tiered spending caps** — replaced flat per-tx cap with category-specific limits. Photography £1500/tx, electronics £300, travel £500, groceries £50, takeaway £40, default £75. Plus per-category daily/weekly/monthly + a global cross-category daily ceiling of £2000.
+- ✅ **Expanded merchant allowlist** — 25 UK retailers across 8 categories: groceries (Tesco/Sainsbury's/Ocado/Waitrose), takeaway (Uber Eats/Deliveroo/Just Eat), electronics (Currys/AO), photography (WEX/Park Cameras/MPB/Calumet), homeware (John Lewis/IKEA/Wayfair), travel (Skyscanner/Kayak/Booking/Trainline/National Rail), office (Ryman/Viking), default (Amazon/Argos).
+- ✅ **`search_products` tool** — uses request_browse to compare options on a merchant without buying. Returns shortlist; operator picks; LLM follows up with request_purchase. Lets the operator say "find me a 50mm prime under £400" without committing.
+- ✅ **`find_flights` tool** — drives Skyscanner search via request_browse. Read-only — does NOT book. Operator goes to airline directly via open_url after picking.
+- ✅ **`learn_visual_style` tool** (`bridge/visual-style.mjs`) — folder OR list of paths, both stills AND videos. ffmpeg samples 4 keyframes per video file. Vision LLM produces structured prose (palette/lighting/contrast/framing/grading/mood) alongside the existing numerical signature. Stored in style-memory's edit_styles table.
+
+### Shipped after the autonomy expansion
+
+- ✅ **Embedding-based tool router** (`bridge/tool-router.mjs`) — at 97 tools the full TOOLS array was too much context for qwen2.5:14b's tool-selector. Now: each tool's `name + description + param-names` embedded via `nomic-embed-text` at boot (1.5s, persisted to `data/tool-index.json`, hash-invalidated on TOOLS change). Per query, embed the operator's utterance, cosine-rank the catalogue, pass top-20 + 10 always-on tools (recall, web_search, open_url, enter_sleep_mode, etc) to Ollama. Wired into both `askLLM` (non-streaming) and `askLLMStream`. Resolved once per query so all hops share the same filtered set.
+- ✅ **`/health` exposes index status** — `toolRouter: { ready, toolCount, hash, alwaysOn }`. The Agent Console will surface this in a future patch.
+
+### What's needed for video-style learning to work end-to-end
+
+- The local `qwen2.5vl:7b` can ingest the extracted keyframes but produces less-detailed prose than Claude / GPT-4o. For best results, set `LLM_PROVIDER_VISION=anthropic` (or `openai`) in the Agent Console — falls back to Ollama silently if no key is set.
+- Adam needs `ffmpeg` on PATH (already required by Jarvis for video editing — should already be there via Homebrew).
 
 ---
 

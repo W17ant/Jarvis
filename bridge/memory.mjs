@@ -68,6 +68,23 @@ CREATE TABLE IF NOT EXISTS conversation_summaries (
   started_at INTEGER NOT NULL,
   ended_at INTEGER NOT NULL
 );
+
+/* Per-turn persistence — every operator query and Jarvis reply lands here.
+ * conversation_summaries is kept too (end-of-session digests for long-term
+ * recall); turns are the raw transcript. session_id groups turns from the
+ * same HUD load. tools_json is the JSON-stringified list of tool names that
+ * fired during the turn (e.g. ["recall","draft_email"]) — used by the HUD
+ * drawer to render tool chips per row. */
+CREATE TABLE IF NOT EXISTS conversation_turns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  role TEXT NOT NULL,                 -- "user" | "assistant"
+  content TEXT NOT NULL,
+  tools_json TEXT                     -- JSON array of tool names; NULL when no tools fired
+);
+CREATE INDEX IF NOT EXISTS idx_conversation_turns_ts ON conversation_turns(ts);
+CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(session_id, ts);
 `);
 
 /* ---------- EMBEDDINGS via Ollama ---------- */
@@ -234,6 +251,61 @@ export async function saveConversation({ summary, topics = [], startedAt, endedA
                         VALUES (?, ?, ?, ?, ?)`)
               .run(summary, JSON.stringify(topics || []), emb, startedAt || Date.now(), endedAt || Date.now());
   return { ok: true, id: r.lastInsertRowid };
+}
+
+/* ---------- PER-TURN PERSISTENCE ----------
+ * Append-only log of every operator query and Jarvis reply. Each row is a
+ * single turn keyed by session_id (one HUD load = one session). Used by
+ * the HUD's history drawer for "what did I ask about yesterday" type queries
+ * without spinning up the more expensive recall() embedding search.
+ *
+ * No embeddings on turns — they'd 50× the embedding compute and the recall
+ * tool already handles semantic search via conversation_summaries. Turns
+ * are the literal transcript; summaries are the searchable distillation. */
+
+/** Append a single turn. Synchronous SQLite write — better-sqlite3's
+ *  prepared statement is fast enough that we don't need async. */
+export function appendTurn({ sessionId, role, content, tools = null } = {}) {
+  if (!sessionId || !role || !content) return { ok: false, error: "sessionId, role, content required" };
+  const toolsJson = (Array.isArray(tools) && tools.length) ? JSON.stringify(tools) : null;
+  const r = db.prepare(`INSERT INTO conversation_turns (session_id, ts, role, content, tools_json) VALUES (?, ?, ?, ?, ?)`)
+              .run(String(sessionId), Date.now(), String(role), String(content), toolsJson);
+  return { ok: true, id: r.lastInsertRowid };
+}
+
+/** Recent turns paginated by timestamp. The HUD's drawer uses limit=50 by
+ *  default; the search box does substring filtering client-side because the
+ *  result sets are small (max ~1000 turns over a typical week of use). */
+export function recentTurns({ limit = 50, beforeTs = null, sessionId = null } = {}) {
+  const cap = Math.max(1, Math.min(500, Number(limit) || 50));
+  const params = [];
+  let where = "1=1";
+  if (beforeTs) { where += " AND ts < ?"; params.push(Number(beforeTs)); }
+  if (sessionId) { where += " AND session_id = ?"; params.push(String(sessionId)); }
+  const rows = db.prepare(`SELECT id, session_id, ts, role, content, tools_json
+                           FROM conversation_turns
+                           WHERE ${where}
+                           ORDER BY ts DESC
+                           LIMIT ?`).all(...params, cap);
+  return rows.map((r) => ({
+    id: r.id,
+    sessionId: r.session_id,
+    ts: r.ts,
+    role: r.role,
+    content: r.content,
+    tools: r.tools_json ? (() => { try { return JSON.parse(r.tools_json); } catch { return []; } })() : [],
+  }));
+}
+
+/** Distinct session ids in the last N days, with per-session turn counts.
+ *  Lets the drawer offer a "jump to this session" picker. */
+export function listSessions({ days = 14 } = {}) {
+  const since = Date.now() - Math.max(1, Number(days) || 14) * 86400_000;
+  return db.prepare(`SELECT session_id, MIN(ts) AS started_at, MAX(ts) AS ended_at, COUNT(*) AS turn_count
+                     FROM conversation_turns
+                     WHERE ts >= ?
+                     GROUP BY session_id
+                     ORDER BY ended_at DESC`).all(since);
 }
 
 /* ---------- PROJECTS ---------- */

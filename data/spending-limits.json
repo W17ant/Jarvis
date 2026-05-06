@@ -1,13 +1,27 @@
 {
-  "_comment": "Hard caps enforced by bridge/purchases.mjs BEFORE any virtual-card call. Defense-in-depth on top of the pre-funded card's bank ceiling. Edit numbers cautiously — the LLM cannot edit this file at runtime.",
+  "_comment": "Category-tiered spend caps enforced by bridge/purchases.mjs BEFORE any virtual-card call. Defense-in-depth on top of the pre-funded card's bank ceiling. Edit numbers cautiously — the LLM cannot edit this file at runtime. Each merchant in merchant-allowlist.json carries a category that maps into 'categories' here; if a merchant's category is missing or 'default' is the catch-all.",
   "currency": "GBP",
-  "perTransactionMaxGbp": 30,
-  "dailyCapGbp": 50,
-  "weeklyCapGbp": 150,
+  "categories": {
+    "_comment": "Per-category caps. perTransactionMaxGbp is the single-purchase ceiling. dailyCapGbp / weeklyCapGbp / monthlyCapGbp are rolling totals; first one to trip wins.",
+    "default":     { "perTransactionMaxGbp": 75,   "dailyCapGbp": 100, "weeklyCapGbp": 250,  "monthlyCapGbp": 600 },
+    "groceries":   { "perTransactionMaxGbp": 50,   "dailyCapGbp": 80,  "weeklyCapGbp": 200,  "monthlyCapGbp": 600 },
+    "takeaway":    { "perTransactionMaxGbp": 40,   "dailyCapGbp": 60,  "weeklyCapGbp": 150,  "monthlyCapGbp": 400 },
+    "electronics": { "perTransactionMaxGbp": 300,  "dailyCapGbp": 500, "weeklyCapGbp": 800,  "monthlyCapGbp": 1500 },
+    "photography": { "perTransactionMaxGbp": 1500, "dailyCapGbp": 1500,"weeklyCapGbp": 2500, "monthlyCapGbp": 4000 },
+    "homeware":    { "perTransactionMaxGbp": 200,  "dailyCapGbp": 300, "weeklyCapGbp": 600,  "monthlyCapGbp": 1500 },
+    "travel":      { "perTransactionMaxGbp": 500,  "dailyCapGbp": 500, "weeklyCapGbp": 1500, "monthlyCapGbp": 3000 },
+    "office":      { "perTransactionMaxGbp": 100,  "dailyCapGbp": 150, "weeklyCapGbp": 300,  "monthlyCapGbp": 600 }
+  },
   "tiers": {
-    "_comment": "Confirmation requirement by amount. auto = LLM may proceed without operator confirm. voice = standard voice 'yes'/'no' gate. typed = HUD modal where operator types the amount to confirm (anti-injection — voice 'yes' cannot authorise).",
-    "autoMaxGbp": 5,
-    "voiceMaxGbp": 25
+    "_comment": "Confirmation requirement by amount, applied AFTER category cap passes. auto = LLM may proceed without operator confirm. voice = standard voice 'yes'/'no' gate. typed = HUD modal where operator types the amount to confirm (anti-injection — voice 'yes' cannot authorise). Tiers scale with per-tx cap so a £1500 camera lens doesn't auto-pay just because the cap permits it.",
+    "autoMaxGbp": 10,
+    "voiceMaxGbp": 100
+  },
+  "globalCaps": {
+    "_comment": "Hard ceilings across ALL categories combined. Final safety net so a runaway loop hopping between categories can't drain the card. Must be >= the highest single-category per-tx cap (currently photography £1500) so the per-category cap is actually reachable in one purchase.",
+    "dailyCapGbp": 2000,
+    "weeklyCapGbp": 4000,
+    "monthlyCapGbp": 8000
   },
   "simulatorMode": true
 }

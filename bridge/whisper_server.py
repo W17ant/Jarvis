@@ -1,8 +1,11 @@
 """whisper_server.py - Local STT via faster-whisper. Replaces Chrome's cloud SpeechRecognition.
 
-POST /transcribe  body: audio bytes (any format ffmpeg can decode — webm/opus/wav/m4a)
-                  →  {"text": "...", "language": "en", "duration": float}
-GET  /health      →  {"ok": true, "model": "..."}
+POST /transcribe              body: audio bytes (any format ffmpeg can decode)
+                              →  {"text": "...", "language": "en", "duration": float}
+POST /transcribe?segments=1   same body, returns timestamped segments instead
+                              →  {"text": "...", "language": "en", "duration": float,
+                                   "segments": [{"start": float, "end": float, "text": "..."}]}
+GET  /health                  →  {"ok": true, "model": "..."}
 
 Run: .venv/bin/python bridge/whisper_server.py
 Port: 8768
@@ -39,8 +42,10 @@ WHISPER_INITIAL_PROMPT = (
 )
 
 
-def transcribe_bytes(data: bytes) -> dict:
-    """Transcribe raw audio bytes (ffmpeg-decodable). Returns text + meta."""
+def transcribe_bytes(data: bytes, want_segments: bool = False) -> dict:
+    """Transcribe raw audio bytes (ffmpeg-decodable). Returns text + meta.
+    If want_segments is True, also returns per-segment start/end/text for
+    callers like the bridge's transcribe_video tool that need timestamps."""
     with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as fp:
         fp.write(data)
         path = fp.name
@@ -59,8 +64,17 @@ def transcribe_bytes(data: bytes) -> dict:
                 compression_ratio_threshold=2.4,
                 no_speech_threshold=0.45,
             )
-            text = " ".join(s.text.strip() for s in segments).strip()
-        return {"text": text, "language": info.language, "duration": info.duration}
+            # faster-whisper segments is a generator — materialise once because
+            # we may need both the joined text and the per-segment list.
+            seg_list = list(segments)
+            text = " ".join(s.text.strip() for s in seg_list).strip()
+        out = {"text": text, "language": info.language, "duration": info.duration}
+        if want_segments:
+            out["segments"] = [
+                {"start": float(s.start), "end": float(s.end), "text": s.text.strip()}
+                for s in seg_list
+            ]
+        return out
     finally:
         try: os.unlink(path)
         except OSError: pass
@@ -85,11 +99,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(404); self._cors(); self.end_headers()
 
     def do_POST(self):
-        if self.path != "/transcribe":
+        # Accept /transcribe and /transcribe?segments=1 — strip the query for routing.
+        path_only = self.path.split("?", 1)[0]
+        if path_only != "/transcribe":
             self.send_response(404); self._cors(); self.end_headers(); return
+        # ?segments=1 (or =true) opts into per-segment timestamped output.
+        want_segments = False
+        if "?" in self.path:
+            qs = self.path.split("?", 1)[1]
+            for pair in qs.split("&"):
+                k, _, v = pair.partition("=")
+                if k == "segments" and v.lower() in ("1", "true", "yes"):
+                    want_segments = True
         length = int(self.headers.get("Content-Length", "0"))
         ctype = self.headers.get("Content-Type", "?")
-        print(f"[whisper] POST /transcribe  len={length}B  content-type={ctype}", flush=True)
+        print(f"[whisper] POST /transcribe  len={length}B  content-type={ctype}  segments={want_segments}", flush=True)
         if length == 0:
             print("[whisper] empty body", flush=True)
             self.send_response(400); self._cors(); self.end_headers()
@@ -102,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             pass
         try:
-            result = transcribe_bytes(data)
+            result = transcribe_bytes(data, want_segments=want_segments)
         except Exception as e:
             print(f"[whisper] transcribe failed: {e}", file=sys.stderr, flush=True)
             self.send_response(500); self._cors(); self.end_headers()

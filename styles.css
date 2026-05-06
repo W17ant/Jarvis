@@ -1625,6 +1625,46 @@ body.font-scale-xl { font-size: 21px; }
   line-height: 1;
 }
 
+/* ────────── Accessibility toggles ──────────
+ *  Three independent classes, each toggled by a keyboard shortcut from
+ *  hud.js. They compose — high-contrast + reduced-motion + bigger-font is
+ *  fine and useful for a colleague with multiple needs.
+ *
+ *  body.is-reduced-motion  — kills every transition / animation. Operator
+ *    feedback: pulses + scan-lines were giving a colleague vertigo. Keep
+ *    state changes legible (state colour swaps still happen, just not animated).
+ *
+ *  body.is-high-contrast  — bumps text colours toward pure white, panel
+ *    borders to brand red, and dims out background gradient artwork that
+ *    can wash out the data layer for low-vision operators.
+ *
+ *  body.is-bigger-text  — scales rem font sizes up by 15% across the board
+ *    so the whole HUD reflows at a more readable size. Doesn't touch fixed
+ *    px sizes (icons, gauge dimensions) — those need their own sizing pass. */
+body.is-reduced-motion *,
+body.is-reduced-motion *::before,
+body.is-reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+body.is-high-contrast {
+  --text: #ffffff;
+  --text-dim: #d8d8d8;
+  --panel-bg: #000;
+  --panel-border: var(--fom-red);
+  --hairline: rgba(255, 255, 255, 0.45);
+}
+body.is-high-contrast .panel,
+body.is-high-contrast .syspod,
+body.is-high-contrast .speedo {
+  border-width: 2px;
+}
+body.is-bigger-text {
+  font-size: 17.25px; /* default is 15; +15% for legibility */
+}
+
 /* ────────── Demo / Clean mode (Cmd+D) ──────────
  *  Hides operational chrome (numeric readouts, debug, history drawer, REC dot,
  *  notification timestamps) so the kiosk reads as a pure cinematic surface for

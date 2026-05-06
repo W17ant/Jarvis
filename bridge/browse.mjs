@@ -63,6 +63,16 @@ const INJECTION_PATTERNS = [
   /reveal (?:your|the) prompt/i,
 ];
 
+/* Cooperative cancel — operator says "stop" / "cancel" while a browse loop
+ * is mid-flight, the bridge raises this flag, the next loop iteration sees
+ * it and bails cleanly with a partial trace. Reset to false at the top of
+ * each requestBrowse call so a stale cancel from a previous run can't
+ * pre-cancel the next one. */
+let _aborted = false;
+export function raiseAbort() { _aborted = true; }
+export function clearAbort() { _aborted = false; }
+export function isAborted() { return _aborted; }
+
 /**
  * @param {object} args
  * @param {string} args.goal           Plain-English goal e.g. "Find the cheapest Nikon Z6 III on eBay UK and tell me the price"
@@ -73,6 +83,8 @@ const INJECTION_PATTERNS = [
 export async function requestBrowse({ goal, startUrl, maxSteps = 12, headless = false } = {}) {
   if (!goal || typeof goal !== "string") return { ok: false, error: "goal (string) is required" };
   const stepCap = Math.max(1, Math.min(30, Number(maxSteps) || 12));
+  /* Reset the abort flag so a previous run's "stop" doesn't pre-cancel us. */
+  clearAbort();
 
   /* Ensure the traces dir exists so screenshots/text dumps land somewhere. */
   await fsp.mkdir(TRACES_DIR, { recursive: true });
@@ -99,6 +111,11 @@ export async function requestBrowse({ goal, startUrl, maxSteps = 12, headless = 
 
     while (stepCount < stepCap) {
       stepCount += 1;
+      /* Cooperative cancel — checked at the top of each step so the operator's
+       * "stop" doesn't have to wait for the in-flight LLM call to finish. */
+      if (isAborted()) {
+        return { ok: false, sessionId, trace, error: "Cancelled by operator." };
+      }
       const snap = await snapshotPage(page, sessionDir, stepCount);
       const guard = INJECTION_PATTERNS.some((re) => re.test(snap.text)) ? injectionGuard(goal) : "";
       const sys = systemPrompt(goal, guard);
