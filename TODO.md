@@ -52,6 +52,11 @@ Living todo list. Everything discussed in our planning sessions that hasn't ship
 - ✅ **`find_flights` tool** — drives Skyscanner search via request_browse. Read-only — does NOT book. Operator goes to airline directly via open_url after picking.
 - ✅ **`learn_visual_style` tool** (`bridge/visual-style.mjs`) — folder OR list of paths, both stills AND videos. ffmpeg samples 4 keyframes per video file. Vision LLM produces structured prose (palette/lighting/contrast/framing/grading/mood) alongside the existing numerical signature. Stored in style-memory's edit_styles table.
 
+### Shipped after the autonomy expansion
+
+- ✅ **Embedding-based tool router** (`bridge/tool-router.mjs`) — at 97 tools the full TOOLS array was too much context for qwen2.5:14b's tool-selector. Now: each tool's `name + description + param-names` embedded via `nomic-embed-text` at boot (1.5s, persisted to `data/tool-index.json`, hash-invalidated on TOOLS change). Per query, embed the operator's utterance, cosine-rank the catalogue, pass top-20 + 10 always-on tools (recall, web_search, open_url, enter_sleep_mode, etc) to Ollama. Wired into both `askLLM` (non-streaming) and `askLLMStream`. Resolved once per query so all hops share the same filtered set.
+- ✅ **`/health` exposes index status** — `toolRouter: { ready, toolCount, hash, alwaysOn }`. The Agent Console will surface this in a future patch.
+
 ### What's needed for video-style learning to work end-to-end
 
 - The local `qwen2.5vl:7b` can ingest the extracted keyframes but produces less-detailed prose than Claude / GPT-4o. For best results, set `LLM_PROVIDER_VISION=anthropic` (or `openai`) in the Agent Console — falls back to Ollama silently if no key is set.

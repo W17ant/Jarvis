@@ -56,6 +56,7 @@ import * as Browse from "./browse.mjs";
 import * as LlmProviders from "./llm/providers.mjs";
 import * as Personal from "./personal.mjs";
 import * as VisualStyle from "./visual-style.mjs";
+import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
 
@@ -2685,6 +2686,16 @@ When given [Context], use those facts verbatim. If asked to do something you don
     { role: "user", content: userContent },
   ];
 
+  /* Embedding-based tool filter — at 97 tools the full catalogue is too much
+   * context for the 14b selector. Pick the top-K most-similar by nomic-embed
+   * cosine + always-on core. Resolved once per query, reused across hops so
+   * the second hop's filtered set matches the first. */
+  const filtered = await ToolRouter.pickRelevant(query, TOOLS, { topK: 20 });
+  if (!filtered.fallback) {
+    console.log(`[tool-router] ${query.slice(0, 40).replace(/\n/g, " ")} → ${filtered.picked.length}/${TOOLS.length} tools (${filtered.elapsedMs}ms)`);
+  }
+  const toolsForLLM = filtered.tools;
+
   /* Why: tool-calling loop — model may emit tool_calls, we run them, append results, ask again.
    * Cap at 3 round trips to prevent infinite loops on a confused tool-happy model. */
   for (let hop = 0; hop < 3; hop++) {
@@ -2700,7 +2711,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
        * wizard's OLLAMA_KEEP_ALIVE setting so the model doesn't unload between
        * turns. Lower-tier installs stick to "30s" so the model can free memory
        * for other work. */
-      body: JSON.stringify({ model: modelForHop, messages, stream: false, tools: TOOLS, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
+      body: JSON.stringify({ model: modelForHop, messages, stream: false, tools: toolsForLLM, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
     });
     if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
     const data = await res.json();
@@ -2817,6 +2828,15 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     sb.text = "";
   }
 
+  /* Embedding-based tool filter — same as askLLM(). Resolved once before the
+   * hop loop so all hops share the same filtered set; otherwise the model
+   * could pick tool A on hop 1 then find it absent on hop 2. */
+  const filtered = await ToolRouter.pickRelevant(query, TOOLS, { topK: 20 });
+  if (!filtered.fallback) {
+    console.log(`[tool-router] (stream) → ${filtered.picked.length}/${TOOLS.length} tools (${filtered.elapsedMs}ms)`);
+  }
+  const toolsForLLM = filtered.tools;
+
   /* Up to 3 hops, same cap as askLLM(). Each hop streams; tool_calls in the terminal
    * frame trigger an extra hop with the tool results appended to messages. Model
    * routing matches the non-streaming path: first hop picks via query content,
@@ -2829,7 +2849,7 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     const res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: modelForHop, messages, stream: true, tools: TOOLS, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
+      body: JSON.stringify({ model: modelForHop, messages, stream: true, tools: toolsForLLM, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
     });
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
@@ -2954,7 +2974,12 @@ const httpServer = createServer(async (req, res) => {
 
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, model: getModel() }));
+    res.end(JSON.stringify({
+      ok: true,
+      model: getModel(),
+      toolCount: TOOLS.length,
+      toolRouter: ToolRouter.indexStatus(),
+    }));
     return;
   }
 
@@ -4346,6 +4371,11 @@ httpServer.listen(PORT, () => {
     vlKeepAlive: process.env.VL_KEEP_ALIVE || "30s",
     skipVL: isLiteTier,
   }).catch(() => { /* warmUpAll already logs internally */ });
+
+  /* Build the embedding-based tool index. Fire-and-forget — pickRelevant()
+   * falls back to the full TOOLS array until this resolves, so no chat call
+   * is blocked. Subsequent boots load from data/tool-index.json instantly. */
+  ToolRouter.buildIndex(TOOLS).catch((e) => console.warn(`[tool-router] index build failed: ${e.message} — chat will use full TOOLS catalogue`));
 
   /* Pre-warm the fast model too if hardware tier opted into routing. Most weight
    * is on the main model so this second warm is cheap (small model, small RAM). */
