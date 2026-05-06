@@ -1273,6 +1273,78 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- ACCESSIBILITY TOGGLES ----------
+ *  Three independent body classes, each toggled by a keyboard chord:
+ *    Shift+Cmd+M → reduced-motion (kills transitions/animations)
+ *    Shift+Cmd+C → high-contrast (white text, red panel borders)
+ *    Shift+Cmd+T → bigger-text (15% bump on root font size)
+ *  Each persists via localStorage so a colleague's preference survives
+ *  Cmd+R. Tiny corner badge stack appears when any are on so the operator
+ *  sees their state without opening settings. */
+
+const A11Y_TOGGLES = [
+  { key: "M", cls: "is-reduced-motion", label: "REDUCED MOTION", storage: "flatout.reducedMotion" },
+  { key: "C", cls: "is-high-contrast",  label: "HIGH CONTRAST",  storage: "flatout.highContrast" },
+  { key: "T", cls: "is-bigger-text",    label: "BIGGER TEXT",    storage: "flatout.biggerText" },
+];
+
+let _a11yBadgeHost = null;
+function ensureA11yBadgeHost() {
+  if (_a11yBadgeHost) return _a11yBadgeHost;
+  const host = document.createElement("div");
+  host.id = "a11yBadges";
+  host.style.cssText = "position:fixed;top:42px;right:12px;z-index:9999;display:flex;flex-direction:column;gap:4px;align-items:flex-end;font-family:var(--mono,monospace);font-size:9px;letter-spacing:0.18em;color:#888;pointer-events:none;";
+  document.body.appendChild(host);
+  _a11yBadgeHost = host;
+  return host;
+}
+
+function refreshA11yBadges() {
+  const host = ensureA11yBadgeHost();
+  while (host.firstChild) host.removeChild(host.firstChild);
+  for (const t of A11Y_TOGGLES) {
+    if (document.body.classList.contains(t.cls)) {
+      const b = el("div", { text: t.label });
+      b.style.cssText = "border:1px solid #333;padding:2px 7px;background:rgba(0,0,0,0.55);";
+      host.appendChild(b);
+    }
+  }
+}
+
+function toggleA11y(toggle) {
+  const on = document.body.classList.toggle(toggle.cls);
+  try { localStorage.setItem(toggle.storage, on ? "1" : "0"); } catch {}
+  refreshA11yBadges();
+  console.log(`[Flat-Out] ${toggle.label} ${on ? "ON" : "OFF"}`);
+}
+
+/* Restore saved state on boot. */
+try {
+  for (const t of A11Y_TOGGLES) {
+    if (localStorage.getItem(t.storage) === "1") {
+      document.addEventListener("DOMContentLoaded", () => {
+        document.body.classList.add(t.cls);
+        refreshA11yBadges();
+      });
+    }
+  }
+} catch {}
+
+document.addEventListener("keydown", (e) => {
+  if (!(e.shiftKey && (e.metaKey || e.ctrlKey))) return;
+  /* Match exact (case-insensitive). Ignore the chord if a modifier we don't
+   * care about is held — prevents a stray Alt+Shift+Cmd+M binding from
+   * firing two toggles. */
+  const k = e.key.toUpperCase();
+  for (const t of A11Y_TOGGLES) {
+    if (k === t.key) {
+      e.preventDefault();
+      toggleA11y(t);
+      return;
+    }
+  }
+});
+
 /* ---------- HELP / CHEAT SHEET (?) ----------
  *  Plain "?" key opens a searchable overlay listing every tool the LLM can
  *  invoke. Pulls from /actions (the manifest endpoint shipped this round)

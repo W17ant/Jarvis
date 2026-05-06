@@ -58,6 +58,7 @@ import * as Personal from "./personal.mjs";
 import * as VisualStyle from "./visual-style.mjs";
 import * as Transcribe from "./transcribe.mjs";
 import * as UsageLog from "./usage-log.mjs";
+import * as EodDigest from "./eod-digest.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1785,6 +1786,27 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "cancel_active_jobs",
+      description: "Cancel any in-flight long-running operation (active browse_web loop, caption_shoot_folder batch). Use when the operator says 'stop', 'cancel', 'abort', or hits Esc. Idempotent — calling when nothing is running is harmless.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_eod_digest",
+      description: "Generate the operator's end-of-day activity digest — replies count, purchases made (settled + blocked), renders shipped, files dropped into the inbox, top tools used, LLM spend. Use when operator says 'what did I do today', 'summarise my day', 'daily wrap'. Returns a structured JSON plus a plain-text version the LLM can read aloud verbatim.",
+      parameters: {
+        type: "object",
+        properties: {
+          sinceTs: { type: "number", description: "Optional cutoff timestamp ms. Default = midnight today." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "transcribe_video",
       description: "Transcribe a video file end-to-end. Strips audio with ffmpeg → local Whisper for timestamped speech segments → samples N keyframes → vision LLM captions each one. Returns timestamped speech + frame captions + a single interleaved narrative. Use for: 'transcribe yesterday's interview', 'what's said in the press-launch clip', 'summarise this raw rushes file'. Slower than text tools (30-90s for a 5-minute clip) so use sparingly.",
       parameters: {
@@ -2022,6 +2044,8 @@ function summariseToolCall(name, args) {
       return `Learn style "${a.name || "?"}" from ${typeof a.target === "string" ? a.target.slice(0, 50) : "(reference set)"}`;
     case "transcribe_video":
       return `Transcribe video: ${(a.path || "(?)").slice(0, 60)}${a.includeVisual === false ? " (audio only)" : ""}`;
+    case "request_eod_digest":
+      return `End-of-day digest`;
     case "request_browse":
       return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
     case "open_url":
@@ -2165,6 +2189,16 @@ async function _executeToolInner(name, args) {
     }
     case "learn_visual_style": return await VisualStyle.learnVisualStyle(args);
     case "transcribe_video":   return await Transcribe.transcribeVideo(args);
+    case "request_eod_digest": {
+      const digest = await EodDigest.buildDigest(args || {});
+      digest.spoken = EodDigest.digestToText(digest);
+      return digest;
+    }
+    case "cancel_active_jobs": {
+      Vision.raiseAbort();
+      Browse.raiseAbort();
+      return { ok: true, note: "Cancellation raised on Vision + Browse modules. Active loops will bail at the next safe checkpoint." };
+    }
     case "request_browse": {
       /* Sanity-check: refuse if no vision-capable provider has an API key —
        * driving a browser from text only would burn tokens for poor results. */
@@ -3807,13 +3841,17 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
   if (req.url === "/cancel" && req.method === "POST") {
-    /* Operator said "stop" / "cancel" mid-task. Long-running tools (currently
-     * caption_shoot_folder) check Vision.isAborted() between iterations and bail
-     * cleanly with partial results. The teaser pipeline is more complex and not
-     * yet abort-aware — document that to the operator instead of pretending. */
+    /* Operator said "stop" / "cancel" mid-task. Raises every long-running
+     * module's abort flag in parallel; each module's loop checks isAborted()
+     * at its safe-to-bail boundary. Currently:
+     *  - Vision.raiseAbort  — caption batches between frames
+     *  - Browse.raiseAbort  — browse_web inner loop between LLM calls
+     * The teaser pipeline is more complex and not yet abort-aware — operator
+     * has to ride that one out or kill the whole bridge. */
     Vision.raiseAbort();
+    Browse.raiseAbort();
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, note: "Cancellation requested. Active caption batch will stop at next frame." }));
+    res.end(JSON.stringify({ ok: true, note: "Cancellation requested. Active caption batch / browse loop will stop at next safe checkpoint." }));
     return;
   }
   if (req.url === "/brand" && req.method === "POST") {
