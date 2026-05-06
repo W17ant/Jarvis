@@ -1,8 +1,54 @@
 # Flat-Out HUD — Outstanding Work
 
-Living todo list. Everything discussed in our planning sessions that hasn't shipped yet. FOM-flavoured throughout — items are sequenced for an automotive PR/content agency's daily workflow, not generic kiosk polish.
+Living todo list. Honest reckoning: a lot of this list was stale by the time anyone read it — many items marked outstanding had already shipped. Cleaned up below.
 
 **Legend**: 🟥 critical · 🟧 high · 🟨 medium · 🟩 low · ⚙️ architecture · 🚀 FOM workflow win
+
+---
+
+## Genuinely outstanding
+
+These are NOT shipped and need real work:
+
+- 🟥 ⚙️ **voice.js extraction** (~2 days) — file is 2900+ LOC and growing every patch. Refactor into bridge-client / tts / state / modal-queue / drawer modules. Not user-visible; pure structural debt. Risky to do mid-sprint.
+- 🟧 🚀 **Multi-machine memory sync** (~3-5 days) — periodic backup of `data/memory.db` to NAS or shared encrypted folder. Operator A's contacts visible on operator B's kiosk. Agency-wide knowledge not personal. Needs conflict-resolution design first.
+- 🟧 🚀 **Live shoot mode (phone-as-mic)** (~1 week) — the one transformative piece of the original Phase 5 plan still missing. Phone walks the studio, real-time captions per shot, "flag this as hero" mid-frame, contact sheet ready by lunch.
+- 🟧 ⚙️ **Multi-operator profile picker** (~2-3 days) — namespace prep already exists; modal lock-screen picker on boot doesn't.
+- 🟧 **HUD command palette (Cmd+K)** (~1.5 days) — keyboard fallback for everything voice does. The `/actions` manifest endpoint already serves the data; just needs the palette UI.
+- 🟨 ⚙️ **Containerised render env** (~3-5 days) — Docker per video job with ffmpeg + ImageMagick + exiftool pre-baked. Concurrent renders stop fighting over `output/`. Already partially scaffolded behind `RENDER_USE_DOCKER=1` env var.
+- 🟨 **Lane-grouped progress viz** (~1-2 days) — video pipeline stages as parallel lanes in the task strip. Bonus for client demos: they watch the work happen.
+- 🟨 **Per-profile theming persisted** (~1 day) — each operator's brand colour persists per session.
+- 🟩 **Tablet/iPad responsive variant** (~2-3 days) — operator's iPad mirrors HUD when away from desk.
+- 🟩 **Layout customisation** (~3 days) — drag panels to reposition, save per-profile.
+
+---
+
+## Shipped (was previously listed as outstanding)
+
+The TODO had marked these critical / high / medium. They're all in the code now:
+
+- ✅ Embedding-based tool router (`bridge/tool-router.mjs` + nomic-embed)
+- ✅ Auto-cull a shoot folder (`auto_cull` tool, `bridge/autocull.mjs`)
+- ✅ Brand-pack auto-export (`build_brand_pack`, `bridge/brandpack.mjs`)
+- ✅ Pre-shoot kit checklist (`pre_shoot_checklist`)
+- ✅ Press-cycle radar (`press_cycle_radar`, daily schedule)
+- ✅ Manufacturer media-day calendar (`add_media_day` / `list_media_days`)
+- ✅ EOD activity digest (`request_eod_digest`, `bridge/eod-digest.mjs`)
+- ✅ Editorial style memory + visual style learner (`extract_style`, `learn_visual_style`)
+- ✅ Sentence-level TTS streaming + barge-in (`askLLMStream` + `startBargeInMonitor`)
+- ✅ Wake-flick on detected wake word (already wired in voice.js)
+- ✅ Demo / Clean mode toggle (Shift+Cmd+D)
+- ✅ Help / cheat sheet HUD (`?` opens searchable command list from `/actions`)
+- ✅ Action manifest (`GET /actions`)
+- ✅ Accessibility-tree primitive (`read_active_window`)
+- ✅ Per-turn conversation history persistence + drawer (`H` key, `bridge/memory.mjs`)
+- ✅ MCP server support (`POST /mcp` JSON-RPC)
+- ✅ Reduced motion / high contrast / bigger text (Shift+Cmd+M/C/T)
+- ✅ Containerised render env scaffold (`RENDER_USE_DOCKER=1`)
+- ✅ Cost / usage telemetry (`bridge/usage-log.mjs` + Agent Console)
+- ✅ Cancel active jobs (`cancel_active_jobs` tool, Vision + Browse cooperative abort)
+
+---
 
 ---
 

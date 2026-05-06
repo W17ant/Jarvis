@@ -9,7 +9,7 @@
 
 **Built by [Antony O'Neill](https://www.linkedin.com/in/antonyoneilladl/) · [aoneill.co.uk](https://aoneill.co.uk) · [antony@aoneill.co.uk](mailto:antony@aoneill.co.uk)**
 
-A complete on-prem AI assistant: local Qwen brain, local Whisper STT, local Kokoro TTS, no cloud round-trip for inference, no client work leaving your machine. Stark-style HUD on a 27"+ display. 76+ tools spanning vision, video editing, Premiere automation, Lightroom XMP, Frame.io review, Apple Mail / Calendar, persistent memory, MCP server, and a phone-as-mic live shoot mode.
+A complete on-prem AI assistant: local Qwen brain, local Whisper STT, local Kokoro TTS, no cloud round-trip for inference, no client work leaving your machine. Stark-style HUD on a 27"+ display. 99 tools spanning vision, video editing, Premiere automation, Lightroom XMP, Frame.io review, Apple Mail / Calendar, persistent memory, MCP server, and a phone-as-mic live shoot mode.
 
 ---
 
@@ -30,6 +30,23 @@ A complete on-prem AI assistant: local Qwen brain, local Whisper STT, local Koko
 | **Press radar + media-day calendar** | Daily sweep across automotive press for tracked manufacturers. Manual + auto event tracking. |
 | **Live shoot mode** | Phone-as-mic companion view at `GET /live`. Photographer taps HERO mid-frame; editor at the desk sees it land in real time. |
 | **MCP server** | Every bridge tool exposed via JSON-RPC at `POST /mcp`. Drive the same kiosk from Claude Desktop, Cursor, Continue. |
+| **Agentic purchases** | Pre-funded virtual debit card via macOS Keychain. Category-tiered caps (photography £1500, travel £500, groceries £50, default £75). 25 UK retailer allowlist. Auto/voice/typed confirmation tiers. Append-only audit journal. Argos / Amazon UK / MPB checkout adapters. Simulator-mode default. |
+| **Pluggable LLM providers** | Anthropic / OpenAI / local Ollama all behind one `chat()` call. Workload routing — default chat to Ollama, vision to Claude, high-stakes to Claude. Live token + cost telemetry surfaces in the Agent Console so spend never surprises. |
+| **Embedding tool router** | At 99 tools the full catalogue overwhelms the 14b selector. nomic-embed-text indexes each tool at boot; per-query the catalogue is filtered to top-20 + 10 always-on. Live transparency in the Agent Console shows which tools the model actually saw. |
+| **Web-use loop** | `request_browse` drives a real Chromium with Playwright + a vision LLM (Claude/GPT) — clicks, types, scrolls, reads. URL denylist (banks, gov, brokers), prompt-injection guard, action allowlist. Use for "find the cheapest X", "summarise this page", "fill this form for me". |
+| **Conversation history** | Every turn persisted to SQLite. Right-edge slide-out drawer (`H` key) shows everything searchable across sessions, with tool chips per row. |
+| **Personal-assistant tools** | iMessage, Apple Reminders, in-HUD timers, Apple Music / Spotify, Apple Notes / Bear / Obsidian, Mozilla Readability article fetch, screencapture, macOS Focus mode, 1Password CLI lookup. Zero-API-cost daily-life primitives via osascript. |
+| **Video transcription** | `transcribe_video` strips audio with ffmpeg → local Whisper for timestamped speech segments → samples N keyframes → vision LLM captions each one. Returns interleaved narrative. |
+| **Visual style learning** | Point at a folder OR a video file — ffmpeg samples 4 keyframes per video, vision LLM produces structured prose (palette / lighting / contrast / framing / grading / mood) alongside the existing numerical signature. |
+
+### Keyboard shortcuts
+
+- `?` — searchable command cheat sheet (every tool, with confirmation/always-on flags)
+- `H` — conversation history drawer
+- `Shift+Cmd+J` — Agent Console (LLM keys + workload routing + tool router live picks + LLM usage rollup + purchase audit log)
+- `Shift+Cmd+D` — demo / clean mode (hides numeric readouts, REC indicator, timestamps for client visits)
+- `Shift+Cmd+M` / `+C` / `+T` — accessibility: reduced-motion / high-contrast / bigger-text
+- `Esc` — closes any open modal / drawer; mid-task = cancel the active browse / caption batch
 
 ---
 
@@ -136,7 +153,7 @@ Common gotchas (full FAQ in `docs/install-guide.html` pages 11–13):
               ┌────────────────────┴────────────────────┐
               │            Bridge (Node 22)             │
               │ ─────────────────────────────────────── │
-              │  76+ tool dispatch · MCP server         │
+              │  99 tool dispatch · MCP server         │
               │  Sentence-level LLM streaming · Audit   │
               │  Tasks · Undo · Memory · Notifications  │
               └─┬──────┬──────┬──────┬──────────┘
@@ -201,7 +218,7 @@ Every tool is exposed via the Model Context Protocol at `POST http://localhost:8
 }
 ```
 
-That's it. All 76+ tools become available. Tools that require operator confirmation surface their `requires_confirmation` payload back through the host's UI.
+That's it. All 99 tools become available. Tools that require operator confirmation surface their `requires_confirmation` payload back through the host's UI.
 
 ---
 
