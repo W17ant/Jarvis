@@ -1696,6 +1696,129 @@ async function openPalette() {
   setTimeout(() => root._refs.input.focus(), 50);
 }
 
+/* ---------- PROFILE LOCK-SCREEN ----------
+ *  When more than one profile exists in the registry AND the last operator
+ *  activity is older than the lock threshold (default 30 min), show a
+ *  full-screen profile picker on boot. This is the multi-operator scenario
+ *  — agency kiosk shared by lead photographer / editor / MD, each with
+ *  their own voice / colour / brand / audit identity. Single-profile
+ *  installs never see this.
+ *
+ *  Why a lock-screen rather than a settings dropdown: the active profile
+ *  drives the Storage namespace prefix, the brand colour, the identity in
+ *  the audit log. Picking it should be the FIRST action of a session, not
+ *  buried in a settings modal. The picker can be skipped by setting
+ *  `flatout.skipLockScreen = "1"` for a single-operator install.
+ *
+ *  Picker logic:
+ *  - More than one profile registered (otherwise no point asking)
+ *  - Last activity timestamp > 30 min ago (otherwise it's a quick reload —
+ *    operator is already working, don't disrupt)
+ *  - Skip if `flatout.skipLockScreen` is set */
+
+const LOCK_TIMEOUT_MS = 30 * 60 * 1000;
+
+async function maybeShowProfileLockScreen() {
+  /* Read profiles + last-activity directly from localStorage to avoid an
+   * import cycle with the ESM profiles.js module — boot order matters. */
+  let profiles = [];
+  try {
+    const raw = localStorage.getItem("flatout.profiles");
+    profiles = raw ? JSON.parse(raw) : [];
+  } catch {}
+  if (!Array.isArray(profiles) || profiles.length < 2) return;
+  if (localStorage.getItem("flatout.skipLockScreen") === "1") return;
+  const lastActivity = Number(localStorage.getItem("flatout.lastActivity") || 0);
+  if (lastActivity && (Date.now() - lastActivity) < LOCK_TIMEOUT_MS) return;
+  /* Show the picker. Returns a promise that resolves when the operator picks
+   * (or skips with the bypass shortcut). */
+  await renderLockScreen(profiles);
+}
+
+function renderLockScreen(profiles) {
+  return new Promise((resolve) => {
+    const activeId = localStorage.getItem("flatout.activeProfile") || "default";
+    const root = el("div", { id: "lockScreen" });
+    const style = document.createElement("style");
+    style.textContent = `
+      #lockScreen { position: fixed; inset: 0; background: #000; z-index: 11000; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
+      #lockScreen h1 { color: var(--brand-primary, #ff3b3b); margin: 0 0 6px; font-size: 22px; letter-spacing: 0.32em; text-transform: uppercase; }
+      #lockScreen .ls-sub { color: #888; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 38px; }
+      #lockScreen .ls-grid { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; max-width: 1080px; }
+      #lockScreen .ls-card { background: #0b0b0b; border: 2px solid #1c1c1c; padding: 28px 32px; min-width: 220px; cursor: pointer; transition: transform 120ms ease, border-color 120ms ease; text-align: center; }
+      #lockScreen .ls-card:hover, #lockScreen .ls-card.is-active { border-color: var(--brand-primary, #ff3b3b); transform: translateY(-3px); box-shadow: 0 12px 40px rgba(255,59,59,0.35); }
+      #lockScreen .ls-card .ls-name { color: #fff; font-size: 18px; letter-spacing: 0.1em; margin-bottom: 6px; }
+      #lockScreen .ls-card .ls-id { color: #555; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+      #lockScreen .ls-card .ls-active-tag { color: var(--brand-primary, #ff3b3b); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 12px; }
+      #lockScreen .ls-foot { color: #555; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 38px; }
+      #lockScreen .ls-foot a { color: #888; text-decoration: none; cursor: pointer; }
+      #lockScreen .ls-foot a:hover { color: var(--brand-primary, #ff3b3b); }
+    `;
+    root.appendChild(style);
+    root.appendChild(el("h1", { text: "Who's at the wheel?" }));
+    root.appendChild(el("div", { className: "ls-sub", text: "Pick your operator profile to begin the session" }));
+    const grid = el("div", { className: "ls-grid" });
+    for (const p of profiles) {
+      const card = el("div", { className: "ls-card" });
+      if (p.id === activeId) card.classList.add("is-active");
+      card.appendChild(el("div", { className: "ls-name", text: p.name || p.id }));
+      card.appendChild(el("div", { className: "ls-id", text: p.id }));
+      if (p.id === activeId) card.appendChild(el("div", { className: "ls-active-tag", text: "Last session" }));
+      card.addEventListener("click", () => choose(p.id));
+      grid.appendChild(card);
+    }
+    root.appendChild(grid);
+    /* Bypass link — useful for single-operator scenarios where the registry
+     * happens to have stale entries. Sets the skip flag so it doesn't ask
+     * again until the operator clears localStorage. */
+    const foot = el("div", { className: "ls-foot" });
+    const bypass = el("a", { text: "Skip this screen for next time" });
+    bypass.addEventListener("click", () => {
+      try { localStorage.setItem("flatout.skipLockScreen", "1"); } catch {}
+      cleanup();
+      resolve();
+    });
+    foot.appendChild(bypass);
+    root.appendChild(foot);
+    document.body.appendChild(root);
+
+    function cleanup() { root.remove(); }
+    function choose(id) {
+      try { localStorage.setItem("flatout.activeProfile", id); } catch {}
+      try { localStorage.setItem("flatout.lastActivity", String(Date.now())); } catch {}
+      /* Reload — Storage namespacing changes mean the safest path is a full
+       * page reload rather than trying to re-init every module that already
+       * read from localStorage. */
+      cleanup();
+      window.location.reload();
+    }
+
+    /* Keyboard support: ↓ / ↑ navigate, Enter selects. Default focus on
+     * the active profile if any, otherwise the first card. */
+    let idx = Math.max(0, profiles.findIndex((p) => p.id === activeId));
+    const cards = grid.querySelectorAll(".ls-card");
+    cards[idx]?.classList.add("is-active");
+    function refocus() { cards.forEach((c, i) => c.classList.toggle("is-active", i === idx)); }
+    document.addEventListener("keydown", function lockKey(e) {
+      if (root.parentElement !== document.body) {
+        document.removeEventListener("keydown", lockKey);
+        return;
+      }
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); idx = (idx + 1) % cards.length; refocus(); }
+      if (e.key === "ArrowLeft"  || e.key === "ArrowUp"  ) { e.preventDefault(); idx = (idx - 1 + cards.length) % cards.length; refocus(); }
+      if (e.key === "Enter") { e.preventDefault(); choose(profiles[idx].id); }
+    });
+  });
+}
+
+/* Track activity on any keypress / click so the lock-screen knows when to
+ * stay quiet on a quick reload vs pop on a fresh session. */
+function bumpActivity() {
+  try { localStorage.setItem("flatout.lastActivity", String(Date.now())); } catch {}
+}
+document.addEventListener("keydown", bumpActivity, { capture: true, passive: true });
+document.addEventListener("click", bumpActivity, { capture: true, passive: true });
+
 /* Cmd+K (Ctrl+K elsewhere) toggles the palette. */
 document.addEventListener("keydown", (e) => {
   const tag = (e.target?.tagName || "").toLowerCase();
@@ -1850,7 +1973,13 @@ document.addEventListener("keydown", (e) => {
 });
 
 /* ---------- BOOT ---------- */
-function boot() {
+async function boot() {
+  /* Multi-operator profile lock-screen — only renders if the registry has
+   * more than one profile AND the kiosk's been idle longer than the lock
+   * timeout. Returns immediately on single-profile installs. Awaited so a
+   * profile switch (which reloads the page) doesn't race with the rest of
+   * boot. */
+  await maybeShowProfileLockScreen();
   buildTicks();
   buildNumerals();
   renderCalendar();
