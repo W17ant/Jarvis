@@ -2579,7 +2579,7 @@ async function _executeToolInner(name, args) {
   }
 }
 
-async function askLLM(query, history = []) {
+async function askLLM(query, history = [], { sessionId = null } = {}) {
   const brand = loadBrand();
   const agencyName = brand.agency.name || CONFIG.agency.name;
   const agentName = brand.agent.name || "Flat-Out";
@@ -2686,6 +2686,17 @@ When given [Context], use those facts verbatim. If asked to do something you don
     { role: "user", content: userContent },
   ];
 
+  /* Per-turn persistence — the operator's raw query goes in immediately so
+   * even a crashed reply leaves a record. The assistant turn is written
+   * after the reply resolves, with the list of tools that fired. sessionId
+   * is supplied by the HUD; we tolerate its absence by skipping persistence
+   * (e.g. for MCP / smoke-test entry points that don't carry one). */
+  const toolsThisQuery = [];
+  if (sessionId) {
+    try { Memory.appendTurn({ sessionId, role: "user", content: query }); }
+    catch (e) { console.warn(`[bridge] turn persist (user) failed: ${e.message}`); }
+  }
+
   /* Embedding-based tool filter — at 97 tools the full catalogue is too much
    * context for the 14b selector. Pick the top-K most-similar by nomic-embed
    * cosine + always-on core. Resolved once per query, reused across hops so
@@ -2739,7 +2750,12 @@ When given [Context], use those facts verbatim. If asked to do something you don
     const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
 
     if (calls.length === 0) {
-      return (msg.content || "").trim();
+      const finalReply = (msg.content || "").trim();
+      if (sessionId && finalReply) {
+        try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
+        catch (e) { console.warn(`[bridge] turn persist (assistant) failed: ${e.message}`); }
+      }
+      return finalReply;
     }
 
     // Append the assistant's tool-call message + execute each tool, append their results
@@ -2749,6 +2765,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
       let args = c.function?.arguments;
       if (typeof args === "string") { try { args = JSON.parse(args); } catch { args = {}; } }
       console.log(`[bridge] tool call: ${fname}(${JSON.stringify(args).slice(0, 120)})`);
+      toolsThisQuery.push(fname);
       let result;
       try { result = await executeTool(fname, args || {}); }
       catch (e) { result = { error: String(e.message || e) }; }
@@ -2781,7 +2798,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
  *  @returns {Promise<string>} the fully-assembled reply (caller can also persist this
  *  to history without missing anything that was streamed).
  */
-async function askLLMStream({ query, history = [], onSentence }) {
+async function askLLMStream({ query, history = [], onSentence, sessionId = null }) {
   /* Why log: when the kiosk goes silent mid-turn, the bridge log was empty —
    * no entry for the inbound query, no entry for hop boundaries. Every later
    * "is it stuck?" debug starts blind. One concise line per hop + the first
@@ -2816,6 +2833,16 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     ...history,
     { role: "user", content: userContent },
   ];
+
+  /* Per-turn persistence (streaming path). User turn gets logged immediately
+   * so a stream that fails partway still leaves a record. Assistant turn is
+   * written below once the stream finishes (or after the last hop completes,
+   * with the full accumulated text). */
+  const toolsThisQuery = [];
+  if (sessionId) {
+    try { Memory.appendTurn({ sessionId, role: "user", content: query }); }
+    catch (e) { console.warn(`[bridge] turn persist (user, stream) failed: ${e.message}`); }
+  }
 
   /* Sentence boundary state — accumulates streamed tokens, flushes on terminal punctuation.
    * Boundary regex keeps it simple: ".", "?", or "!" followed by whitespace or end-of-string.
@@ -2926,7 +2953,12 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     if (calls.length === 0) {
       flushFinal();
       console.log(`[stream] complete in ${Date.now() - t0}ms (${sb.emitted.length} chars total)`);
-      return sb.emitted.trim();
+      const finalReply = sb.emitted.trim();
+      if (sessionId && finalReply) {
+        try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
+        catch (e) { console.warn(`[bridge] turn persist (assistant, stream) failed: ${e.message}`); }
+      }
+      return finalReply;
     }
 
     /* Tool-calling hop: append the assistant message + each tool's result, then loop.
@@ -2939,6 +2971,7 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
       let args = c.function?.arguments;
       if (typeof args === "string") { try { args = JSON.parse(args); } catch { args = {}; } }
       console.log(`[bridge] tool call (stream): ${fname}(${JSON.stringify(args).slice(0, 120)})`);
+      toolsThisQuery.push(fname);
       let result;
       try { result = await executeTool(fname, args || {}); }
       catch (e) { result = { error: String(e.message || e) }; }
@@ -2953,7 +2986,12 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
   }
 
   flushFinal();
-  return sb.emitted.trim() || "I tried a few searches but couldn't pull a clean answer together — try asking more specifically.";
+  const finalReply = sb.emitted.trim();
+  if (sessionId && finalReply) {
+    try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
+    catch (e) { console.warn(`[bridge] turn persist (assistant, stream end) failed: ${e.message}`); }
+  }
+  return finalReply || "I tried a few searches but couldn't pull a clean answer together — try asking more specifically.";
 }
 
 /* ---------- WEATHER (Open-Meteo, no API key needed) ---------- */
@@ -3015,6 +3053,32 @@ const httpServer = createServer(async (req, res) => {
       toolRouter: ToolRouter.indexStatus(),
     }));
     return;
+  }
+
+  /* GET /history — paginated conversation turns. Query params:
+   *    limit       max rows (default 50, hard cap 500)
+   *    beforeTs    paginate older than this ms timestamp
+   *    sessionId   filter to one HUD session
+   * GET /history/sessions — distinct sessions in last N days with turn counts
+   * Used by the HUD's history drawer for "what did I ask yesterday" lookups. */
+  if (req.url?.startsWith("/history") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    if (url.pathname === "/history/sessions") {
+      const days = Number(url.searchParams.get("days")) || 14;
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ ok: true, sessions: Memory.listSessions({ days }) }));
+      return;
+    }
+    if (url.pathname === "/history") {
+      const turns = Memory.recentTurns({
+        limit: Number(url.searchParams.get("limit")) || 50,
+        beforeTs: url.searchParams.get("beforeTs") ? Number(url.searchParams.get("beforeTs")) : null,
+        sessionId: url.searchParams.get("sessionId") || null,
+      });
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ ok: true, turns }));
+      return;
+    }
   }
 
   /* GET /actions — machine-readable manifest of every tool the LLM exposes,
@@ -4320,13 +4384,16 @@ wss.on("connection", (ws) => {
 
     try {
       switch (type) {
-        case "llm.ask":     reply(await askLLM(payload.query, payload.history || [])); break;
+        case "llm.ask":     reply(await askLLM(payload.query, payload.history || [], { sessionId: payload?.sessionId })); break;
 
         /* Streaming variant — emits llm.sentence events as the model generates, then
          * resolves the request promise with the full text. The caller can either await
          * the reply (legacy path, gets the same string) OR subscribe to llm.sentence
          * for sentence-by-sentence TTS. RunId correlates events to a single utterance
-         * so a stale stream's sentences don't bleed into a new one. */
+         * so a stale stream's sentences don't bleed into a new one.
+         *
+         * sessionId (passed from the HUD's localStorage) groups turns from the same
+         * HUD load so the history drawer can show "this session" vs older sessions. */
         case "llm.askStream": {
           const runId = `stream-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           const send = (subType, data) => ws.send(JSON.stringify({ type: subType, runId, ts: Date.now(), data }));
@@ -4335,6 +4402,7 @@ wss.on("connection", (ws) => {
             const text = await askLLMStream({
               query: payload.query,
               history: payload.history || [],
+              sessionId: payload?.sessionId,
               onSentence: (s) => send("llm.sentence", { runId, text: s }),
             });
             send("llm.streamDone", { runId, text });

@@ -629,13 +629,28 @@ function clearHistory() {
 }
 
 /** Ask the bridge for an LLM reply. Includes conversationHistory so the model has context. */
+/* Stable per-HUD-load session id. Persists in localStorage so survives Cmd+R
+ * but resets if the browser profile is wiped. Used to group conversation_turns
+ * rows in the bridge's persistence layer so the history drawer can offer a
+ * "this session" filter. */
+function getSessionId() {
+  try {
+    let id = localStorage.getItem("flatout.sessionId");
+    if (!id) {
+      id = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      localStorage.setItem("flatout.sessionId", id);
+    }
+    return id;
+  } catch { return null; }
+}
+
 /* Why: 60s timeout used to be enough but composite tools like describe_shoot_with_specs
  * legitimately need ~30-90s when they chain caption+search+synthesis. Bumped to 120s as a
  * backstop; the bridge still logs per-stage timings so genuine hangs are spottable. */
 function askLLM(query, timeoutMs = 120000) {
   return Bridge.ask({
     type: "llm.ask",
-    payload: { query, history: conversationHistory.slice() },
+    payload: { query, history: conversationHistory.slice(), sessionId: getSessionId() },
   }, timeoutMs);
 }
 
@@ -773,7 +788,7 @@ async function speakStream(query, history) {
   try {
     /* Fire the streaming request. The reply payload arrives via the bridge's id-correlated
      * reply, but we don't need to await it — events drive everything. */
-    Bridge.ask({ type: "llm.askStream", payload: { query, history } }).catch((e) => {
+    Bridge.ask({ type: "llm.askStream", payload: { query, history, sessionId: getSessionId() } }).catch((e) => {
       console.warn("[Flat-Out] askStream failed:", e.message);
       /* Resolve early with whatever we accumulated so the speak() pipeline closes cleanly. */
       if (session.resolveEarly) session.resolveEarly(session.accumulated || "");

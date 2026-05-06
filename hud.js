@@ -1364,6 +1364,144 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- HISTORY DRAWER (H) ----------
+ *  Slide-out from the right edge listing every conversation turn the bridge
+ *  has persisted (conversation_turns table — populated by askLLM and
+ *  askLLMStream). Each row: timestamp, role badge (HEARD / FLAT-OUT), the
+ *  content, plus chips for any tools that fired during that turn.
+ *
+ *  Why a drawer not a modal: history is something the operator skims while
+ *  Jarvis stays operational behind it. Modals stop the world; the drawer
+ *  lets the speedometer keep ticking and the wake mic stay live.
+ *
+ *  H key opens / closes (operator-input guarded same as ?). Escape closes. */
+
+let _historyDrawerEl = null;
+let _historyTurnsCache = null;
+
+function ensureHistoryDrawer() {
+  if (_historyDrawerEl) return _historyDrawerEl;
+  const root = el("aside", { id: "historyDrawer" });
+  root.hidden = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    #historyDrawer { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; max-width: 95vw; background: #050505; border-left: 2px solid var(--brand-primary, #ff3b3b); z-index: 9998; display: flex; flex-direction: column; font-family: var(--mono, "JetBrains Mono", monospace); transform: translateX(0); transition: transform 220ms ease; box-shadow: -10px 0 40px rgba(0,0,0,0.6); }
+    #historyDrawer[hidden] { display: flex; transform: translateX(110%); pointer-events: none; }
+    #historyDrawer .hd-head { padding: 18px 22px 10px; border-bottom: 1px solid #1c1c1c; }
+    #historyDrawer h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #historyDrawer .hd-sub { color: #888; font-size: 10px; margin-bottom: 12px; }
+    #historyDrawer input.hd-search { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 8px 10px; width: 100%; font-family: inherit; font-size: 12px; box-sizing: border-box; }
+    #historyDrawer input.hd-search:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #historyDrawer .hd-list { flex: 1; overflow-y: auto; padding: 8px 18px 18px; }
+    #historyDrawer .hd-turn { padding: 10px 0; border-bottom: 1px dashed #1a1a1a; }
+    #historyDrawer .hd-turn:last-child { border-bottom: none; }
+    #historyDrawer .hd-meta { display: flex; gap: 8px; align-items: baseline; font-size: 9px; letter-spacing: 0.1em; color: #555; margin-bottom: 4px; text-transform: uppercase; }
+    #historyDrawer .hd-role { color: var(--brand-primary, #ff3b3b); font-weight: 700; }
+    #historyDrawer .hd-role.user { color: #ccc; }
+    #historyDrawer .hd-content { color: #ddd; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
+    #historyDrawer .hd-tools { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+    #historyDrawer .hd-tool-chip { background: rgba(255,59,59,0.12); color: var(--brand-primary, #ff3b3b); border: 1px solid rgba(255,59,59,0.3); font-size: 9px; padding: 1px 6px; letter-spacing: 0.08em; }
+    #historyDrawer .hd-empty { color: #555; padding: 32px 0; text-align: center; font-size: 11px; }
+    #historyDrawer .hd-footer { color: #555; font-size: 9px; padding: 8px 22px; border-top: 1px solid #1c1c1c; letter-spacing: 0.08em; text-transform: uppercase; }
+  `;
+  root.appendChild(style);
+
+  const head = el("div", { className: "hd-head" });
+  head.appendChild(el("h2", { text: "Conversation history" }));
+  const sub = el("div", { className: "hd-sub", text: "Recent turns from this and previous sessions." });
+  head.appendChild(sub);
+  const search = el("input", { className: "hd-search", attrs: { type: "text", placeholder: "Filter — try a name, project, tool…", autocomplete: "off" } });
+  head.appendChild(search);
+  root.appendChild(head);
+  const list = el("div", { className: "hd-list" });
+  root.appendChild(list);
+  root.appendChild(el("div", { className: "hd-footer", text: "H or Esc to close · turns saved across reloads" }));
+
+  document.body.appendChild(root);
+  _historyDrawerEl = root;
+  root._refs = { search, list, sub };
+  search.addEventListener("input", () => renderHistoryList(root, search.value));
+  search.addEventListener("keydown", (e) => { if (e.key === "Escape") root.hidden = true; });
+  return root;
+}
+
+function renderHistoryList(root, filter = "") {
+  const { list, sub } = root._refs;
+  while (list.firstChild) list.removeChild(list.firstChild);
+  if (!_historyTurnsCache) {
+    list.appendChild(el("div", { className: "hd-empty", text: "Loading…" }));
+    return;
+  }
+  const q = filter.trim().toLowerCase();
+  const matches = _historyTurnsCache.filter((t) => {
+    if (!q) return true;
+    if ((t.content || "").toLowerCase().includes(q)) return true;
+    if ((t.tools || []).some((tool) => tool.toLowerCase().includes(q))) return true;
+    return false;
+  });
+  sub.textContent = `${matches.length} of ${_historyTurnsCache.length} turns${q ? ` matching "${q}"` : ""}`;
+  if (!matches.length) {
+    list.appendChild(el("div", { className: "hd-empty", text: q ? `No turns matching "${filter}".` : "No conversation history yet — say something to Jarvis." }));
+    return;
+  }
+  /* Render newest first (the bridge already sorts that way). */
+  const currentSession = (() => { try { return localStorage.getItem("flatout.sessionId"); } catch { return null; } })();
+  for (const t of matches) {
+    const row = el("div", { className: "hd-turn" });
+    const meta = el("div", { className: "hd-meta" });
+    const ts = new Date(t.ts);
+    const mark = ts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    const date = ts.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    const roleLabel = t.role === "assistant" ? "FLAT-OUT" : "HEARD";
+    const roleSpan = el("span", { className: `hd-role ${t.role === "user" ? "user" : ""}`, text: roleLabel });
+    meta.appendChild(roleSpan);
+    meta.appendChild(el("span", { text: `${date} ${mark}` }));
+    if (t.sessionId === currentSession) meta.appendChild(el("span", { text: "this session" }));
+    row.appendChild(meta);
+    row.appendChild(el("div", { className: "hd-content", text: t.content }));
+    if (t.tools && t.tools.length) {
+      const chips = el("div", { className: "hd-tools" });
+      for (const tool of t.tools) chips.appendChild(el("span", { className: "hd-tool-chip", text: tool }));
+      row.appendChild(chips);
+    }
+    list.appendChild(row);
+  }
+}
+
+async function openHistoryDrawer() {
+  const root = ensureHistoryDrawer();
+  root.hidden = false;
+  setTimeout(() => root._refs.search.focus(), 60);
+  /* Always re-fetch on open — turns accumulate while the drawer was closed.
+   * 200 turns is plenty for a typical week of use; cheap to grab fresh. */
+  try {
+    const r = await fetch("http://localhost:8766/history?limit=200", { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      _historyTurnsCache = j.turns || [];
+    } else {
+      _historyTurnsCache = [];
+    }
+  } catch { _historyTurnsCache = []; }
+  renderHistoryList(root, root._refs.search.value || "");
+}
+
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target?.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  if ((e.key === "h" || e.key === "H") && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    e.preventDefault();
+    if (_historyDrawerEl && !_historyDrawerEl.hidden) {
+      _historyDrawerEl.hidden = true;
+    } else {
+      openHistoryDrawer();
+    }
+  }
+  if (e.key === "Escape" && _historyDrawerEl && !_historyDrawerEl.hidden) {
+    _historyDrawerEl.hidden = true;
+  }
+});
+
 /* ---------- BOOT ---------- */
 function boot() {
   buildTicks();
