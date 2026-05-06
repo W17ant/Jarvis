@@ -54,7 +54,7 @@ node tools/setup-wizard.mjs
 The wizard asks for:
 - Agent name + wake phrase + voice (any of Kokoro's 50+ voices)
 - Agency name, tagline, brand colours, logo
-- Hardware tier (auto-picks model sizes that fit your chip — M5 Max gets 32b/32b, M1 Max gets 14b/7b)
+- Hardware tier (auto-picks model sizes that fit your chip — all M-series Maxes get qwen2.5:14b text + qwen2.5vl:7b vision, smaller chips drop to 7b/3b. The previous 32b/32b combo crashed M5 Max GPUs and was retired)
 - Optional API keys (Frame.io for review workflow, SerpAPI for press radar, Hunter.io for outreach)
 - Shoots + output folder roots (point at a NAS / external SSD if you want)
 
@@ -143,9 +143,9 @@ Common gotchas (full FAQ in `docs/install-guide.html` pages 11–13):
                 │      │      │      │
             Ollama  Whisper Kokoro  AppleScript
             (Qwen   (STT)   (TTS)   (Mail · Calendar
-             14b/                    · Premiere · Lightroom)
-             32b
-             VL)
+             14b +                   · Premiere · Lightroom)
+             3b fast +
+             7b VL)
 ```
 
 - **HUD** — vanilla HTML/CSS/JS. No framework. 17 modules: voice loop, layout grid, plan stage, command palette, audit overlay, usage telemetry, conversation history, demo mode, profiles, notifications, etc. White-labelable via `config/brand.json`.
@@ -167,9 +167,9 @@ The 🚀 features are agency-flavoured, not generic kiosk demos. The bridge know
 
 ## ⚡ Performance
 
-- **Cold start to first audio**: ~1s on M5 Max (32b text model, sentence-level streaming hides cold-start)
-- **Subsequent turns**: ~300ms first-token latency with `keep_alive: 30m`
-- **Tool routing on capable hardware**: short routing queries hit the 14b fast model; long-form drafts hit 32b. Roughly 40-50% faster on chat-style queries without giving up quality on writes
+- **Cold start to first audio**: ~1s on M5 Max (14b text model, sentence-level streaming hides cold-start)
+- **Subsequent turns**: ~300ms first-token latency with `keep_alive: 24h` and `OLLAMA_FLASH_ATTENTION=1` set via launchctl
+- **Tool routing on capable hardware**: short routing queries hit the 3b fast model (~500ms); long-form drafts and tool dispatch hit 14b. Roughly 5x faster on chat-style queries without giving up quality on writes
 - **Pre-warm on boot**: parallel probes to Ollama (text + VL), Kokoro, Whisper hide the 2-3s cold-start tax
 - **Optional Docker render env** — `RENDER_USE_DOCKER=1` routes shell commands through a pinned Debian image with ffmpeg + ImageMagick + exiftool. Reproducible across operator Macs
 

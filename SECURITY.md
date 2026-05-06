@@ -10,8 +10,8 @@ Everything that processes voice or content stays on the machine:
 | Data | Where it runs | Network egress |
 |---|---|---|
 | Voice (mic → Whisper STT) | Local Python venv (`bridge/whisper_server.py`) | None |
-| LLM reasoning (Qwen 2.5 32b) | Local Ollama on `:11434` | None |
-| Vision (Qwen 2.5-VL 32b) | Local Ollama on `:11434` | None |
+| LLM reasoning (Qwen 2.5 14b main, 3b fast-router) | Local Ollama on `:11434` | None |
+| Vision (Qwen 2.5-VL 7b) | Local Ollama on `:11434` | None |
 | Embeddings (nomic-embed-text) | Local Ollama on `:11434` | None |
 | TTS (Kokoro) | Local Python venv (`bridge/kokoro_server.py`) | None |
 | Memory DB | Local SQLite (`data/memory.db`) | None |

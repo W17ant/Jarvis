@@ -131,10 +131,16 @@ async function warmWhisper() {
  * @param {boolean} [cfg.skipVL]   tier-controlled — skip VL warmup on lite tier
  */
 export async function warmUpAll(cfg) {
-  console.log(`[warmup] starting (text=${cfg.textModel}${cfg.skipVL ? ", VL skipped" : `, vl=${cfg.vlModel}`})`);
+  /* Why VL is now skipped by default: pre-warming both text + vision at boot
+   * doubles peak GPU memory pressure on Apple Silicon (Adam's M5 Max crashed
+   * at 100% GPU on the 14b+7b combo). Vision is only used by ~10% of operator
+   * queries — it loads on first use and the user pays a one-off ~1.5s cold
+   * start. Override with WARMUP_VL=1 if you want the original behaviour. */
+  const skipVL = cfg.skipVL || process.env.WARMUP_VL !== "1";
+  console.log(`[warmup] starting (text=${cfg.textModel}${skipVL ? ", VL deferred to first call" : `, vl=${cfg.vlModel}`})`);
   await Promise.allSettled([
     warmText({ ollamaUrl: cfg.ollamaUrl, model: cfg.textModel, keepAlive: cfg.textKeepAlive }),
-    cfg.skipVL ? Promise.resolve() : warmVL({ ollamaUrl: cfg.ollamaUrl, model: cfg.vlModel, keepAlive: cfg.vlKeepAlive }),
+    skipVL ? Promise.resolve() : warmVL({ ollamaUrl: cfg.ollamaUrl, model: cfg.vlModel, keepAlive: cfg.vlKeepAlive }),
     warmKokoro(),
     warmWhisper(),
   ]);

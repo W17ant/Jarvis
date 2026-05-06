@@ -15,17 +15,45 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 URL="http://localhost:8765/"
 
+# ── Ollama tuning ──────────────────────────────────────────────
+# Set BEFORE the bridge boots so Ollama (which auto-restarts under launchd
+# on macOS via Ollama.app) picks the values up. These are the four knobs
+# that meaningfully change Apple-Silicon GPU pressure on a 14b/7b stack:
+#   NUM_PARALLEL=1     — only one concurrent request per loaded model.
+#                        Default is 4, which 4× the KV cache and pegs GPU
+#                        memory on M-series Macs running text + VL together.
+#   FLASH_ATTENTION=1  — Metal flash attention. ~10-20% faster + halves KV
+#                        cache size. Stable on Ollama 0.4+.
+#   KV_CACHE_TYPE=q8_0 — quantise the KV cache. Halves it again with
+#                        negligible quality loss for tool-calling workloads.
+#   KEEP_ALIVE=24h     — once a model is warm, keep it warm. Default 5m
+#                        unloads between sentences, paying cold-start every
+#                        time the operator pauses for a moment.
+# launchctl setenv writes to the per-user environment that launchd-spawned
+# processes (Ollama.app) inherit. Already-running Ollama needs a quit +
+# relaunch from the menu bar to pick these up — we don't kill it here
+# because that would interrupt anyone else using it.
+if command -v launchctl >/dev/null 2>&1; then
+  launchctl setenv OLLAMA_NUM_PARALLEL 1            >/dev/null 2>&1 || true
+  launchctl setenv OLLAMA_FLASH_ATTENTION 1         >/dev/null 2>&1 || true
+  launchctl setenv OLLAMA_KV_CACHE_TYPE q8_0        >/dev/null 2>&1 || true
+  launchctl setenv OLLAMA_KEEP_ALIVE 24h            >/dev/null 2>&1 || true
+  launchctl setenv OLLAMA_MAX_LOADED_MODELS 2       >/dev/null 2>&1 || true
+fi
+
 # ── Service control ────────────────────────────────────────────
 # Kill by PORT, not by process name. lsof -ti :PORT returns every PID bound to
 # that port — covers static (python3 http.server), bridge (node), kokoro/whisper
 # (python from .venv) regardless of how they were spawned. More reliable than
 # pkill -f against command-string patterns.
 stop_services() {
+  local killed_any=0
   for port in 8765 8766 8767 8768; do
     pids=$(lsof -ti ":$port" 2>/dev/null || true)
     if [[ -n "$pids" ]]; then
       echo "[Flat-Out] killing :${port} (pid=${pids})"
       kill -TERM $pids 2>/dev/null || true
+      killed_any=1
     fi
   done
   # Give them a beat to exit gracefully, then SIGKILL anything still bound.
@@ -34,7 +62,24 @@ stop_services() {
     pids=$(lsof -ti ":$port" 2>/dev/null || true)
     [[ -n "$pids" ]] && kill -KILL $pids 2>/dev/null || true
   done
-  echo "[Flat-Out] services stopped"
+
+  # Why: Adam reported "shut down didn't work" — backend died but the Chrome
+  # HUD window stayed open showing "bridge offline". From his POV nothing
+  # changed. We close ONLY the app-mode HUD window (Chrome launched with
+  # --app=http://localhost:8765/) using pgrep against the exact flag, so the
+  # operator's regular Chrome session is untouched.
+  hud_pids=$(pgrep -f -- "--app=${URL}" 2>/dev/null || true)
+  if [[ -n "$hud_pids" ]]; then
+    echo "[Flat-Out] closing HUD Chrome window (pid=${hud_pids})"
+    kill -TERM $hud_pids 2>/dev/null || true
+    killed_any=1
+  fi
+
+  if (( killed_any )); then
+    echo "[Flat-Out] services stopped"
+  else
+    echo "[Flat-Out] nothing to stop — services were already down"
+  fi
 }
 
 SKIP_CHROME=0     # set by restart so we don't open another Chrome window

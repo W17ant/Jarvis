@@ -80,7 +80,7 @@ done
 # ── Hardware tier detection ───────────────────────────────────
 # Map chip + RAM to the right Qwen model sizes. Mirrors the wizard's tier table
 # so the install pulls models the operator will actually use. Three tiers:
-#   ultra   — 96 GB+ RAM           → 32b text + 32b VL  (press-release grade)
+#   ultra   — 96 GB+ RAM           → 14b text + 7b VL   (M5/M4 Max — 32b pegged GPU and OOM'd)
 #   max     — 64 GB                → 14b text + 7b VL   (safe middle, default)
 #   pro     — 32 GB or older Macs  → 7b  text + 3b VL   (fast, lower accuracy)
 detect_tier() {
@@ -98,7 +98,7 @@ detect_tier() {
 
 TIER="$(detect_tier)"
 case "$TIER" in
-  ultra)  TEXT_MODEL="qwen2.5:32b"; VL_MODEL="qwen2.5vl:32b" ;;
+  ultra)  TEXT_MODEL="qwen2.5:14b"; VL_MODEL="qwen2.5vl:7b"  ;;
   max)    TEXT_MODEL="qwen2.5:14b"; VL_MODEL="qwen2.5vl:7b"  ;;
   pro)    TEXT_MODEL="qwen2.5:14b"; VL_MODEL="qwen2.5vl:7b"  ;;
   lite|*) TEXT_MODEL="qwen2.5:7b";  VL_MODEL="qwen2.5vl:3b"  ;;

@@ -66,7 +66,7 @@ Purpose: visual proof-of-concept for the client meeting. Not the deliverable.
 
 Wire the HUD to a real LLM running locally on the M1 Max.
 
-- Install Ollama + pull `qwen2.5:14b` (start) and `qwen2.5:32b` (showpiece quality).
+- Install Ollama + pull `qwen2.5:14b` (main reasoning) and `qwen2.5:3b` (cascade router for chatty queries). 32b was tried for "showpiece" quality but pegged GPU on M5 Max and was retired.
 - Install isair/jarvis as the voice loop framework (already prebuilt for macOS arm64).
 - Replace canned `cannedReply()` in `voice.js` with calls to local jarvis backend.
 - Fork isair/jarvis to broadcast state events (`listening`/`thinking`/`speaking`/`tool-running`) over a local websocket — HUD subscribes and lights the speedo accordingly.

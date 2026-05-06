@@ -22,8 +22,16 @@ auth.json
 # data/memory.db = persistent SQLite with the operator's contacts, projects,
 # facts, conversation summaries. Per-install, contains personal data, never
 # commit. The setup wizard / boot path creates a fresh empty DB if missing.
-data/
+# Use data/* (not data/) so the whitelist exceptions below are reachable —
+# git can't re-include files inside a fully-excluded directory.
+data/*
 !data/.gitkeep
+# Operator-editable config templates — ship the defaults with the repo so a
+# fresh install has hard caps and an allowlist baked in. Per-operator edits
+# overwrite these in place. Runtime journals (purchase-log.jsonl, receipts/,
+# screenshots/, browse-traces/) stay caught by data/* above.
+!data/spending-limits.json
+!data/merchant-allowlist.json
 
 # Inbox watcher target. Operator drops files here. Per-install, never commit.
 inbox/

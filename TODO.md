@@ -6,6 +6,46 @@ Living todo list. Everything discussed in our planning sessions that hasn't ship
 
 ---
 
+## Current session — agentic capabilities + ops fixes (2026-05-06)
+
+### Shipped this session
+
+- ✅ **Pluggable LLM providers** — `bridge/llm/providers.mjs` unifies Anthropic / OpenAI / Ollama under one `chat()` call. Routing by workload (default / vision / highstakes). Env-driven keys.
+- ✅ **`open_url` tool** — fast no-API-cost path for "show me a map of X". Hard-validates http(s).
+- ✅ **`request_browse` tool** — Playwright + Claude/GPT vision inner loop. URL denylist (banks, gov, brokers), prompt-injection guard, action allowlist (click/type/scroll/wait/navigate/done), refuses to type card-shaped strings.
+- ✅ **`enter_sleep_mode` tool** — voice "shut down" / "go to sleep" mutes mic, dims speedo via `state.sleep` broadcast.
+- ✅ **Purchase rails (Patches A/B/C/D)** — `bridge/purchases.mjs` with budget caps + allowlist + tiered confirmation + append-only journal. Typed-confirm modal in HUD for £25–30. macOS Keychain card vault (`bridge/cards.mjs` + `tools/register-card.sh`). Argos UK adapter scaffolded (selectors stubbed).
+- ✅ **Speed knobs** — `launch.sh` sets `OLLAMA_NUM_PARALLEL=1`, `FLASH_ATTENTION=1`, `KV_CACHE_TYPE=q8_0`, `KEEP_ALIVE=24h`, `MAX_LOADED_MODELS=2` via launchctl. `.env` carries `OLLAMA_KEEP_ALIVE=24h` and `OLLAMA_FAST_MODEL=qwen2.5:3b`. Operator must quit + relaunch Ollama once for the launchctl vars to take effect.
+- ✅ **Location-lookup bug** — `lockLocation: true` in config.json was short-circuiting auto-detect. Fixed: defaulted false, force-flag added to `autoDetectLocation`, `/config/redetect` always forces + persists.
+- ✅ **`./launch.sh stop` UX** — now closes the Chrome HUD app-mode window AND prints "nothing to stop" when ports already free.
+- ✅ **Capture One + Lightroom** removed from launcher panel per Adam's request.
+- ✅ **Weather icon onerror fallback** — failed loads fall back to `cloudy.svg` and log the failed name.
+- ✅ **`models` array in `package.json`** — `tools/update.sh` will auto-pull `qwen2.5:3b` for Adam.
+- ✅ **Ultra tier patched in install.sh** — was 32b/32b (crashed M5 Max GPU), now 14b/7b matching max tier.
+- ✅ **Skip VL pre-warm at boot** — `bridge/warmup.mjs` now defers qwen2.5vl:7b to first vision call. Override with `WARMUP_VL=1`. Boot log shows `VL deferred to first call`.
+- ✅ **3-stage cascade router classifier hop** — `bridge/model-router.mjs` exposes `pickAsync()` with a 3b SIMPLE/COMPLEX hop on top of the existing regex/length heuristics. 600ms timeout, falls back to heuristics on failure.
+- ✅ **Stale 32b references in docs** — `README.md`, `SECURITY.md`, `PLAN.md` updated to reflect 14b + 3b + 7b VL stack.
+- ✅ **Personal-assistant tool quartet** — `bridge/personal.mjs` ships `send_imessage` (voice-gated), `add_reminder`, `set_timer` / `list_timers` / `cancel_timer` (in-HUD countdown badge + Kokoro fire announcement + Web Audio beep), `play_music` / `pause_music` (Music + Spotify via osascript). All zero-API-cost.
+- ✅ **HUD audit panel for purchase journal** — Shift+Cmd+J opens a dedicated Agent Console modal with scrollable journal (newest first), running totals, daily/weekly cap reminder. Pulls from `/purchases/audit?limit=50`.
+- ✅ **HUD API-key entry UI** — same Agent Console modal. Fields for Anthropic + OpenAI keys (masked display when set, never returned in clear by bridge), plus three workload routing dropdowns (default / vision / highstakes). POSTs to `/api-keys` which now allowlists `anthropic|openai|ollama` for routing values.
+- ✅ **`models` array in `package.json`** — `tools/update.sh` will auto-pull `qwen2.5:3b` for Adam alongside the existing models.
+
+- ✅ **Wider personal-assistant tools shipped** (`bridge/personal.mjs`):
+  - `read_article({url})` — fetch + clean HTML extraction (article / main / body), 12k char cap, returns title + text for the LLM to summarise
+  - `take_screenshot({region})` — `screencapture` for screen / window / selection. Saves to `data/screenshots/`. Detects operator-cancelled interactive captures.
+  - `set_focus({mode, until})` — invokes a `Focus On <mode>` Shortcut. Clear setup error if the Shortcut doesn't exist
+  - `lookup_password({label, field})` — 1Password CLI `op item get`. **Confirmation-gated**. Detects missing `op`, expired session, ambiguous matches
+  - `compose_note({title, body, app})` — Apple Notes (osascript) / Bear (x-callback-url) / Obsidian (URI handler)
+- ✅ **`update.sh` ships clear post-update operator instructions** — colour-coded numbered list covering: HUD refresh, macOS automation prompts, voice-command examples, the new Shift+Cmd+J shortcut, log paths, rollback options
+- ✅ **`update.sh` auto-restarts Ollama** — quits the menu-bar Ollama.app, waits for the daemon to exit, relaunches, polls `:11434` until ready. Only thing the operator has to do manually is approve macOS Automation prompts on first use of the new tools.
+
+### Outstanding from this session — deferred / not safe to ship blind
+
+- 🟧 **Argos adapter checkout-step wiring** — selectors need real verification on argos.co.uk. Scaffold has product search + cap-check + basket; checkout form-fill is intentionally stubbed. Bring up the bridge headed-Chromium session, complete one purchase manually so cookies persist, then use Playwright codegen to record selectors and wire them in.
+- 🟨 **`set_lights({scene, room})`** — Philips Hue API integration. Skipped because it needs per-install Hue bridge IP + bridge user token, plus the operator may not have Hue at all. Add when there's a known target setup.
+
+---
+
 ## Architectural debt to clear before P1
 
 🟥 ⚙️ **voice.js extraction** (~2 days)

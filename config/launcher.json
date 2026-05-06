@@ -2,10 +2,8 @@
   "_comment": "Quick-launch panel entries. Edit this file (or use the future settings UI) to add/remove/reorder. Icon names map to assets/icons/<name>.svg via Phosphor; omit for text-only.",
   "items": [
     { "label": "MAIL",         "app": "mail" },
-    { "label": "CAPTURE ONE",  "app": "capture-one" },
     { "label": "ADOBE CC",     "app": "adobe" },
     { "label": "PREMIERE PRO", "app": "premiere" },
-    { "label": "LIGHTROOM",    "app": "lightroom" },
     { "label": "COMPLETED",    "app": "output" },
     { "label": "SHOOTS",       "app": "shoots" },
     { "label": "FRAME.IO",     "app": "frameio" }

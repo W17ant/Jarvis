@@ -18,5 +18,5 @@
     "memoryGB": 64,
     "tier": "pro"
   },
-  "lockLocation": true
+  "lockLocation": false
 }

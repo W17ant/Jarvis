@@ -146,6 +146,63 @@ else
   warn "ollama not installed — run ./install.sh"
 fi
 
+# ─── 6.5 Ollama daemon restart ─────────────────────────────────────────────────
+# Why: NUM_PARALLEL=1, FLASH_ATTENTION=1, KV_CACHE_TYPE=q8_0, KEEP_ALIVE=24h
+# only take effect when Ollama itself restarts — the already-running daemon
+# inherited the OLD environment. Without this step, Adam's M5 Max keeps
+# crashing at 100% GPU because NUM_PARALLEL=4 is still in effect.
+#
+# We set launchctl vars HERE (idempotent — duplicated from launch.sh) before
+# touching Ollama. The order is: writeenv → quit Ollama → relaunch → bridge.
+# If we relied on launch.sh's setenv (step 7), Ollama would relaunch with
+# stale env and miss the whole point.
+step "Ollama daemon restart (pickup new env vars)"
+if command -v launchctl >/dev/null 2>&1 && [[ $CHECK_ONLY -eq 0 ]]; then
+  launchctl setenv OLLAMA_NUM_PARALLEL 1            >/dev/null 2>&1 || true
+  launchctl setenv OLLAMA_FLASH_ATTENTION 1         >/dev/null 2>&1 || true
+  launchctl setenv OLLAMA_KV_CACHE_TYPE q8_0        >/dev/null 2>&1 || true
+  launchctl setenv OLLAMA_KEEP_ALIVE 24h            >/dev/null 2>&1 || true
+  launchctl setenv OLLAMA_MAX_LOADED_MODELS 2       >/dev/null 2>&1 || true
+  ok "launchctl env vars set"
+fi
+if [[ -d "/Applications/Ollama.app" ]]; then
+  if [[ $CHECK_ONLY -eq 1 ]]; then
+    ok "would quit + relaunch Ollama.app"
+  else
+    if pgrep -fq "Ollama Helper\|Ollama\.app/Contents/MacOS/Ollama"; then
+      osascript -e 'tell application "Ollama" to quit' 2>/dev/null || true
+      # Wait for the daemon to actually exit before relaunching — otherwise the
+      # new instance crashes on a still-bound :11434 and the operator sees a
+      # silently dead Ollama.
+      for i in {1..10}; do
+        sleep 0.5
+        pgrep -fq "Ollama Helper\|Ollama\.app/Contents/MacOS/Ollama" || break
+      done
+      ok "Ollama quit"
+    else
+      ok "Ollama wasn't running — fresh launch"
+    fi
+    open -a Ollama
+    # Wait for :11434 to come back so the next step (services restart) doesn't
+    # race against an empty Ollama state.
+    for i in {1..20}; do
+      sleep 0.5
+      curl -fsS -m 1 http://localhost:11434/api/tags >/dev/null 2>&1 && break
+    done
+    if curl -fsS -m 1 http://localhost:11434/api/tags >/dev/null 2>&1; then
+      ok "Ollama relaunched and listening on :11434"
+    else
+      warn "Ollama relaunch timed out — services may still report ollama-offline. Try: open -a Ollama"
+    fi
+  fi
+elif command -v ollama >/dev/null 2>&1; then
+  # CLI-only install (rare). Adam likely doesn't have this, but cover it cleanly.
+  warn "Ollama CLI detected but no Ollama.app — restart your daemon manually:"
+  warn "    pkill -f 'ollama serve' && ollama serve &"
+else
+  warn "Ollama not installed — install with: brew install ollama"
+fi
+
 # ─── 7. Restart services ───────────────────────────────────────────────────────
 step "Restart"
 if [[ $CHECK_ONLY -eq 1 ]]; then
@@ -169,12 +226,60 @@ else
   fi
 fi
 
+# ─── 8. Post-update operator instructions ─────────────────────────────────────
+# What the operator needs to do AFTER the script finishes. Organised by
+# urgency: action items (must-do), discoveries (new features they should try),
+# safety nets (where to find logs, how to roll back). Coloured headings so the
+# important parts catch the eye in a busy terminal.
+RED=$'\033[1;31m'; CYN=$'\033[1;36m'; GRN=$'\033[1;32m'; DIM=$'\033[2m'; NC=$'\033[0m'
+
 cat <<EOF
 
-  ┌──────────────────────────────────────────┐
-  │  Update complete.                        │
-  │  Tail logs:                              │
-  │     tail -f /tmp/flat-out-bridge.log     │
-  └──────────────────────────────────────────┘
+${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
+${RED}                       UPDATE COMPLETE${NC}
+${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
+
+${CYN}1. Refresh the HUD${NC}
+   Click the Flat-Out browser window and press ${GRN}Cmd+R${NC}.
+   Picks up new HUD code, the launcher menu changes, and the new
+   weather-icon fallback. Without this the HUD still runs the old JS.
+
+${CYN}2. macOS will ask for permissions the first time you use the new tools${NC}
+   On first use, macOS prompts you to allow Jarvis to control:
+     - Messages (for "text Adam I'm running late")
+     - Reminders (for "remind me to call mum at 6")
+     - Music / Spotify (for "play some driving music")
+     - Contacts (for resolving names → numbers in iMessage)
+   Approve in: ${GRN}System Settings → Privacy & Security → Automation${NC}.
+   This is a one-time approval per app. Until you approve, those voice
+   commands will fail with "automation not permitted".
+
+${CYN}3. Try the new voice commands${NC}
+   Wake Jarvis with your hot phrase, then say any of these:
+     "shut down" / "go to sleep"        — mutes mic, dims HUD
+     "open Google Maps for Manchester"  — pops the URL in your browser
+     "text Adam I'm running 10 late"    — iMessage with confirmation gate
+     "remind me to call mum at 6pm"     — Apple Reminders
+     "set a 20 minute timer for chicken"— in-HUD countdown + chime
+     "play some driving music"          — Apple Music search + play
+
+${CYN}4. New keyboard shortcut: ${GRN}Shift+Cmd+J${NC}
+   Opens the Agent Console — a compact panel with:
+     - Anthropic / OpenAI API key entry (optional, for Claude/GPT integration)
+     - LLM workload routing (default chat / vision / high-stakes)
+     - Live purchase audit log (any shopping the agent has tried)
+   Same shortcut closes it.
+
+${CYN}5. Tail logs if something looks off${NC}
+   ${GRN}tail -f /tmp/flat-out-bridge.log${NC}        Bridge — main chat path
+   ${GRN}tail -f /tmp/flat-out-kokoro.log${NC}        TTS server
+   ${GRN}tail -f /tmp/flat-out-static.log${NC}        Static HUD server
+
+${CYN}6. Roll back if you need to${NC}
+   git stash list                       List anything the updater stashed
+   git stash pop                        Restore your local edits
+   git reset --hard HEAD~1              Bail out of this update entirely
+
+${DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
 
 EOF
