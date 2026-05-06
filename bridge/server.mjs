@@ -56,6 +56,7 @@ import * as Browse from "./browse.mjs";
 import * as LlmProviders from "./llm/providers.mjs";
 import * as Personal from "./personal.mjs";
 import * as VisualStyle from "./visual-style.mjs";
+import * as Transcribe from "./transcribe.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1783,6 +1784,22 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "transcribe_video",
+      description: "Transcribe a video file end-to-end. Strips audio with ffmpeg → local Whisper for timestamped speech segments → samples N keyframes → vision LLM captions each one. Returns timestamped speech + frame captions + a single interleaved narrative. Use for: 'transcribe yesterday's interview', 'what's said in the press-launch clip', 'summarise this raw rushes file'. Slower than text tools (30-90s for a 5-minute clip) so use sparingly.",
+      parameters: {
+        type: "object",
+        properties: {
+          path:          { type: "string", description: "Filesystem path — absolute or relative to project root. Must be a video file (mp4/mov/m4v/mkv/avi/webm)." },
+          includeVisual: { type: "boolean", description: "Sample frames + caption them via the vision LLM. Default true. Set false for audio-only transcription (faster, no API cost)." },
+          sampleFrames:  { type: "number", description: "How many keyframes to caption when includeVisual is true. Default 8, max 20. More frames = more API spend." },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "learn_visual_style",
       description: "Analyse a folder, file, or list of reference frames/videos to capture the operator's visual style. Combines numerical metrics (brightness/contrast/saturation curves via ImageMagick) with a vision-LLM prose description (palette, lighting, framing, grading). Use for: 'learn my style from these reference shoots', 'capture the FOM look from output/heroes/'. For videos, ffmpeg samples 4 keyframes per file. Stored alongside the existing style memory so 'apply my style' tools can recall it later.",
       parameters: {
@@ -1961,6 +1978,8 @@ const PLAN_PROPOSED_TOOLS = new Set([
    * kicks off. Doubles as transparency — they know the bot's about to drive
    * a browser around. */
   "request_browse",
+  /* Transcribe: 30-90s job. Plan-stage so operator sees what's happening. */
+  "transcribe_video",
   /* Personal-assistant tools that touch the operator's wider digital life —
    * iMessage and music are visible to other people / out of the HUD. Plan-stage
    * the intent so the operator can interrupt before send/play. */
@@ -2000,6 +2019,8 @@ function summariseToolCall(name, args) {
       return `Find flights ${a.from || "?"} → ${a.to || "?"} on ${a.depart || "?"}${a.returnDate ? ` returning ${a.returnDate}` : ""}`;
     case "learn_visual_style":
       return `Learn style "${a.name || "?"}" from ${typeof a.target === "string" ? a.target.slice(0, 50) : "(reference set)"}`;
+    case "transcribe_video":
+      return `Transcribe video: ${(a.path || "(?)").slice(0, 60)}${a.includeVisual === false ? " (audio only)" : ""}`;
     case "request_browse":
       return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
     case "open_url":
@@ -2142,6 +2163,7 @@ async function _executeToolInner(name, args) {
       return await Browse.requestBrowse({ goal, startUrl, maxSteps: 18 });
     }
     case "learn_visual_style": return await VisualStyle.learnVisualStyle(args);
+    case "transcribe_video":   return await Transcribe.transcribeVideo(args);
     case "request_browse": {
       /* Sanity-check: refuse if no vision-capable provider has an API key —
        * driving a browser from text only would burn tokens for poor results. */
