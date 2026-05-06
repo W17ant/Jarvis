@@ -1484,6 +1484,233 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- COMMAND PALETTE (Cmd+K) ----------
+ *  Spotlight-style palette over the HUD. Two modes:
+ *    1. Free-text — operator types a sentence ("text Adam I'm running late"),
+ *       Enter routes it through the same llm.askStream path as voice.
+ *       Gets the operator parity with voice without a separate dispatch
+ *       surface — same tool router, same NEEDS_CONFIRMATION gates, same
+ *       persistence to conversation_turns.
+ *    2. Tool browse — type "/" to switch. Filters the live /actions
+ *       manifest by name/description. Selection prepopulates the input
+ *       with a hint so the operator knows what to type next ("/text adam"
+ *       → "text Adam ").
+ *
+ *  Why a palette on top of voice: noisy production studios kill mic
+ *  recognition. A keyboard fallback that uses the same backend keeps the
+ *  whole tool surface usable without rebuilding it. Cmd+K matches Linear,
+ *  GitHub, Slack — universal palette shortcut.
+ *
+ *  Persistence: last 20 queries cached in localStorage so operators don't
+ *  retype "draft an email to ben at..." every time. Up arrow walks history. */
+
+let _paletteEl = null;
+let _paletteHistory = [];
+
+function loadPaletteHistory() {
+  try { _paletteHistory = JSON.parse(localStorage.getItem("flatout.paletteHistory") || "[]"); }
+  catch { _paletteHistory = []; }
+}
+function savePaletteHistory() {
+  try { localStorage.setItem("flatout.paletteHistory", JSON.stringify(_paletteHistory.slice(0, 20))); } catch {}
+}
+
+function ensurePalette() {
+  if (_paletteEl) return _paletteEl;
+  loadPaletteHistory();
+  const root = el("div", { id: "commandPalette" });
+  root.hidden = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    #commandPalette { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10002; display: flex; align-items: flex-start; justify-content: center; padding-top: 18vh; font-family: var(--mono, "JetBrains Mono", monospace); }
+    #commandPalette .cp-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); width: 720px; max-width: 92vw; max-height: 70vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(255,59,59,0.35); }
+    #commandPalette .cp-prompt { padding: 14px 18px; border-bottom: 1px solid #1c1c1c; }
+    #commandPalette input.cp-input { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 12px 14px; width: 100%; font-family: inherit; font-size: 16px; box-sizing: border-box; }
+    #commandPalette input.cp-input:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #commandPalette .cp-mode { color: #888; font-size: 10px; letter-spacing: 0.16em; margin-top: 6px; text-transform: uppercase; }
+    #commandPalette .cp-mode strong { color: var(--brand-primary, #ff3b3b); }
+    #commandPalette .cp-list { flex: 1; overflow-y: auto; padding: 6px 0; }
+    #commandPalette .cp-item { padding: 8px 18px; cursor: pointer; display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: baseline; color: #ddd; font-size: 12px; border-left: 2px solid transparent; }
+    #commandPalette .cp-item:hover, #commandPalette .cp-item.is-active { background: rgba(255,59,59,0.08); border-left-color: var(--brand-primary, #ff3b3b); }
+    #commandPalette .cp-name { color: var(--brand-primary, #ff3b3b); font-weight: 600; letter-spacing: 0.04em; }
+    #commandPalette .cp-desc { color: #888; line-height: 1.4; }
+    #commandPalette .cp-empty { color: #555; padding: 30px; text-align: center; font-size: 11px; }
+    #commandPalette .cp-foot { color: #555; font-size: 9px; padding: 8px 18px; border-top: 1px solid #1c1c1c; letter-spacing: 0.1em; text-transform: uppercase; }
+  `;
+  root.appendChild(style);
+  const frame = el("div", { className: "cp-frame" });
+  const promptHost = el("div", { className: "cp-prompt" });
+  const input = el("input", { className: "cp-input", attrs: { type: "text", placeholder: "Type a command — try 'text Adam I'm late' or '/' to browse tools", autocomplete: "off", spellcheck: "false" } });
+  const modeEl = el("div", { className: "cp-mode" });
+  modeEl.appendChild(document.createTextNode("Mode: "));
+  const modeStrong = el("strong", { text: "FREE TEXT" });
+  modeEl.appendChild(modeStrong);
+  modeEl.appendChild(document.createTextNode(" · Enter to send · ↑/↓ history · / for tools · Esc to close"));
+  promptHost.appendChild(input);
+  promptHost.appendChild(modeEl);
+  frame.appendChild(promptHost);
+  const list = el("div", { className: "cp-list" });
+  frame.appendChild(list);
+  frame.appendChild(el("div", { className: "cp-foot", text: "Free-text routes through the voice loop. Tool browse types the name into the prompt." }));
+  root.appendChild(frame);
+
+  let activeIdx = 0;
+  let mode = "free";        // "free" | "tools"
+  let lastFiltered = [];    // what's currently rendered in tools mode
+  let historyIdx = -1;
+
+  function setMode(next) {
+    mode = next;
+    modeStrong.textContent = next === "tools" ? "TOOL BROWSE" : "FREE TEXT";
+    while (list.firstChild) list.removeChild(list.firstChild);
+    if (next === "tools") drawTools(input.value.replace(/^\//, ""));
+  }
+
+  function drawTools(filter) {
+    while (list.firstChild) list.removeChild(list.firstChild);
+    if (!_helpManifest) {
+      list.appendChild(el("div", { className: "cp-empty", text: "Loading tool catalogue…" }));
+      return;
+    }
+    const q = (filter || "").trim().toLowerCase();
+    const matched = _helpManifest.filter((a) => {
+      if (!q) return true;
+      return a.name.toLowerCase().includes(q) || (a.description || "").toLowerCase().includes(q);
+    }).slice(0, 60);
+    lastFiltered = matched;
+    activeIdx = 0;
+    if (!matched.length) {
+      list.appendChild(el("div", { className: "cp-empty", text: `No tools matching "${q}".` }));
+      return;
+    }
+    matched.forEach((a, i) => {
+      const item = el("div", { className: "cp-item" + (i === 0 ? " is-active" : "") });
+      item.appendChild(el("div", { className: "cp-name", text: a.name }));
+      item.appendChild(el("div", { className: "cp-desc", text: (a.description || "").slice(0, 140) }));
+      item.addEventListener("mousedown", (e) => { e.preventDefault(); selectTool(a); });
+      list.appendChild(item);
+    });
+  }
+
+  function selectTool(action) {
+    /* When the operator picks a tool from browse mode, drop the leading "/"
+     * and prefix the tool name as a verb the LLM will recognise. The
+     * operator can append params naturally ("send_imessage to Adam Hello"). */
+    const verb = action.name.replace(/^request_/, "").replace(/_/g, " ");
+    input.value = `${verb} `;
+    setMode("free");
+    input.focus();
+  }
+
+  async function dispatchFreeText(text) {
+    if (!text.trim()) return;
+    /* Stash in history. Most-recent first; cap at 20. */
+    _paletteHistory = [text, ..._paletteHistory.filter((q) => q !== text)].slice(0, 20);
+    savePaletteHistory();
+    historyIdx = -1;
+    /* Close the palette before dispatch — the response shows up in the
+     * normal transcript bubble + speedo states, not in the palette. */
+    root.hidden = true;
+    /* Use the same WebSocket path voice uses. The handleHeard() in voice.js
+     * is the entry point; but it expects to be called from the wake/passive
+     * loop. Instead we go straight to bridge-client's askStream — same
+     * subscription pattern, no wake-word detection needed. */
+    if (window.__paletteDispatch) {
+      window.__paletteDispatch(text);
+    } else {
+      console.warn("[Flat-Out] palette dispatch hook not wired");
+    }
+  }
+
+  input.addEventListener("input", () => {
+    if (input.value.startsWith("/")) {
+      if (mode !== "tools") setMode("tools");
+      else drawTools(input.value.replace(/^\//, ""));
+    } else if (mode !== "free") {
+      setMode("free");
+    }
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { root.hidden = true; return; }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (mode === "tools" && lastFiltered.length) {
+        selectTool(lastFiltered[activeIdx]);
+      } else {
+        dispatchFreeText(input.value);
+      }
+      return;
+    }
+    if (mode === "tools") {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        activeIdx = Math.min(activeIdx + 1, lastFiltered.length - 1);
+        Array.from(list.children).forEach((c, i) => c.classList.toggle("is-active", i === activeIdx));
+        list.children[activeIdx]?.scrollIntoView({ block: "nearest" });
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        activeIdx = Math.max(activeIdx - 1, 0);
+        Array.from(list.children).forEach((c, i) => c.classList.toggle("is-active", i === activeIdx));
+        list.children[activeIdx]?.scrollIntoView({ block: "nearest" });
+      }
+      return;
+    }
+    /* Free-text mode — up/down walks history. */
+    if (e.key === "ArrowUp" && _paletteHistory.length) {
+      e.preventDefault();
+      historyIdx = Math.min(historyIdx + 1, _paletteHistory.length - 1);
+      input.value = _paletteHistory[historyIdx] || "";
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+    if (e.key === "ArrowDown" && historyIdx >= 0) {
+      e.preventDefault();
+      historyIdx -= 1;
+      input.value = historyIdx >= 0 ? _paletteHistory[historyIdx] : "";
+    }
+  });
+
+  root.addEventListener("click", (e) => { if (e.target === root) root.hidden = true; });
+  document.body.appendChild(root);
+  _paletteEl = root;
+  root._refs = { input, modeStrong, list, setMode, drawTools };
+  return root;
+}
+
+async function openPalette() {
+  const root = ensurePalette();
+  /* Pre-load tool manifest if we don't already have it from the help modal. */
+  if (!_helpManifest) {
+    try {
+      const r = await fetch("http://localhost:8766/actions", { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        _helpManifest = (j.actions || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+      }
+    } catch {}
+  }
+  root._refs.input.value = "";
+  root._refs.setMode("free");
+  root.hidden = false;
+  setTimeout(() => root._refs.input.focus(), 50);
+}
+
+/* Cmd+K (Ctrl+K elsewhere) toggles the palette. */
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target?.tagName || "").toLowerCase();
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === "k" || e.key === "K")) {
+    /* Allow opening from inside an input — the palette IS an input, no point
+     * making the operator click out first. */
+    e.preventDefault();
+    if (_paletteEl && !_paletteEl.hidden) {
+      _paletteEl.hidden = true;
+    } else {
+      openPalette();
+    }
+  }
+});
+
 /* ---------- HISTORY DRAWER (H) ----------
  *  Slide-out from the right edge listing every conversation turn the bridge
  *  has persisted (conversation_turns table — populated by askLLM and

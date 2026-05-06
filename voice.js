@@ -2042,6 +2042,18 @@ function wireUI() {
    * Bridge.connect() reuses an existing socket if one is open. */
   wireBridgeEvents();
 
+  /* Expose the heard-handler to the command palette (Cmd+K). The palette
+   * dispatches free-text by calling this hook; reuses the entire voice
+   * loop (askLLMStream → tool dispatch → TTS → conversation persistence)
+   * so the keyboard path is identical to mic. */
+  window.__paletteDispatch = (text) => {
+    if (!text) return;
+    /* Force conversation mode on so a single palette query gets the same
+     * follow-up window the wake-word path gets. */
+    if (typeof enterConversation === "function") enterConversation();
+    handleHeard(text, true);
+  };
+
   wfInit();   // start the state-aware waveform on boot
   refreshDevicePicker();   // populate the input dropdown + auto-select non-built-in
   maybeShowSetup();        // first-run setup modal (no-op after first completion)
