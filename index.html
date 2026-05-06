@@ -329,7 +329,8 @@
       <div class="weather__head">
         <div class="weather__loc" id="weatherLoc">MANCHESTER, UK</div>
         <div class="weather__now">
-          <img class="weather__icon" id="weatherIcon" src="assets/weather-icons/partly-cloudy-day.svg" alt="" aria-hidden="true" />
+          <img class="weather__icon" id="weatherIcon" src="assets/weather-icons/partly-cloudy-day.svg" alt="" aria-hidden="true"
+               onerror="this.onerror=null; console.warn('[Flat-Out] today weather icon failed to load:', this.src); this.src='assets/weather-icons/cloudy.svg';" />
           <div class="weather__readout">
             <span class="weather__temp" id="weatherTemp">14°</span>
             <span class="weather__cond" id="weatherCond">PARTLY CLOUDED</span>

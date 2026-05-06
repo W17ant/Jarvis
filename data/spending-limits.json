@@ -1,0 +1,13 @@
+{
+  "_comment": "Hard caps enforced by bridge/purchases.mjs BEFORE any virtual-card call. Defense-in-depth on top of the pre-funded card's bank ceiling. Edit numbers cautiously — the LLM cannot edit this file at runtime.",
+  "currency": "GBP",
+  "perTransactionMaxGbp": 30,
+  "dailyCapGbp": 50,
+  "weeklyCapGbp": 150,
+  "tiers": {
+    "_comment": "Confirmation requirement by amount. auto = LLM may proceed without operator confirm. voice = standard voice 'yes'/'no' gate. typed = HUD modal where operator types the amount to confirm (anti-injection — voice 'yes' cannot authorise).",
+    "autoMaxGbp": 5,
+    "voiceMaxGbp": 25
+  },
+  "simulatorMode": true
+}

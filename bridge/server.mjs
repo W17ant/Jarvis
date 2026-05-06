@@ -51,6 +51,10 @@ import * as MediaDays from "./media-days.mjs";
 import * as StyleMemory from "./style-memory.mjs";
 import { autoCull } from "./autocull.mjs";
 import { exportBrandPack } from "./brandpack.mjs";
+import * as Purchases from "./purchases.mjs";
+import * as Browse from "./browse.mjs";
+import * as LlmProviders from "./llm/providers.mjs";
+import * as Personal from "./personal.mjs";
 
 const execp = promisify(exec);
 
@@ -158,8 +162,8 @@ const GEO_PROVIDERS = [
   },
 ];
 
-async function autoDetectLocation() {
-  if (CONFIG.lockLocation) {
+async function autoDetectLocation({ force = false } = {}) {
+  if (CONFIG.lockLocation && !force) {
     console.log(`[bridge] location locked by config: ${CONFIG.operator.city}`);
     return;
   }
@@ -1537,6 +1541,227 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "send_imessage",
+      description: "Send an iMessage / SMS via the macOS Messages app. Recipient can be a phone number, email, or contact name (resolves to first match in Contacts). Use for: 'text Adam I'm running late', 'message mum I'll call her tonight'. ALWAYS goes through the confirmation gate — operator must say 'yes' before send.",
+      parameters: {
+        type: "object",
+        properties: {
+          to:   { type: "string", description: "Phone number, email, or contact name. e.g. '+447700900123', 'adam@example.com', 'Adam Walker'." },
+          body: { type: "string", description: "Message text. Keep concise — long SMS get split." },
+        },
+        required: ["to", "body"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_reminder",
+      description: "Add an item to Apple Reminders. Use for: 'remind me to call mum at 6', 'remember to buy milk', 'add cleaning the studio to my list'. The bridge parses the due date — pass natural language like 'tomorrow at 18:00' or an ISO string.",
+      parameters: {
+        type: "object",
+        properties: {
+          title:    { type: "string", description: "What the operator wants to remember." },
+          due:      { type: "string", description: "Optional due date — ISO timestamp or natural language. Omit for an undated reminder." },
+          notes:    { type: "string", description: "Optional notes attached to the reminder." },
+          listName: { type: "string", description: "Optional Reminders list name. Omit for the default list." },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_timer",
+      description: "Start an in-HUD kitchen timer. Use for cooking, breaks, or any 'remind me in N minutes' that is shorter than ~12 hours. For longer waits, use add_reminder. The HUD shows a countdown badge and Kokoro speaks the label when it fires.",
+      parameters: {
+        type: "object",
+        properties: {
+          minutes: { type: "number", description: "Duration in minutes. Max 720 (12 hours)." },
+          label:   { type: "string", description: "Optional name announced when the timer fires. Default 'N minute timer'." },
+        },
+        required: ["minutes"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_timers",
+      description: "List currently-active timers. Use when operator asks 'what timers do I have' or 'how long left on the chicken'.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_timer",
+      description: "Cancel an active timer by id. Use only after list_timers — operator usually identifies a timer by its label, not id.",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "string", description: "The timer id from list_timers." } },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "play_music",
+      description: "Play music via Apple Music (default) or Spotify. Pass a search query — artist, song, mood, or playlist name. Empty query just resumes whatever is loaded. Use for: 'play some driving music', 'put on Daft Punk', 'play that podcast I was listening to'.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Free-text search. Empty/omitted = resume." },
+          app:   { type: "string", enum: ["music", "spotify"], description: "music (Apple Music) or spotify. Default music." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_article",
+      description: "Fetch a web article and return cleaned text the LLM can summarise. Use for: 'summarise this Verge piece', 'read me the BBC headline at <url>', 'what does this article say'. Returns title + text (capped ~12k chars). Pure HTTP fetch — no Playwright, no API cost.",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string", description: "Fully-qualified https:// URL." } },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "take_screenshot",
+      description: "Take a macOS screenshot via screencapture. region='screen' (default, full primary display), 'window' (operator clicks a window), 'selection' (operator drags a region). Saves to data/screenshots/. Returns the filesystem path so the LLM (or the operator) can refer to it. Use for: 'screenshot the current Premiere session', 'capture this region for the brief'.",
+      parameters: {
+        type: "object",
+        properties: { region: { type: "string", enum: ["screen", "window", "selection"], description: "Capture mode. Default 'screen'." } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_focus",
+      description: "Toggle a macOS Focus mode (Do Not Disturb, Work, Personal, etc) by invoking a pre-existing Shortcut named exactly 'Focus On <mode>'. The operator builds the Shortcut once in Shortcuts.app. Use for: 'turn on Do Not Disturb', 'switch to Work focus until 6pm'.",
+      parameters: {
+        type: "object",
+        properties: {
+          mode:  { type: "string", description: "Focus mode name — must match the Shortcut name. e.g. 'Do Not Disturb', 'Work', 'Personal'." },
+          until: { type: "string", description: "Optional duration / time hint passed to the Shortcut. Free text." },
+        },
+        required: ["mode"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "lookup_password",
+      description: "Read a credential from 1Password via the `op` CLI. Returns the field value (typically the password) so the operator can use it. ALWAYS goes through the confirmation gate — operator must say 'yes' before the credential leaves 1Password. Requires `op` installed and the operator signed in (`eval $(op signin)`).",
+      parameters: {
+        type: "object",
+        properties: {
+          label: { type: "string", description: "1Password item name. Must match exactly." },
+          field: { type: "string", description: "Field to read. Default 'password'. Common: 'password', 'username', 'totp'." },
+        },
+        required: ["label"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "compose_note",
+      description: "Create a note in Apple Notes (default), Bear, or Obsidian. Use for: 'note this idea down', 'jot that in my brief notes', 'save this to Bear'. Title becomes the note's headline; body is freeform. No confirmation required — notes are private and easy to delete.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Note title / headline." },
+          body:  { type: "string", description: "Note body — freeform markdown or plain text." },
+          app:   { type: "string", enum: ["notes", "bear", "obsidian"], description: "Target app. Default 'notes' (Apple Notes)." },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "pause_music",
+      description: "Pause Apple Music or Spotify playback.",
+      parameters: {
+        type: "object",
+        properties: { app: { type: "string", enum: ["music", "spotify"] } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "enter_sleep_mode",
+      description:
+        "Put Jarvis to sleep — stops the mic, dims the HUD, and waits for the operator to tap the speedometer or say the wake word to come back. Use when the operator says 'shut down', 'go to sleep', 'stop listening', 'that's enough', 'goodnight', 'turn off'. NOT for ending a single response — only for full standby.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "open_url",
+      description:
+        "Open a URL in the operator's default browser via macOS `open`. Use for 'pull up a map of X', 'open the BBC News homepage', 'show me Tesco's milk page'. This is the FAST tool — picks the right URL and hands off to Chrome. No API cost, no vision loop, no waiting. Prefer this over request_browse whenever the operator just wants to SEE a page (they can read it themselves). Only use request_browse when the goal needs the LLM to extract a specific fact from a page or perform a multi-step interaction. For maps: build a https://www.google.com/maps/search/<query> URL with the location URL-encoded. For shops: go straight to the product or category page if you know it.",
+      parameters: {
+        type: "object",
+        properties: {
+          url:    { type: "string", description: "Fully-qualified URL starting with https://. Refused otherwise." },
+          reason: { type: "string", description: "One-sentence reason for the operator's audit log. e.g. 'Operator asked for a map of Manchester'." },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_browse",
+      description:
+        "Drive a real Chromium browser to accomplish a web-based goal. The bridge runs a vision-driven inner loop using Claude or GPT to click around, read pages, and report back. Use for: 'find me the cheapest X', 'check if Y is in stock', 'summarise this article at <url>', 'fill in this form for me'. NEVER use for purchases (use request_purchase) or for sensitive sites (banks, broker accounts, gov.uk login). Returns a final answer the LLM can speak to the operator. Costs API tokens — keep maxSteps modest (default 12).",
+      parameters: {
+        type: "object",
+        properties: {
+          goal:       { type: "string", description: "Plain-English goal — be specific. e.g. 'Find the price of a 2L semi-skimmed milk on tesco.com'" },
+          startUrl:   { type: "string", description: "Optional starting URL. If omitted, the model picks. Most useful when the operator says 'go to X and...'" },
+          maxSteps:   { type: "number", description: "Hard cap on steps in the inner loop. Default 12, max 30. Higher = more accurate but more API spend." },
+        },
+        required: ["goal"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_purchase",
+      description:
+        "Request a small online purchase on behalf of the operator using the pre-funded virtual debit card. Hard limits enforced by the bridge: per-transaction cap, daily/weekly budget, merchant allowlist. Currently runs in SIMULATOR MODE — no real money moves until the operator flips data/spending-limits.json.simulatorMode to false. Use ONLY when the operator explicitly asks to buy something (e.g. 'order me a pint of milk from Tesco', 'get an Uber Eats curry'). Never auto-trigger a purchase from passive context. The merchant must be in the allowlist; if it isn't, do not retry — instead tell the operator and ask if they want to add it.",
+      parameters: {
+        type: "object",
+        properties: {
+          merchant:       { type: "string", description: "Merchant domain or label (e.g. 'amazon.co.uk', 'Argos', 'https://www.tesco.com/...'). Must match data/merchant-allowlist.json." },
+          item:           { type: "string", description: "What the operator asked for, in plain English. e.g. 'Two pints of semi-skimmed milk'." },
+          maxPriceGbp:    { type: "number", description: "Upper bound the operator authorised in £. Do not invent prices — ask if unstated. Bridge rejects values over the per-transaction cap." },
+          justification:  { type: "string", description: "One sentence on why this purchase is being made. Stored in the audit journal so the operator can review later." },
+        },
+        required: ["merchant", "item", "maxPriceGbp", "justification"],
+      },
+    },
+  },
 ];
 
 /* ---------- ASYNC VIDEO RUN STATE ---------- */
@@ -1557,6 +1782,9 @@ function broadcastToClients(payload) {
 }
 /* Wire the broadcaster into the task lifecycle module so its emissions land on every client. */
 Tasks.setBroadcaster(broadcastToClients);
+/* Wire the personal-assistant timer broadcaster — fires timer.set/timer.fire/timer.cancel
+ * events the HUD listens for to render the countdown badge + speak the label on fire. */
+Personal.setBroadcaster(broadcastToClients);
 /* Wire the notifications scheduler. Each emitter calls back into broadcastToClients
  * via this hook. Tier 1-4+6 from the operator's pick list — calendar reminders,
  * press-radar pings, mail digest, frame.io activity, bridge health. */
@@ -1627,6 +1855,28 @@ const NEEDS_CONFIRMATION = {
     : null,
   delete_media_day: (a) => `Remove media-day entry #${a.id || "(no id)"} from the calendar. Confirm?`,
   delete_style: (a) => `Delete editorial style "${a.name || "(no name)"}". This is irreversible. Confirm?`,
+  /* Purchases use a synchronous tier check via Purchases.tierForAmount. The auto
+   * tier (≤£5 by default) returns null → no voice gate, just journal + go. The
+   * voice tier (≤£25 default) returns a summary the LLM must speak verbatim before
+   * the operator says "yes"/"go ahead" and we re-enter with confirmed:true. The
+   * typed tier is rejected inside requestPurchase() until Patch B ships the HUD
+   * modal — better to refuse a £30+ charge than approve it on a voice "yes". */
+  request_purchase: (a) => {
+    const amount = Number(a?.maxPriceGbp);
+    const tier = Purchases.tierForAmount(amount);
+    if (tier === "auto") return null;
+    const amt = Number.isFinite(amount) ? `£${amount.toFixed(2)}` : "(no price)";
+    return `Buy ${a?.item || "(no item)"} from ${a?.merchant || "(no merchant)"} for up to ${amt}. Confirm the purchase?`;
+  },
+  /* iMessages always go through confirmation — they're sent in your name and
+   * can't be unsent. Phone numbers and contact names are spoken back so the
+   * operator catches a misheard "Adam" → "Allan" before it leaves the box. */
+  send_imessage: (a) => `Send iMessage to ${a?.to || "(no recipient)"}: "${(a?.body || "").slice(0, 100)}"${(a?.body || "").length > 100 ? "…" : ""}. Send?`,
+  /* Password lookups should never happen silently — the operator might not
+   * remember asking, or someone else in the room could pick up the response.
+   * Force a verbal confirm so the credential leaves 1Password only on
+   * explicit human go-ahead. */
+  lookup_password: (a) => `Look up "${a?.label || "(no label)"}" in 1Password (field: ${a?.field || "password"}). Read the value out?`,
 };
 
 /** Wrapped tool dispatch — logs every call (success + error) to the audit log
@@ -1650,6 +1900,18 @@ const PLAN_PROPOSED_TOOLS = new Set([
   "premiere_import_folder", "apply_lightroom_preset", "crop_to_portrait",
   "draft_email", "add_calendar_event", "create_pdf",
   "frameio_add_comment", "frameio_set_status",
+  /* Purchases: always plan-broadcast — operator must see what the LLM intends to
+   * buy with a real card BEFORE the dispatcher fires, even if the amount sits
+   * inside the auto tier. */
+  "request_purchase",
+  /* Browse: plan-broadcast so operator sees the goal before a 30-step API spend
+   * kicks off. Doubles as transparency — they know the bot's about to drive
+   * a browser around. */
+  "request_browse",
+  /* Personal-assistant tools that touch the operator's wider digital life —
+   * iMessage and music are visible to other people / out of the HUD. Plan-stage
+   * the intent so the operator can interrupt before send/play. */
+  "send_imessage", "play_music",
 ]);
 
 /** Build a one-line operator-facing summary of the tool call. Used in the plan-proposed
@@ -1675,6 +1937,32 @@ function summariseToolCall(name, args) {
     case "frameio_set_status": return `Set Frame.io status to ${a.status || "(status)"}`;
     case "apply_lightroom_preset": return `Apply preset ${a.preset || "(preset)"} to ${a.folder || "(folder)"}`;
     case "crop_to_portrait": return `Crop ${a.path || "(file)"} to ${a.aspect || "9:16"}`;
+    case "request_purchase": {
+      const amt = Number.isFinite(Number(a.maxPriceGbp)) ? `£${Number(a.maxPriceGbp).toFixed(2)}` : "(no price)";
+      return `Buy ${a.item || "(item)"} from ${a.merchant || "(merchant)"} for up to ${amt}`;
+    }
+    case "request_browse":
+      return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
+    case "open_url":
+      return `Open ${(a.url || "(no url)").replace(/^https?:\/\//, "").slice(0, 60)} in browser`;
+    case "send_imessage":
+      return `iMessage ${a.to || "(?)"} — "${(a.body || "").slice(0, 50)}${(a.body || "").length > 50 ? "…" : ""}"`;
+    case "add_reminder":
+      return `Add reminder "${(a.title || "").slice(0, 50)}"${a.due ? ` for ${a.due}` : ""}`;
+    case "set_timer":
+      return `${a.minutes || "?"} min timer${a.label ? ` — ${String(a.label).slice(0, 40)}` : ""}`;
+    case "play_music":
+      return `Play music: ${(a.query || "(resume)").slice(0, 50)}${a.app === "spotify" ? " · Spotify" : ""}`;
+    case "read_article":
+      return `Read article: ${String(a.url || "").replace(/^https?:\/\//, "").slice(0, 60)}`;
+    case "take_screenshot":
+      return `Screenshot (${a.region || "screen"})`;
+    case "set_focus":
+      return `Focus mode: ${a.mode || "(?)"}${a.until ? ` until ${a.until}` : ""}`;
+    case "lookup_password":
+      return `1Password: ${a.label || "(?)"} → ${a.field || "password"}`;
+    case "compose_note":
+      return `Note "${(a.title || "").slice(0, 50)}" → ${a.app || "Apple Notes"}`;
     default: return `${name}(${JSON.stringify(a).slice(0, 80)})`;
   }
 }
@@ -1736,6 +2024,111 @@ async function _executeToolInner(name, args) {
     case "web_search": {
       const results = await webSearch(String(args.query || "").trim(), 5);
       return { results };
+    }
+    case "send_imessage":  return await Personal.sendIMessage(args);
+    case "add_reminder":   return await Personal.addReminder(args);
+    case "set_timer":      return Personal.setTimer(args);
+    case "list_timers":    return { ok: true, timers: Personal.listTimers() };
+    case "cancel_timer":   return Personal.cancelTimer(args);
+    case "play_music":     return await Personal.playMusic(args);
+    case "pause_music":    return await Personal.pauseMusic(args);
+    case "read_article":   return await Personal.readArticle(args);
+    case "take_screenshot":return await Personal.takeScreenshot(args);
+    case "set_focus":      return await Personal.setFocus(args);
+    case "lookup_password":return await Personal.lookupPassword(args);
+    case "compose_note":   return await Personal.composeNote(args);
+    case "enter_sleep_mode": {
+      /* Broadcast a sleep cue. The HUD listens, mutes the mic via stopListening(),
+       * dims the speedometer, and waits for an explicit wake action (click or
+       * wake-word). The bridge stays running so the HUD can come back instantly. */
+      broadcastToClients({ type: "state.sleep" });
+      return { ok: true, note: "Sleep cue sent. HUD will mute mic and dim. Tell the operator goodnight." };
+    }
+    case "open_url": {
+      /* Hard-validate the URL — must be http(s), no file:// or javascript:.
+       * macOS `open` would happily run any URL handler, including ones that
+       * launch random applications, so we reject anything unusual. */
+      const raw = String(args.url || "").trim();
+      if (!/^https?:\/\//i.test(raw)) {
+        return { ok: false, error: "url must start with http:// or https://" };
+      }
+      let parsed;
+      try { parsed = new URL(raw); } catch { return { ok: false, error: "Could not parse URL" }; }
+      try {
+        await execp(`open ${JSON.stringify(parsed.toString())}`);
+        return { ok: true, opened: parsed.toString(), reason: args.reason || null };
+      } catch (e) {
+        return { ok: false, error: `open failed: ${e.message}` };
+      }
+    }
+    case "request_browse": {
+      /* Sanity-check: refuse if no vision-capable provider has an API key —
+       * driving a browser from text only would burn tokens for poor results. */
+      const visionProvider = LlmProviders.pickProvider("vision");
+      if (visionProvider === "ollama") {
+        return {
+          ok: false,
+          error: "request_browse needs a vision-capable cloud provider. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env and choose LLM_PROVIDER_VISION accordingly.",
+        };
+      }
+      const r = await Browse.requestBrowse({
+        goal: args.goal,
+        startUrl: args.startUrl,
+        maxSteps: args.maxSteps,
+      });
+      broadcastToClients({
+        type: "browse.complete",
+        data: {
+          ok: !!r.ok,
+          sessionId: r.sessionId || null,
+          stepCount: r.stepCount ?? r.trace?.length ?? 0,
+          goal: args.goal,
+          finalAnswer: r.finalAnswer ?? null,
+          error: r.error ?? null,
+        },
+      });
+      return r;
+    }
+    case "request_purchase": {
+      const r = await Purchases.requestPurchase({
+        merchant: args.merchant,
+        item: args.item,
+        maxPriceGbp: args.maxPriceGbp,
+        justification: args.justification,
+        confirmed: !!args.confirmed,
+      });
+      /* Typed-tier branch: bridge parked the request, broadcast a modal cue so
+       * the HUD pops the typed-confirm dialog. The LLM's response (returned
+       * below) instructs it to verbally cue the operator AND stop talking — the
+       * modal will settle the transaction without another LLM round-trip. */
+      if (r?.code === "needs_typed_confirm" && r.pendingId) {
+        broadcastToClients({
+          type: "purchase.typed_confirm.required",
+          data: {
+            pendingId: r.pendingId,
+            merchant: r.merchant,
+            item: r.item,
+            amountGbp: r.amountGbp,
+          },
+        });
+      }
+      /* HUD audit broadcast — fires for both settled and rejected calls so the
+       * operator sees an immediate badge "Jarvis just tried to spend £X at Y".
+       * Settled simulator calls show as "simulated" so a glance distinguishes
+       * intent from real spend. */
+      broadcastToClients({
+        type: "purchase.recorded",
+        data: {
+          ok: !!r.ok,
+          simulated: r.simulated ?? null,
+          merchant: r.merchant ?? args.merchant ?? null,
+          item: args.item ?? null,
+          chargedGbp: r.chargedGbp ?? Number(args.maxPriceGbp) ?? null,
+          tier: r.tier ?? null,
+          code: r.code ?? null,
+        },
+      });
+      return r;
     }
     case "premiere_open_project":              return await Premiere.premiereOpenProject(args.projectPath);
     case "premiere_import_folder":             return await Premiere.premiereImportFolder(args.folderPath);
@@ -2707,9 +3100,16 @@ const httpServer = createServer(async (req, res) => {
     res.end(JSON.stringify({
       ok: true,
       keys: {
-        frameio: { set: !!process.env.FRAMEIO_TOKEN,  hint: mask(process.env.FRAMEIO_TOKEN) },
-        serpapi: { set: !!process.env.SERPAPI_KEY,    hint: mask(process.env.SERPAPI_KEY) },
-        hunter:  { set: !!process.env.HUNTER_API_KEY, hint: mask(process.env.HUNTER_API_KEY) },
+        frameio:   { set: !!process.env.FRAMEIO_TOKEN,     hint: mask(process.env.FRAMEIO_TOKEN) },
+        serpapi:   { set: !!process.env.SERPAPI_KEY,       hint: mask(process.env.SERPAPI_KEY) },
+        hunter:    { set: !!process.env.HUNTER_API_KEY,    hint: mask(process.env.HUNTER_API_KEY) },
+        anthropic: { set: !!process.env.ANTHROPIC_API_KEY, hint: mask(process.env.ANTHROPIC_API_KEY) },
+        openai:    { set: !!process.env.OPENAI_API_KEY,    hint: mask(process.env.OPENAI_API_KEY) },
+      },
+      routing: {
+        default:    process.env.LLM_PROVIDER_DEFAULT    || "ollama",
+        vision:     process.env.LLM_PROVIDER_VISION     || "ollama",
+        highstakes: process.env.LLM_PROVIDER_HIGHSTAKES || "ollama",
       },
     }));
     return;
@@ -2728,10 +3128,29 @@ const httpServer = createServer(async (req, res) => {
     try {
       const parsed = JSON.parse(body || "{}");
       const MAP = {
-        frameio: "FRAMEIO_TOKEN",
-        serpapi: "SERPAPI_KEY",
-        hunter:  "HUNTER_API_KEY",
+        frameio:   "FRAMEIO_TOKEN",
+        serpapi:   "SERPAPI_KEY",
+        hunter:    "HUNTER_API_KEY",
+        anthropic: "ANTHROPIC_API_KEY",
+        openai:    "OPENAI_API_KEY",
       };
+      /* LLM provider routing knobs are written under their own keys. The
+       * accepted values are an allowlist (anthropic|openai|ollama) so a stray
+       * POST can't set the default to something garbage that the dispatcher
+       * would silently fall back from anyway. */
+      const ROUTING_MAP = {
+        defaultProvider:    "LLM_PROVIDER_DEFAULT",
+        visionProvider:     "LLM_PROVIDER_VISION",
+        highstakesProvider: "LLM_PROVIDER_HIGHSTAKES",
+      };
+      const ROUTING_VALUES = new Set(["anthropic", "openai", "ollama"]);
+      for (const [shortKey, envKey] of Object.entries(ROUTING_MAP)) {
+        if (!Object.prototype.hasOwnProperty.call(parsed, shortKey)) continue;
+        const v = String(parsed[shortKey] || "").toLowerCase();
+        if (!ROUTING_VALUES.has(v)) continue;
+        await persistEnvVar(envKey, v);
+        process.env[envKey] = v;
+      }
       const updated = {};
       for (const [shortKey, envKey] of Object.entries(MAP)) {
         if (!Object.prototype.hasOwnProperty.call(parsed, shortKey)) continue;
@@ -3113,7 +3532,20 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
   if (req.url === "/config/redetect") {
-    await autoDetectLocation();
+    /* Force the IP lookup regardless of CONFIG.lockLocation. The whole point of
+     * the operator pressing "Re-detect Location" is to override a stale lock —
+     * respecting it here was a real bug Adam hit. We also clear lockLocation
+     * and persist so the new detection survives the next reboot; if the
+     * operator wants to lock again they can save manually in the setup modal. */
+    await autoDetectLocation({ force: true });
+    CONFIG.lockLocation = false;
+    try {
+      const fs = await import("node:fs/promises");
+      const cfgPath = new URL("../config.json", import.meta.url);
+      await fs.writeFile(cfgPath, JSON.stringify(CONFIG, null, 2));
+    } catch (e) {
+      console.warn(`[bridge] could not persist redetect to config.json: ${e.message}`);
+    }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(CONFIG));
     return;
@@ -3145,6 +3577,79 @@ const httpServer = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: e.message }));
       }
     });
+    return;
+  }
+
+  /* POST /purchases/confirm — HUD posts here when operator types the amount
+   * in the typed-confirm modal. Body: { pendingId: string, enteredAmountGbp: number,
+   * action?: "confirm"|"cancel" }. Cancel just drops the pending entry; confirm
+   * runs Purchases.confirmTyped which re-enters requestPurchase with confirmed:true.
+   * Always broadcasts a purchase.recorded event mirroring the dispatch path so
+   * the HUD shows the same badge regardless of how settlement happened. */
+  if (req.url === "/purchases/confirm" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    let payload;
+    try { payload = JSON.parse(body || "{}"); } catch { payload = {}; }
+    const pendingId = String(payload.pendingId || "");
+    const action = String(payload.action || "confirm").toLowerCase();
+    if (!pendingId) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "pendingId required" }));
+      return;
+    }
+    if (action === "cancel") {
+      const dropped = Purchases.cancelPending(pendingId);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, cancelled: dropped }));
+      return;
+    }
+    const r = await Purchases.confirmTyped(pendingId, payload.enteredAmountGbp);
+    broadcastToClients({
+      type: "purchase.recorded",
+      data: {
+        ok: !!r.ok,
+        simulated: r.simulated ?? null,
+        merchant: r.merchant ?? null,
+        item: r.item ?? null,
+        chargedGbp: r.chargedGbp ?? null,
+        tier: r.tier ?? "typed",
+        code: r.code ?? null,
+      },
+    });
+    res.writeHead(r.ok ? 200 : 400, { "content-type": "application/json" });
+    res.end(JSON.stringify(r));
+    return;
+  }
+
+  /* GET /llm/providers — diagnostic list of configured LLM providers + which
+   * workload each is wired for. No keys returned — only "available: true/false"
+   * so an injection that reads this endpoint can't exfiltrate credentials. */
+  if (req.url === "/llm/providers" && req.method === "GET") {
+    const list = LlmProviders.listProviders();
+    const routing = {
+      default:    LlmProviders.pickProvider("default"),
+      vision:     LlmProviders.pickProvider("vision"),
+      highstakes: LlmProviders.pickProvider("highstakes"),
+    };
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, providers: list, routing }));
+    return;
+  }
+
+  /* GET /purchases/audit — read-only journal + caps + allowlist for the HUD's
+   * audit overlay. No write surface — limits/allowlist edits go through the
+   * filesystem on purpose so an injection can't loosen the rails at runtime. */
+  if (req.url.startsWith("/purchases/audit") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 50));
+    const [limits, allowlist, journal] = await Promise.all([
+      Purchases.getLimits(),
+      Purchases.getAllowlist(),
+      Purchases.getRecentJournal(limit),
+    ]);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, limits, allowlist, journal }));
     return;
   }
 

@@ -584,6 +584,12 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .speedo.is-thinking  .speedo__state-text { color: #ffaa00; }
 .speedo.is-speaking  .speedo__state-dot { background: var(--fom-red); box-shadow: 0 0 16px var(--fom-red-glow); animation: pulse 0.4s ease-in-out infinite; }
 .speedo.is-speaking  .speedo__state-text { color: var(--fom-red); }
+/* Asleep state — set by enter_sleep_mode tool. Whole speedometer dims so the
+ * operator can see at a glance Jarvis isn't listening. Click the speedo or
+ * call any voice command to wake. */
+.speedo.is-asleep                          { opacity: 0.35; filter: grayscale(0.7); transition: opacity 600ms ease, filter 600ms ease; }
+.speedo.is-asleep .speedo__state-dot       { background: #555; box-shadow: none; animation: none; }
+.speedo.is-asleep .speedo__state-text      { color: #888; }
 
 @keyframes pulse {
   0%, 100% { transform: scale(1); opacity: 1; }

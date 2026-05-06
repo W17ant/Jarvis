@@ -237,6 +237,11 @@ function connectBridge() {
     const m = JSON.parse(ev.data);
     if (m.type === "stats") applyLiveStats(m.data);
     if (m.type === "weather.reply") applyWeather(m.data);
+    /* Patch B: typed-confirm modal for £25-30 purchases. The LLM can't authorise
+     * these — the operator must type the exact amount. We mount the modal on
+     * first event so the DOM cost is zero until a typed-tier purchase happens. */
+    if (m.type === "purchase.typed_confirm.required") openPurchaseTypedConfirm(m.data);
+    if (m.type === "purchase.recorded") flashPurchaseAuditBadge(m.data);
   });
 
   bridgeWS.addEventListener("close", () => {
@@ -267,7 +272,22 @@ function applyWeather(w) {
     $("weatherTemp").textContent = `${w.now.temp}°`;
     $("weatherCond").textContent = wmoCondition(w.now.code);
     const iconEl = $("weatherIcon");
-    if (iconEl) iconEl.src = `assets/weather-icons/${wmoIcon(w.now.code, day)}.svg`;
+    if (iconEl) {
+      const iconName = wmoIcon(w.now.code, day);
+      const path = `assets/weather-icons/${iconName}.svg`;
+      /* Re-bind the error handler every time we swap src — Adam reported the
+       * today icon rendering as an empty box. The onerror in HTML only fires
+       * once per element by default; resetting onerror=null inside the handler
+       * means the fallback also has its own retry. We log the failed name so
+       * any future wmoIcon mapping that points at a missing file is obvious
+       * in the console rather than silently broken. */
+      iconEl.onerror = () => {
+        console.warn(`[Flat-Out] weather icon failed: ${iconName}.svg — falling back to cloudy.svg`);
+        iconEl.onerror = null;
+        iconEl.src = "assets/weather-icons/cloudy.svg";
+      };
+      iconEl.src = path;
+    }
   }
   if (w.forecast) {
     const host = $("weatherForecast");
@@ -669,6 +689,392 @@ function wireFullscreen() {
   });
   document.getElementById("speedo")?.addEventListener("dblclick", toggle);
 }
+
+/* ---------- TYPED-CONFIRM PURCHASE MODAL (Patch B) ----------
+ * Pops when the bridge broadcasts purchase.typed_confirm.required for a
+ * typed-tier (£25-30) purchase. Operator must type the EXACT pence amount —
+ * a voice "yes" is too easy to fake or accidentally trigger. Modal is built
+ * on demand (no DOM until needed) and torn down on close. */
+
+let _purchaseModalEl = null;
+
+/** One-liner DOM helper: create an element, set className/text, append children. */
+function el(tag, opts = {}, ...children) {
+  const e = document.createElement(tag);
+  if (opts.className) e.className = opts.className;
+  if (opts.id) e.id = opts.id;
+  if (opts.text != null) e.textContent = opts.text;
+  if (opts.attrs) for (const [k, v] of Object.entries(opts.attrs)) e.setAttribute(k, v);
+  for (const c of children) if (c) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  return e;
+}
+
+/** Build the modal once and reuse it across calls. Built via DOM methods so no
+ *  innerHTML usage — every attribute and string is set explicitly. */
+function ensurePurchaseModal() {
+  if (_purchaseModalEl) return _purchaseModalEl;
+  const root = el("div", { id: "purchaseConfirmModal" });
+  root.hidden = true;
+  /* All styles are static — no interpolation, safe to inline as a single style block. */
+  const style = document.createElement("style");
+  style.textContent = `
+    #purchaseConfirmModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10000; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
+    #purchaseConfirmModal .pcm-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); padding: 32px 36px; min-width: 460px; max-width: 600px; box-shadow: 0 0 60px rgba(255,59,59,0.35); }
+    #purchaseConfirmModal h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 16px; font-size: 14px; letter-spacing: 0.16em; text-transform: uppercase; }
+    #purchaseConfirmModal .pcm-row { color: #eaeaea; margin: 6px 0; font-size: 13px; }
+    #purchaseConfirmModal .pcm-row strong { color: #fff; font-weight: 600; }
+    #purchaseConfirmModal .pcm-amount { font-size: 28px; color: var(--brand-primary, #ff3b3b); margin: 18px 0 6px; letter-spacing: 0.04em; }
+    #purchaseConfirmModal .pcm-hint { color: #888; font-size: 11px; margin-bottom: 12px; }
+    #purchaseConfirmModal input { background: #000; color: #fff; border: 1px solid #333; padding: 10px 12px; width: 100%; font-family: inherit; font-size: 18px; box-sizing: border-box; }
+    #purchaseConfirmModal input:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #purchaseConfirmModal .pcm-error { color: var(--brand-primary, #ff3b3b); font-size: 12px; min-height: 16px; margin: 8px 0; }
+    #purchaseConfirmModal .pcm-buttons { display: flex; gap: 12px; margin-top: 16px; }
+    #purchaseConfirmModal button { flex: 1; padding: 12px; background: #181818; color: #fff; border: 1px solid #333; cursor: pointer; font-family: inherit; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
+    #purchaseConfirmModal button.primary { background: var(--brand-primary, #ff3b3b); color: #000; border-color: var(--brand-primary, #ff3b3b); font-weight: 700; }
+    #purchaseConfirmModal button:hover { filter: brightness(1.15); }
+    #purchaseConfirmModal button:disabled { opacity: 0.4; cursor: not-allowed; }
+  `;
+  root.appendChild(style);
+
+  const merchantStrong = el("strong", { className: "pcm-merchant", text: "—" });
+  const itemRow = el("div", { className: "pcm-row pcm-item", text: "—" });
+  const amtSpan = el("span", { className: "pcm-amt-display", text: "—" });
+  const input = el("input", { attrs: { type: "text", inputmode: "decimal", placeholder: "0.00", autocomplete: "off" } });
+  const errorEl = el("div", { className: "pcm-error" });
+  const cancelBtn = el("button", { className: "cancel", text: "Cancel" });
+  const authBtn = el("button", { className: "primary", text: "Authorise" });
+  authBtn.disabled = true;
+
+  const frame = el("div", { className: "pcm-frame" },
+    el("h2", { text: "Authorise purchase" }),
+    el("div", { className: "pcm-row" }, merchantStrong),
+    itemRow,
+    el("div", { className: "pcm-amount" }, document.createTextNode("£"), amtSpan),
+    el("div", { className: "pcm-hint", text: "Type the EXACT amount above to authorise. Voice cannot approve this tier." }),
+    input,
+    errorEl,
+    el("div", { className: "pcm-buttons" }, cancelBtn, authBtn),
+  );
+  root.appendChild(frame);
+  /* Stash refs on the root so the open handler can find them without re-querying. */
+  root._refs = { merchantStrong, itemRow, amtSpan, input, errorEl, cancelBtn, authBtn };
+  document.body.appendChild(root);
+  _purchaseModalEl = root;
+  return root;
+}
+
+/** Show the modal for the given typed-confirm payload from the bridge. */
+function openPurchaseTypedConfirm({ pendingId, merchant, item, amountGbp }) {
+  const root = ensurePurchaseModal();
+  const { merchantStrong, itemRow, amtSpan, input, errorEl, cancelBtn, authBtn } = root._refs;
+
+  merchantStrong.textContent = merchant || "(unknown merchant)";
+  itemRow.textContent = item || "(no item description)";
+  const expectedNum = Number(amountGbp);
+  amtSpan.textContent = Number.isFinite(expectedNum) ? expectedNum.toFixed(2) : "—";
+  input.value = "";
+  errorEl.textContent = "";
+  authBtn.disabled = true;
+  root.hidden = false;
+  setTimeout(() => input.focus(), 50);
+
+  const onInput = () => {
+    const v = parseFloat(input.value);
+    authBtn.disabled = !(Number.isFinite(v) && Number.isFinite(expectedNum) && Math.abs(v - expectedNum) <= 0.01);
+  };
+  const onKey = (e) => {
+    if (e.key === "Enter" && !authBtn.disabled) confirm();
+    if (e.key === "Escape") cancel();
+  };
+  const cleanup = () => {
+    input.removeEventListener("input", onInput);
+    input.removeEventListener("keydown", onKey);
+    cancelBtn.removeEventListener("click", cancel);
+    authBtn.removeEventListener("click", confirm);
+    root.hidden = true;
+  };
+  const cancel = async () => {
+    try {
+      await fetch("http://localhost:8766/purchases/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pendingId, action: "cancel" }),
+      });
+    } catch {}
+    cleanup();
+  };
+  const confirm = async () => {
+    authBtn.disabled = true;
+    errorEl.textContent = "Submitting…";
+    try {
+      const r = await fetch("http://localhost:8766/purchases/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pendingId, action: "confirm", enteredAmountGbp: parseFloat(input.value) }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (j.ok) {
+        errorEl.textContent = "";
+        cleanup();
+      } else {
+        errorEl.textContent = j.error || "Confirmation failed";
+        authBtn.disabled = false;
+        input.select();
+      }
+    } catch (e) {
+      errorEl.textContent = `Network error: ${e.message}`;
+      authBtn.disabled = false;
+    }
+  };
+  input.addEventListener("input", onInput);
+  input.addEventListener("keydown", onKey);
+  cancelBtn.addEventListener("click", cancel);
+  authBtn.addEventListener("click", confirm);
+}
+
+/** Brief audit badge — appears in the corner for ~5s every time a purchase
+ *  request was settled or rejected. Lets the operator catch the LLM trying
+ *  things in the background without staring at a log. */
+function flashPurchaseAuditBadge(data) {
+  let host = document.getElementById("purchaseAuditBadge");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "purchaseAuditBadge";
+    host.style.cssText = "position:fixed;right:18px;bottom:18px;background:#0a0a0a;border:1px solid var(--brand-primary,#ff3b3b);color:#eaeaea;padding:10px 14px;font-family:var(--mono,monospace);font-size:11px;letter-spacing:0.08em;z-index:9999;max-width:340px;box-shadow:0 0 24px rgba(255,59,59,0.25);transition:opacity 250ms;";
+    document.body.appendChild(host);
+  }
+  const verb = data.ok ? (data.simulated ? "SIM" : "PAID") : "BLOCKED";
+  const amt = data.chargedGbp != null ? ` £${Number(data.chargedGbp).toFixed(2)}` : "";
+  const detail = data.code ? ` — ${data.code}` : "";
+  host.textContent = `${verb}${amt} · ${data.merchant || "?"} · ${(data.item || "").slice(0, 40)}${detail}`;
+  host.style.opacity = "1";
+  clearTimeout(host._fadeTimer);
+  host._fadeTimer = setTimeout(() => { host.style.opacity = "0"; }, 5000);
+}
+
+/* ---------- AGENT MODAL (Shift+Cmd+J) ----------
+ * Compact control panel for the new agent capabilities — LLM provider keys,
+ * workload routing, and a scrollable purchase audit log. Opens via keyboard
+ * shortcut so Adam can pull it up from anywhere; built lazily on first open
+ * so the cost is zero for operators who never use it.
+ *
+ * Why a separate modal rather than another tab in the existing settingsModal:
+ * the settings modal is dense already and these are operator-trust controls
+ * (API keys, money). Keeping them physically separate makes accidental
+ * misclicks harder. */
+
+let _agentModalEl = null;
+
+function ensureAgentModal() {
+  if (_agentModalEl) return _agentModalEl;
+  const root = el("div", { id: "agentModal" });
+  root.hidden = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    #agentModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10000; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
+    #agentModal .am-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); padding: 28px 32px; width: 720px; max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: 0 0 60px rgba(255,59,59,0.3); }
+    #agentModal h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #agentModal .am-sub { color: #888; font-size: 11px; margin-bottom: 24px; }
+    #agentModal h3 { color: #fff; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; margin: 22px 0 10px; padding-top: 14px; border-top: 1px solid #1f1f1f; }
+    #agentModal h3:first-of-type { padding-top: 0; border-top: none; margin-top: 0; }
+    #agentModal label { display: block; color: #ccc; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
+    #agentModal input, #agentModal select { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 8px 10px; width: 100%; font-family: inherit; font-size: 12px; box-sizing: border-box; margin-bottom: 10px; }
+    #agentModal input:focus, #agentModal select:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #agentModal .am-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    #agentModal .am-row.two { grid-template-columns: 1fr 1fr; }
+    #agentModal .am-status { font-size: 10px; color: #777; margin: 0 0 8px; min-height: 14px; }
+    #agentModal .am-status.ok { color: #00ff88; }
+    #agentModal .am-status.err { color: var(--brand-primary, #ff3b3b); }
+    #agentModal .am-buttons { display: flex; gap: 12px; justify-content: flex-end; margin-top: 18px; }
+    #agentModal button { padding: 10px 20px; background: #181818; color: #fff; border: 1px solid #333; cursor: pointer; font-family: inherit; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+    #agentModal button.primary { background: var(--brand-primary, #ff3b3b); color: #000; border-color: var(--brand-primary, #ff3b3b); font-weight: 700; }
+    #agentModal button:hover { filter: brightness(1.18); }
+    #agentModal .am-journal { max-height: 240px; overflow-y: auto; background: #050505; border: 1px solid #1c1c1c; padding: 10px 12px; }
+    #agentModal .am-journal-row { color: #ccc; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 56px 70px 1fr 70px; gap: 8px; align-items: baseline; }
+    #agentModal .am-journal-row:last-child { border-bottom: none; }
+    #agentModal .am-journal-row .verb { font-weight: 700; letter-spacing: 0.08em; }
+    #agentModal .am-journal-row .verb.ok { color: #00ff88; }
+    #agentModal .am-journal-row .verb.sim { color: #ffaa00; }
+    #agentModal .am-journal-row .verb.bad { color: var(--brand-primary, #ff3b3b); }
+    #agentModal .am-journal-row .amt { color: #888; text-align: right; font-variant-numeric: tabular-nums; }
+    #agentModal .am-journal-empty { color: #555; font-size: 11px; text-align: center; padding: 20px; }
+    #agentModal .am-summary { color: #999; font-size: 10px; margin-top: 8px; letter-spacing: 0.05em; }
+  `;
+  root.appendChild(style);
+
+  const frame = el("div", { className: "am-frame" });
+  frame.appendChild(el("h2", { text: "Agent Console" }));
+  frame.appendChild(el("div", { className: "am-sub", text: "LLM providers, workload routing, and purchase audit. Shift+Cmd+J to toggle." }));
+
+  /* Section 1: LLM API keys */
+  frame.appendChild(el("h3", { text: "LLM provider keys" }));
+  const keyAnthropic = el("input", { attrs: { type: "password", placeholder: "sk-ant-…", autocomplete: "off" } });
+  const keyOpenai    = el("input", { attrs: { type: "password", placeholder: "sk-…", autocomplete: "off" } });
+  const apRow = el("div", { className: "am-row two" });
+  apRow.appendChild((() => { const w = document.createElement("div"); w.appendChild(el("label", { text: "Anthropic API key" })); w.appendChild(keyAnthropic); return w; })());
+  apRow.appendChild((() => { const w = document.createElement("div"); w.appendChild(el("label", { text: "OpenAI API key" })); w.appendChild(keyOpenai); return w; })());
+  frame.appendChild(apRow);
+
+  /* Section 2: workload routing */
+  frame.appendChild(el("h3", { text: "Workload routing" }));
+  const mkSelect = (defaultVal) => {
+    const s = document.createElement("select");
+    for (const v of ["ollama", "anthropic", "openai"]) {
+      const o = document.createElement("option"); o.value = v; o.textContent = v;
+      s.appendChild(o);
+    }
+    s.value = defaultVal;
+    return s;
+  };
+  const routeDefault    = mkSelect("ollama");
+  const routeVision     = mkSelect("anthropic");
+  const routeHighstakes = mkSelect("anthropic");
+  const rRow = el("div", { className: "am-row" });
+  rRow.appendChild((() => { const w = document.createElement("div"); w.appendChild(el("label", { text: "Default chat" })); w.appendChild(routeDefault); return w; })());
+  rRow.appendChild((() => { const w = document.createElement("div"); w.appendChild(el("label", { text: "Vision (browser/image)" })); w.appendChild(routeVision); return w; })());
+  rRow.appendChild((() => { const w = document.createElement("div"); w.appendChild(el("label", { text: "High-stakes" })); w.appendChild(routeHighstakes); return w; })());
+  frame.appendChild(rRow);
+  const routingHint = el("div", { className: "am-status", text: "request_browse needs vision = anthropic or openai (vision-capable)." });
+  frame.appendChild(routingHint);
+
+  const status = el("div", { className: "am-status" });
+  const cancelBtn = el("button", { className: "cancel", text: "Close" });
+  const saveBtn = el("button", { className: "primary", text: "Save" });
+  const buttons = el("div", { className: "am-buttons" }, status, cancelBtn, saveBtn);
+  frame.appendChild(buttons);
+
+  /* Section 3: purchase audit */
+  frame.appendChild(el("h3", { text: "Purchase audit log" }));
+  const journalHost = el("div", { className: "am-journal" });
+  const summaryEl = el("div", { className: "am-summary", text: "Loading…" });
+  frame.appendChild(journalHost);
+  frame.appendChild(summaryEl);
+
+  root.appendChild(frame);
+  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl };
+  document.body.appendChild(root);
+  _agentModalEl = root;
+
+  cancelBtn.addEventListener("click", () => { root.hidden = true; });
+  root.addEventListener("click", (e) => { if (e.target === root) root.hidden = true; });
+  saveBtn.addEventListener("click", () => saveAgentModal(root));
+
+  return root;
+}
+
+/** Render the journal rows. Pulls from /purchases/audit. Renders newest first. */
+function renderPurchaseJournal(host, summaryEl, journal, limits) {
+  while (host.firstChild) host.removeChild(host.firstChild);
+  if (!journal?.length) {
+    host.appendChild(el("div", { className: "am-journal-empty", text: "No purchase activity yet." }));
+  } else {
+    let totalSettled = 0;
+    let countSettled = 0;
+    for (const e of journal) {
+      const row = el("div", { className: "am-journal-row" });
+      const ts = new Date(e.iso || e.ts);
+      const tsLabel = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
+      row.appendChild(el("span", { text: tsLabel }));
+      const verb = el("span", { className: "verb" });
+      if (e.status === "settled" && e.simulated) { verb.textContent = "SIM"; verb.classList.add("sim"); }
+      else if (e.status === "settled") { verb.textContent = "PAID"; verb.classList.add("ok"); totalSettled += Number(e.amountGbp) || 0; countSettled++; }
+      else if (e.status === "rejected" || e.status === "blocked") { verb.textContent = "BLOCK"; verb.classList.add("bad"); }
+      else if (e.status === "pending_typed") { verb.textContent = "WAIT"; verb.classList.add("sim"); }
+      else { verb.textContent = (e.status || "?").slice(0, 5).toUpperCase(); }
+      row.appendChild(verb);
+      const detail = el("span", { text: `${(e.merchantLabel || e.merchant || "?").slice(0, 30)} · ${(e.item || "").slice(0, 32)}${e.reason && e.reason !== "ok" ? ` (${e.reason})` : ""}` });
+      row.appendChild(detail);
+      const amt = e.amountGbp != null ? `£${Number(e.amountGbp).toFixed(2)}` : "—";
+      row.appendChild(el("span", { className: "amt", text: amt }));
+      host.appendChild(row);
+    }
+    const dailyCap = limits?.dailyCapGbp ?? 50;
+    const weeklyCap = limits?.weeklyCapGbp ?? 150;
+    summaryEl.textContent = `${countSettled} settled · £${totalSettled.toFixed(2)} total in journal · daily cap £${dailyCap} · weekly cap £${weeklyCap}`;
+  }
+}
+
+async function openAgentModal() {
+  const root = ensureAgentModal();
+  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl } = root._refs;
+  status.textContent = ""; status.className = "am-status";
+  keyAnthropic.value = ""; keyOpenai.value = "";
+  root.hidden = false;
+  /* Fetch current state in parallel — keys + audit. Bridge offline → leave
+   * placeholders + an empty journal with a clear hint. */
+  try {
+    const [keysRes, auditRes] = await Promise.all([
+      fetch("http://localhost:8766/api-keys", { cache: "no-store" }),
+      fetch("http://localhost:8766/purchases/audit?limit=50", { cache: "no-store" }),
+    ]);
+    if (keysRes.ok) {
+      const j = await keysRes.json();
+      keyAnthropic.placeholder = j.keys?.anthropic?.set ? `(set ${j.keys.anthropic.hint || ""}) — type to change` : "sk-ant-…";
+      keyOpenai.placeholder    = j.keys?.openai?.set    ? `(set ${j.keys.openai.hint    || ""}) — type to change` : "sk-…";
+      if (j.routing) {
+        if (j.routing.default)    routeDefault.value    = j.routing.default;
+        if (j.routing.vision)     routeVision.value     = j.routing.vision;
+        if (j.routing.highstakes) routeHighstakes.value = j.routing.highstakes;
+      }
+    }
+    if (auditRes.ok) {
+      const a = await auditRes.json();
+      renderPurchaseJournal(journalHost, summaryEl, a.journal || [], a.limits);
+    }
+  } catch (e) {
+    status.textContent = `Bridge offline — ${e.message}`;
+    status.className = "am-status err";
+  }
+}
+
+async function saveAgentModal(root) {
+  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, saveBtn } = root._refs;
+  saveBtn.disabled = true;
+  status.textContent = "Saving…"; status.className = "am-status";
+  const payload = {
+    defaultProvider: routeDefault.value,
+    visionProvider: routeVision.value,
+    highstakesProvider: routeHighstakes.value,
+  };
+  /* Empty key fields = don't change. Only POST the keys the operator filled in. */
+  if (keyAnthropic.value.trim()) payload.anthropic = keyAnthropic.value.trim();
+  if (keyOpenai.value.trim())    payload.openai    = keyOpenai.value.trim();
+  try {
+    const r = await fetch("http://localhost:8766/api-keys", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      status.textContent = "Saved";
+      status.className = "am-status ok";
+      keyAnthropic.value = "";
+      keyOpenai.value = "";
+      setTimeout(() => { root.hidden = true; status.textContent = ""; }, 800);
+    } else {
+      status.textContent = j.error || "Save failed";
+      status.className = "am-status err";
+    }
+  } catch (e) {
+    status.textContent = `Network error: ${e.message}`;
+    status.className = "am-status err";
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+/* Keyboard shortcut: Shift+Cmd+J (Cmd on macOS, Ctrl elsewhere). */
+document.addEventListener("keydown", (e) => {
+  if (e.shiftKey && (e.metaKey || e.ctrlKey) && (e.key === "J" || e.key === "j")) {
+    e.preventDefault();
+    if (_agentModalEl && !_agentModalEl.hidden) {
+      _agentModalEl.hidden = true;
+    } else {
+      openAgentModal();
+    }
+  }
+});
 
 /* ---------- BOOT ---------- */
 function boot() {

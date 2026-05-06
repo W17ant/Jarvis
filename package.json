@@ -23,11 +23,18 @@
   "dependencies": {
     "@sparticuz/chromium-min": "^148.0.0",
     "better-sqlite3": "^12.9.0",
+    "playwright-core": "^1.59.1",
     "puppeteer-core": "^24.42.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@bybas/weather-icons": "^2.0.0",
     "@phosphor-icons/core": "^2.1.1"
-  }
+  },
+  "models": [
+    "qwen2.5:14b",
+    "qwen2.5:3b",
+    "qwen2.5vl:7b",
+    "nomic-embed-text"
+  ]
 }

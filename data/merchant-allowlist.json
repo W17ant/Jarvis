@@ -1,0 +1,12 @@
+{
+  "_comment": "Allowlist of merchant domains the LLM may purchase from. Match is performed on the registrable domain (amazon.co.uk matches https://www.amazon.co.uk/dp/...). Add merchants by editing this file directly — the LLM cannot edit it at runtime. Anything outside this list is rejected with a clear error so the LLM knows to ask the operator first.",
+  "merchants": [
+    { "domain": "amazon.co.uk", "label": "Amazon UK" },
+    { "domain": "argos.co.uk", "label": "Argos" },
+    { "domain": "tesco.com", "label": "Tesco Online" },
+    { "domain": "sainsburys.co.uk", "label": "Sainsbury's" },
+    { "domain": "ubereats.com", "label": "Uber Eats" },
+    { "domain": "deliveroo.co.uk", "label": "Deliveroo" },
+    { "domain": "justeat.co.uk", "label": "Just Eat" }
+  ]
+}
