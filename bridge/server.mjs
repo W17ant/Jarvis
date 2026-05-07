@@ -17,6 +17,7 @@ import { createPdf, listTemplates as listPdfTemplates } from "./pdf.mjs";
 import { getUpcomingEvents, addCalendarEvent } from "./calendar.mjs";
 import { getMailSummary, draftEmail } from "./mail.mjs";
 import { applyLightroomPreset, listLightroomPresets } from "./lightroom.mjs";
+import * as LightroomCatalog from "./lightroom-catalog.mjs";
 import { runShell, writeFileSandboxed, shellAllowlist } from "./shell.mjs";
 import * as Memory from "./memory.mjs";
 import * as Vision from "./vision.mjs";
@@ -573,6 +574,25 @@ const TOOLS = [
       name: "list_lightroom_presets",
       description: "List available Lightroom presets the operator can apply.",
       parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_lr_photo",
+      description: "Search the operator's Lightroom Classic catalogue (read-only, opens .lrcat as SQLite). Use when the operator says 'find me five-star shots from the Bentley shoot', 'show every rejected photo from last week', 'list the picks tagged Goodwood'. Returns absolute file paths so other tools can act on the matches. Filters: rating (min stars 0-5), pick (1=picked, -1=rejected, 0=neutral), after / before (ISO date), keyword (substring of any keyword), format (e.g. 'RAW'). Limit defaults to 50.",
+      parameters: {
+        type: "object",
+        properties: {
+          rating:  { type: "number", description: "Minimum star rating, 0-5." },
+          pick:    { type: "number", description: "Pick flag: 1=picked, -1=rejected, 0=neutral." },
+          after:   { type: "string", description: "ISO date — return photos taken on or after this." },
+          before:  { type: "string", description: "ISO date — return photos taken on or before this." },
+          keyword: { type: "string", description: "Substring of a keyword (case-insensitive)." },
+          format:  { type: "string", description: "File format filter, e.g. 'RAW' or 'JPEG'." },
+          limit:   { type: "number", description: "Max rows (default 50, cap 500)." },
+        },
+      },
     },
   },
   {
@@ -2642,6 +2662,7 @@ async function _executeToolInner(name, args) {
     case "draft_email":                        return await draftEmail(args);
     case "apply_lightroom_preset":             return await applyLightroomPreset(args);
     case "list_lightroom_presets":             return await listLightroomPresets();
+    case "find_lr_photo":                      return await LightroomCatalog.findLrPhoto(args || {});
     case "run_shell":                          return await runShell(args || {});
     case "write_file":                         return await writeFileSandboxed(args || {});
     case "add_contact":                        return await Memory.addContact(args || {});
