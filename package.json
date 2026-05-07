@@ -44,6 +44,7 @@
   },
   "models": [
     "qwen2.5:14b",
+    "qwen2.5:7b",
     "qwen2.5:3b",
     "qwen2.5vl:7b",
     "nomic-embed-text"
