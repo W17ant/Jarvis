@@ -15,6 +15,7 @@ import * as MicTest from "./mic-test.js";
 import * as TimerHud from "./timer-hud.js";
 import * as WhisperStt from "./whisper-stt.js";
 import * as DemoRecorder from "./demo-recorder.js";
+import * as Conversation from "./conversation-mode.js";
 
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
@@ -1322,14 +1323,14 @@ async function cyclePassive() {
 
   if (heard) {
     // 1. In conversation mode, check for dismissal first — save conversation summary before exiting
-    if (conversationMode && WakeParse.isDismissal(heard)) {
+    if (Conversation.isActive() && WakeParse.isDismissal(heard)) {
       // Ask LLM to save_conversation with a summary of what just happened, then exit.
       try {
         if (conversationHistory.length >= 2) {
           await askLLM("Wrap up: call save_conversation with a 2-sentence summary of what we just discussed and a topics array. Reply with 'saved'.");
         }
       } catch {}
-      exitConversation();
+      Conversation.exit();
       await speak("Right you are, sir. Standing by.");
       if (passive) cyclePassive();
       return;
@@ -1337,74 +1338,33 @@ async function cyclePassive() {
 
     // 2. Either we heard the wake word OR we're already in conversation — handle the query
     const wakeHeard = WakeParse.containsWake(heard);
-    if (wakeHeard || conversationMode) {
+    if (wakeHeard || Conversation.isActive()) {
       const query = wakeHeard ? WakeParse.extractQuery(heard) : heard;
       /* Speedo wake-flick: brief 0→40 mph pop on wake-word detection, before the
        * listening state engages. Same vibe as the camera's "lock on" — visible
        * acknowledgement that the kiosk caught the wake even before audio confirms. */
       if (wakeHeard) window.__speedo?.flash?.("flick");
-      resetConversationTimeout();
+      Conversation.resetIdleTimer();
 
       if (query.length >= 2) {
         // Wake + query (or in-conversation utterance): process it
-        if (!conversationMode) enterConversation();
+        if (!Conversation.isActive()) Conversation.enter();
         passive = false;
         wakeBtn.querySelector(".wake__inner").textContent = "PROCESSING…";
         await handleHeard(heard, true);
         if (passive === false) {
           passive = true;
           setState("listening");
-          if (conversationMode) wakeBtn.querySelector(".wake__inner").textContent = "CONVERSATION — TAP TO STOP";
+          if (Conversation.isActive()) wakeBtn.querySelector(".wake__inner").textContent = "CONVERSATION — TAP TO STOP";
         }
       } else if (wakeHeard) {
         // Bare wake word — snappy acknowledgement, enter conversation
-        await acknowledgeBareWake();
+        await Conversation.acknowledgeBareWake();
       }
     }
   }
 
   if (passive) cyclePassive();
-}
-
-/* ---------- CONVERSATION MODE ----------
- * After the first wake, stay in conversation mode — every utterance is a query, no wake word needed.
- * Exit when user says "that's all" / "thanks that's all" / "stop listening" / similar.
- * Auto-exit after 60s of silence. */
-let conversationMode = false;
-let conversationTimeoutId = 0;
-const CONVERSATION_IDLE_MS = 60000;
-const ACK_PHRASES = ["Yes, sir.", "Sir.", "Go ahead.", "I'm here, sir.", "Listening, sir."];
-
-/* DISMISS_PATTERNS + isDismissal moved to ./wake-parsing.js. */
-
-function enterConversation() {
-  conversationMode = true;
-  if (wakeBtn) wakeBtn.querySelector(".wake__inner").textContent = "CONVERSATION — TAP TO STOP";
-  resetConversationTimeout();
-}
-function resetConversationTimeout() {
-  if (conversationTimeoutId) clearTimeout(conversationTimeoutId);
-  conversationTimeoutId = setTimeout(() => {
-    if (conversationMode) {
-      conversationMode = false;
-      if (wakeBtn) wakeBtn.querySelector(".wake__inner").textContent = "WAKE LISTENING — TAP TO STOP";
-      clearHistory();
-      console.log("[Flat-Out] conversation timed out — back to wake-word listening");
-    }
-  }, CONVERSATION_IDLE_MS);
-}
-function exitConversation() {
-  conversationMode = false;
-  if (conversationTimeoutId) { clearTimeout(conversationTimeoutId); conversationTimeoutId = 0; }
-  if (wakeBtn) wakeBtn.querySelector(".wake__inner").textContent = "WAKE LISTENING — TAP TO STOP";
-  clearHistory();   // fresh slate for the next conversation
-}
-
-async function acknowledgeBareWake() {
-  const phrase = ACK_PHRASES[Math.floor(Math.random() * ACK_PHRASES.length)];
-  enterConversation();
-  await speak(phrase);
-  resetConversationTimeout();
 }
 
 async function startListening() {
@@ -1519,7 +1479,7 @@ function wireUI() {
     if (!text) return;
     /* Force conversation mode on so a single palette query gets the same
      * follow-up window the wake-word path gets. */
-    if (typeof enterConversation === "function") enterConversation();
+    Conversation.enter();
     handleHeard(text, true);
   };
 
@@ -1551,6 +1511,15 @@ function wireUI() {
     getAudioCtx: () => wf.audioCtx,
     getMicStream: () => wf.micStream,
     ensureMicStream: () => wfStartListening(),
+  });
+  /* Conversation mode owns the multi-turn state but voice.js owns the wake
+   * button DOM + speak() function + conversation history. Pass them in. */
+  Conversation.setHandlers({
+    wakeBtnLabel: (text) => {
+      if (wakeBtn) wakeBtn.querySelector(".wake__inner").textContent = text;
+    },
+    speak,
+    clearHistory,
   });
   SetupModal.init({ autoPickMic: MicTest.autoPickMic, getPreferredDeviceId, setPreferredDevice, wf });
   SetupModal.maybeShowSetup();        // first-run setup modal (no-op after first completion)
