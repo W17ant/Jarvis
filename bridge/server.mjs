@@ -4342,21 +4342,26 @@ const httpServer = createServer(async (req, res) => {
     res.end(JSON.stringify({ ok: true, comms: out, ts: Date.now() }));
     return;
   }
-  if (req.url === "/cancel" && req.method === "POST") {
-    /* Operator said "stop" / "cancel" mid-task, OR clicked the STOP button on
-     * the active-task strip. Raises every long-running module's abort flag in
-     * parallel; each module's loop checks isAborted() at its safe-to-bail
-     * boundary. Currently abort-aware:
-     *  - Vision.raiseAbort  — caption batches between frames
-     *  - Browse.raiseAbort  — browse_web inner loop between LLM calls
-     *  - Crew.raiseAbort    — multi-agent runner between agent steps
-     * The teaser / video pipeline is more complex and not yet abort-aware —
-     * operator has to ride that one out or kill the whole bridge. */
-    Vision.raiseAbort();
-    Browse.raiseAbort();
-    Crew.raiseAbort();
+  if (req.url.startsWith("/cancel") && req.method === "POST") {
+    /* Two cancel modes:
+     *   POST /cancel              — global, stops everything (voice "stop",
+     *                               STOP pill, Esc keyboard shortcut)
+     *   POST /cancel?runId=<id>   — per-task, stops just that runId. Used by
+     *                               the per-row × button in the HUD task strip.
+     *
+     * Each module's isAborted(runId) checks both the global flag AND its
+     * per-runId set, so global cancel still wins over per-runId. */
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const runId = url.searchParams.get("runId");
+    Vision.raiseAbort(runId);
+    Browse.raiseAbort(runId);
+    Crew.raiseAbort(runId);
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, note: "Cancellation requested. Active caption batch / browse loop / crew run will stop at next safe checkpoint." }));
+    if (runId) {
+      res.end(JSON.stringify({ ok: true, runId, note: `Cancellation requested for runId=${runId}. Active loop will stop at next safe checkpoint.` }));
+    } else {
+      res.end(JSON.stringify({ ok: true, note: "Cancellation requested. Active caption batch / browse loop / crew run will stop at next safe checkpoint." }));
+    }
     return;
   }
   if (req.url === "/brand" && req.method === "POST") {

@@ -65,13 +65,29 @@ const INJECTION_PATTERNS = [
 
 /* Cooperative cancel — operator says "stop" / "cancel" while a browse loop
  * is mid-flight, the bridge raises this flag, the next loop iteration sees
- * it and bails cleanly with a partial trace. Reset to false at the top of
- * each requestBrowse call so a stale cancel from a previous run can't
+ * it and bails cleanly with a partial trace.
+ *
+ * Two-tier: global flag (raiseAbort() with no arg) stops every browse.
+ * Per-runId flag (raiseAbort(runId)) stops just that specific browse. The
+ * HUD per-row × button uses the runId form so killing one task doesn't
+ * collide with sibling browses. Reset to false at the top of each
+ * requestBrowse call so a stale cancel from a previous run can't
  * pre-cancel the next one. */
 let _aborted = false;
-export function raiseAbort() { _aborted = true; }
-export function clearAbort() { _aborted = false; }
-export function isAborted() { return _aborted; }
+const _runIdAborts = new Set();
+export function raiseAbort(runId) {
+  if (runId == null) _aborted = true;
+  else _runIdAborts.add(String(runId));
+}
+export function clearAbort(runId) {
+  if (runId == null) { _aborted = false; _runIdAborts.clear(); }
+  else _runIdAborts.delete(String(runId));
+}
+export function isAborted(runId) {
+  if (_aborted) return true;
+  if (runId != null && _runIdAborts.has(String(runId))) return true;
+  return false;
+}
 
 /**
  * @param {object} args

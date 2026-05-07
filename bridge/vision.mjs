@@ -29,14 +29,32 @@ const DATA_DIR = path.join(PROJECT_DIR, "data");
 const FRAME_CACHE_DIR = path.join(PROJECT_DIR, "data", "frame-cache");
 
 /* ---------- CANCEL FLAG ----------
- * Why: a single-process, single-active-tool kiosk doesn't need a sophisticated abort
- * controller. The bridge maintains a module-level flag the operator can set via /cancel
- * (voice "stop" → voice.js → POST /cancel). Long-running loops poll it between iterations
- * and bail cleanly. Reset by raiseAbort()/clearAbort() bookends in caption_shoot_folder. */
+ * Why: a single-process kiosk doesn't need a sophisticated abort controller, but it
+ * does need per-runId cancel now that the HUD's task-strip can show multiple
+ * concurrent tasks (crew runs, video edits, etc). Two-tier system:
+ *
+ *   - global flag (`aborted`) — raised by `/cancel` with no runId. Stops EVERYTHING.
+ *     Matches the original "stop everything" voice command behaviour.
+ *   - per-runId flags (`_runIdAborts: Set`) — raised by `/cancel?runId=X`. Stops
+ *     just that one task. Per-row × button in the HUD task strip uses this.
+ *
+ * isAborted() with no arg = global only. isAborted(runId) = global OR runId-scoped.
+ * Long-running loops in this module pass their current runId where they have one. */
 let aborted = false;
-export function raiseAbort() { aborted = true; }
-export function clearAbort() { aborted = false; }
-export function isAborted() { return aborted; }
+const _runIdAborts = new Set();
+export function raiseAbort(runId) {
+  if (runId == null) aborted = true;
+  else _runIdAborts.add(String(runId));
+}
+export function clearAbort(runId) {
+  if (runId == null) { aborted = false; _runIdAborts.clear(); }
+  else _runIdAborts.delete(String(runId));
+}
+export function isAborted(runId) {
+  if (aborted) return true;
+  if (runId != null && _runIdAborts.has(String(runId))) return true;
+  return false;
+}
 
 /* Lazy env readers — same reasoning as agency.mjs/leads.mjs: the bridge calls
  * loadEnvFile() AFTER all imports resolve, so reading process.env at top level

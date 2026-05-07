@@ -100,6 +100,18 @@ async function cancelAll() {
   }
 }
 
+/** POST /cancel?runId=<id> for a single task. Optimistically marks just that
+ *  row "is-cancelling" — siblings keep running. */
+async function cancelOne(runId) {
+  const t = tasks.get(runId);
+  if (t) { t.status = "cancelling"; render(); }
+  try {
+    await fetch(`http://localhost:8766/cancel?runId=${encodeURIComponent(runId)}`, { method: "POST" });
+  } catch (e) {
+    console.warn(`[tasks] /cancel?runId=${runId} failed:`, e.message);
+  }
+}
+
 function buildRow(t) {
   const li = document.createElement("li");
   li.className = "tasks__row";
@@ -146,6 +158,21 @@ function buildRow(t) {
     meta.textContent = remaining != null ? fmtEta(remaining) : "RUNNING";
   }
   li.appendChild(meta);
+
+  /* Per-row × button. Hidden during cancelling/error/complete (only fires
+   * on running tasks). POSTs /cancel?runId=<id> so siblings keep running. */
+  if (t.status === "running") {
+    const xBtn = document.createElement("button");
+    xBtn.type = "button";
+    xBtn.className = "tasks__row-cancel";
+    xBtn.textContent = "✕";
+    xBtn.title = `Stop this task only (${t.runId.slice(0, 12)}…)`;
+    xBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      cancelOne(t.runId);
+    });
+    li.appendChild(xBtn);
+  }
 
   /* Progress bar — width animated from percent. If no percent yet, show indeterminate
    * bar that pulses across (CSS-driven) so the operator knows it's not stuck. */
