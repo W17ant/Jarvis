@@ -139,12 +139,13 @@ start_if_free 8766 "bridge"  bash -c "cd '$HERE' && node bridge/server.mjs"
 heal_bridge_if_native_binding_mismatched
 
 # 3. Kokoro TTS server (free local voice — bf_emma British female)
-# 4. Whisper STT server (faster-whisper, local, replaces Chrome cloud SpeechRecognition)
+# 4. Whisper STT server — tries mlx-whisper (Apple GPU, ~6× faster on M-series)
+#    first, falls back to faster-whisper (CPU int8) if the MLX package is missing.
 if [[ -x "$HERE/.venv/bin/python" ]]; then
   start_if_free 8767 "kokoro"   bash -c "cd '$HERE' && '$HERE/.venv/bin/python' bridge/kokoro_server.py"
   start_if_free 8768 "whisper"  bash -c "cd '$HERE' && '$HERE/.venv/bin/python' bridge/whisper_server.py"
 else
-  echo "[Flat-Out] no .venv found — Kokoro & Whisper disabled. Run: python3 -m venv .venv && .venv/bin/pip install kokoro-onnx onnxruntime soundfile numpy faster-whisper"
+  echo "[Flat-Out] no .venv found — Kokoro & Whisper disabled. Run: python3 -m venv .venv && .venv/bin/pip install kokoro-onnx onnxruntime soundfile numpy faster-whisper mlx-whisper"
 fi
 
 # Give services a moment to bind

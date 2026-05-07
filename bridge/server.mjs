@@ -3805,11 +3805,27 @@ const httpServer = createServer(async (req, res) => {
         return r.ok;
       } catch { return false; }
     };
-    const [ollama, kokoro, whisper] = await Promise.all([
+    /* Why: probe whisper for its full payload (not just .ok) so we can surface
+     * which backend is live — MLX (Apple GPU, ~6× faster) vs faster-whisper
+     * (CPU int8 fallback). The HUD shows this in the Agent Console health
+     * row so the operator can tell at a glance whether they're on the fast
+     * path. Falls back to a plain boolean if the probe fails. */
+    const probeWhisper = async (ms = 1500) => {
+      try {
+        const r = await fetch("http://localhost:8768/health", { signal: AbortSignal.timeout(ms) });
+        if (!r.ok) return { ok: false, backend: null, model: null };
+        const j = await r.json();
+        return { ok: true, backend: j.backend || null, model: j.model || null };
+      } catch { return { ok: false, backend: null, model: null }; }
+    };
+    const [ollama, kokoro, whi] = await Promise.all([
       probe(`${OLLAMA_URL}/api/tags`),
       probe("http://localhost:8767/health"),
-      probe("http://localhost:8768/health"),
+      probeWhisper(),
     ]);
+    const whisper = whi.ok;
+    const whisperBackend = whi.backend;
+    const whisperModel = whi.model;
     /* setupRequired: true when config/brand.json is missing — signals to the HUD
      * that this is a fresh install and the operator should run setup-wizard.mjs.
      * The bridge still serves a FALLBACK brand so the HUD doesn't crash; this
@@ -3827,6 +3843,8 @@ const httpServer = createServer(async (req, res) => {
       ok: true,
       ts: Date.now(),
       services: { bridge: true, ollama, kokoro, whisper },
+      whisperBackend,   // "mlx" | "faster-whisper" | null
+      whisperModel,     // e.g. "large-v3-turbo"
       setupRequired,
     }));
     return;

@@ -578,11 +578,15 @@ async function pollHealth() {
   pips.forEach(p => { p.classList.remove("is-up", "is-down", "is-unknown"); });
 
   let services;
+  let whisperBackend = null;
+  let whisperModel = null;
   try {
     const r = await fetch("http://localhost:8766/healthz", { cache: "no-store", signal: AbortSignal.timeout(2500) });
     if (!r.ok) throw new Error(`status ${r.status}`);
     const j = await r.json();
     services = j.services || {};
+    whisperBackend = j.whisperBackend || null;
+    whisperModel = j.whisperModel || null;
   } catch {
     /* Bridge itself is down. Mark bridge red, the rest unknown. */
     services = { bridge: false, ollama: undefined, kokoro: undefined, whisper: undefined };
@@ -593,6 +597,13 @@ async function pollHealth() {
     if (v === true) pip.classList.add("is-up");
     else if (v === false) pip.classList.add("is-down");
     else pip.classList.add("is-unknown");
+    /* Why: surface the active STT backend in the pip tooltip so operator can
+     * tell at a glance whether they're on MLX (Apple GPU, ~6× faster) or the
+     * faster-whisper CPU fallback. Other pips keep their static title. */
+    if (svc === "whisper" && whisperBackend) {
+      const label = whisperBackend === "mlx" ? "MLX (Apple GPU)" : "faster-whisper (CPU int8)";
+      pip.title = `Whisper STT · ${label}${whisperModel ? ` · ${whisperModel}` : ""}`;
+    }
   });
 }
 function startHealthPoll() { pollHealth(); setInterval(pollHealth, 15_000); }
