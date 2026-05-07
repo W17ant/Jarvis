@@ -3007,15 +3007,22 @@ async function askLLM(query, history = [], { sessionId = null } = {}) {
    * default to the operator's current scope without re-asking. Empty string when
    * no project is set — costs nothing in tokens. */
   const projectHint = Projects.systemPromptHint();
-  /* Build "today" + "tomorrow" context strings. Why: without these the model has
-   * no anchor for date-relative queries like "anything in my diary today/tomorrow"
-   * — it returns 7 days of events from get_upcoming_events but can't filter to the
-   * right day, often answers "no events today" even when there's one in the data. */
+  /* Why: keep dynamic-per-turn data OUT of the system prompt. The local time
+   * (HH:MM) used to live here and re-tokenised the entire prefix every minute,
+   * killing Ollama's prefix cache. Date strings (today/tomorrow) stay in
+   * SYSTEM since they only change once per day; the cache invalidates at
+   * midnight which is fine. The local time now goes into the user message's
+   * [Context] block (per-turn anyway), which is appended AFTER the cached
+   * prefix and only re-tokenises the user-line tail.
+   *
+   * Date strings still belong in SYSTEM rather than per-turn context because
+   * date-relative queries ("anything in my diary today/tomorrow") need a
+   * stable anchor for filter logic, and the daily reload is cheap. */
   const _now = new Date();
   const _todayStr = _now.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const _tomorrow = new Date(_now.getTime() + 86_400_000);
   const _tomorrowStr = _tomorrow.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. The local time is ${_now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}${creativeStylePromptBlock()}
+  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}${creativeStylePromptBlock()}
 
 SPOKEN OUTPUT RULES (CRITICAL):
   Your reply is read aloud by a TTS voice. Output ONLY plain spoken prose:
@@ -3097,7 +3104,10 @@ IMPORTANT: when video_edit_from_shoot returns ok:true and status:"started", the 
 When given [Context], use those facts verbatim. If asked to do something you don't have a tool for, say so plainly.`;
 
   const ctx = await gatherContext(query);
-  const userContent = ctx ? `[Context — use these real facts:\n${ctx}\n]\n\n${query}` : query;
+  /* Inject local time per-turn so SYSTEM stays stable for prefix caching. */
+  const _timeStr = _now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const ctxWithTime = `Local time: ${_timeStr}.${ctx ? "\n" + ctx : ""}`;
+  const userContent = `[Context — use these real facts:\n${ctxWithTime}\n]\n\n${query}`;
 
   const messages = [
     { role: "system", content: SYSTEM },
@@ -3264,23 +3274,23 @@ async function askLLMStream({ query, history = [], onSentence, sessionId = null 
   const tagline = brand.agency.tagline ? ` — ${brand.agency.tagline}.` : ".";
   const projectHint = Projects.systemPromptHint();
   /* SYSTEM is shared with askLLM — keep duplicated here so both paths stay in sync.
-   * If they ever diverge, refactor to a shared buildSystemPrompt() helper. */
-  /* Build "today" + "tomorrow" context strings. Why: without these the model has
-   * no anchor for date-relative queries like "anything in my diary today/tomorrow"
-   * — it returns 7 days of events from get_upcoming_events but can't filter to the
-   * right day, often answers "no events today" even when there's one in the data. */
+   * Local time MUST be in the user message, not SYSTEM, or the prefix cache
+   * invalidates every minute. See askLLM for the matching comment. */
   const _now = new Date();
   const _todayStr = _now.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const _tomorrow = new Date(_now.getTime() + 86_400_000);
   const _tomorrowStr = _tomorrow.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. The local time is ${_now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}
+  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}
 
 Output plain spoken prose only — no markdown, no bullet points, no emoji, no special separators. Numbers and units in spoken form when helpful.
 
 YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use those facts verbatim.`;
 
   const ctx = await gatherContext(query);
-  const userContent = ctx ? `[Context — use these real facts:\n${ctx}\n]\n\n${query}` : query;
+  /* Inject local time per-turn so the system prompt stays stable. */
+  const _timeStr = _now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const ctxWithTime = `Local time: ${_timeStr}.${ctx ? "\n" + ctx : ""}`;
+  const userContent = `[Context — use these real facts:\n${ctxWithTime}\n]\n\n${query}`;
   const messages = [
     { role: "system", content: SYSTEM },
     ...history,
