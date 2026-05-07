@@ -813,6 +813,50 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .tasks__row.is-error .tasks__meta { color: #f39c12; letter-spacing: 0.3em; }
 .tasks__row.is-error .tasks__bar-fill { background: #f39c12; box-shadow: 0 0 8px rgba(243, 156, 18, 0.5); }
 
+/* STOP pill — sits above the rows when any task is running. Re-enables
+ * pointer events (the parent ul has them disabled so the waveform behind
+ * stays clickable in idle). Uses the brand-red accent for visibility but
+ * with reduced glow vs the running bar so it doesn't compete for attention
+ * with the active progress fill. */
+.tasks__stop-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 2px;
+  pointer-events: none;
+}
+.tasks__stop-btn {
+  pointer-events: auto;
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #eaeaea;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--fom-red), white 10%);
+  padding: 3px 10px;
+  cursor: pointer;
+  /* Why: matches the brand red but desaturated so the active progress bars
+   * remain the primary visual accent. Hover saturates fully. */
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.tasks__stop-btn:hover,
+.tasks__stop-btn:focus-visible {
+  background: var(--fom-red);
+  color: #000;
+  border-color: var(--fom-red);
+  outline: none;
+}
+
+/* Cancelling state — operator clicked STOP, waiting for the modules to bail
+ * at their next safe checkpoint. Row fades to neutral grey so the operator
+ * sees the request was accepted; task.error / task.complete then clears. */
+.tasks__row.is-cancelling .tasks__kind { color: var(--text-dim); }
+.tasks__row.is-cancelling .tasks__label,
+.tasks__row.is-cancelling .tasks__stage { color: var(--text-dim); }
+.tasks__row.is-cancelling .tasks__meta { color: var(--text-dim); letter-spacing: 0.3em; }
+.tasks__row.is-cancelling .tasks__bar-fill { background: var(--text-dim); box-shadow: none; }
+.tasks__row.is-cancelling .tasks__bar--indeterminate::after { background: linear-gradient(90deg, transparent, var(--text-dim), transparent); }
+
 /* Why: panel--telemetry needs explicit position:relative so .tasks absolute positioning anchors. */
 .panel--telemetry { position: relative; }
 

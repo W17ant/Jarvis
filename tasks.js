@@ -59,9 +59,45 @@ function render() {
   host.hidden = false;
   if (waveformEl) waveformEl.classList.add("waveform--dim");
   while (host.firstChild) host.removeChild(host.firstChild);
+  /* STOP-all button — visible whenever the strip is. POST /cancel hits every
+   * abort-aware module (Vision / Browse / Crew). Per-task cancel isn't here
+   * yet because /cancel is global on the bridge — wiring per-runId would need
+   * each long-running module to track its own runId-keyed abort flag. */
+  host.appendChild(buildStopButton());
   /* Newest task first — most operators care about the thing they just kicked off. */
   const ordered = [...tasks.values()].sort((a, b) => b.startedAt - a.startedAt);
   for (const t of ordered) host.appendChild(buildRow(t));
+}
+
+/** Build the single "STOP ALL" pill that sits above the rows. */
+function buildStopButton() {
+  const li = document.createElement("li");
+  li.className = "tasks__stop-row";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tasks__stop-btn";
+  /* Why: Esc also cancels (handled in voice.js). Keeping the title brief so
+   * operators across the room read just "STOP" — the keyboard shortcut hint
+   * goes in the title attribute for hover-discoverability. */
+  btn.textContent = `STOP · ${tasks.size}`;
+  btn.title = `Stop ${tasks.size === 1 ? "the active task" : "all active tasks"} (Esc)`;
+  btn.addEventListener("click", cancelAll);
+  li.appendChild(btn);
+  return li;
+}
+
+/** POST /cancel and optimistically tint every row "is-cancelling". The actual
+ *  task.error events from the bridge clean rows up at the next safe checkpoint. */
+async function cancelAll() {
+  /* Visual feedback first — operator gets immediate confirmation the click
+   * was registered, even before the network round-trip. */
+  for (const t of tasks.values()) t.status = "cancelling";
+  render();
+  try {
+    await fetch("http://localhost:8766/cancel", { method: "POST" });
+  } catch (e) {
+    console.warn("[tasks] /cancel failed:", e.message);
+  }
 }
 
 function buildRow(t) {
@@ -69,6 +105,7 @@ function buildRow(t) {
   li.className = "tasks__row";
   li.dataset.runId = t.runId;
   if (t.status === "error") li.classList.add("is-error");
+  if (t.status === "cancelling") li.classList.add("is-cancelling");
   if (t.stage) li.classList.add("tasks__row--with-stage");
 
   const badge = document.createElement("span");
@@ -97,6 +134,8 @@ function buildRow(t) {
   meta.className = "tasks__meta";
   if (t.status === "error") {
     meta.textContent = "FAILED";
+  } else if (t.status === "cancelling") {
+    meta.textContent = "STOPPING";
   } else if (t.percent != null) {
     meta.textContent = `${Math.round(t.percent)}%`;
   } else {

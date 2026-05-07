@@ -4320,17 +4320,20 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
   if (req.url === "/cancel" && req.method === "POST") {
-    /* Operator said "stop" / "cancel" mid-task. Raises every long-running
-     * module's abort flag in parallel; each module's loop checks isAborted()
-     * at its safe-to-bail boundary. Currently:
+    /* Operator said "stop" / "cancel" mid-task, OR clicked the STOP button on
+     * the active-task strip. Raises every long-running module's abort flag in
+     * parallel; each module's loop checks isAborted() at its safe-to-bail
+     * boundary. Currently abort-aware:
      *  - Vision.raiseAbort  — caption batches between frames
      *  - Browse.raiseAbort  — browse_web inner loop between LLM calls
-     * The teaser pipeline is more complex and not yet abort-aware — operator
-     * has to ride that one out or kill the whole bridge. */
+     *  - Crew.raiseAbort    — multi-agent runner between agent steps
+     * The teaser / video pipeline is more complex and not yet abort-aware —
+     * operator has to ride that one out or kill the whole bridge. */
     Vision.raiseAbort();
     Browse.raiseAbort();
+    Crew.raiseAbort();
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, note: "Cancellation requested. Active caption batch / browse loop will stop at next safe checkpoint." }));
+    res.end(JSON.stringify({ ok: true, note: "Cancellation requested. Active caption batch / browse loop / crew run will stop at next safe checkpoint." }));
     return;
   }
   if (req.url === "/brand" && req.method === "POST") {
