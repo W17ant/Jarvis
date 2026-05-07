@@ -18,7 +18,9 @@
   "scripts": {
     "bridge": "node bridge/server.mjs",
     "kokoro": "python3 bridge/kokoro_server.py",
-    "serve": "python3 -m http.server 8765"
+    "serve": "python3 -m http.server 8765",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@sparticuz/chromium-min": "^148.0.0",
@@ -32,7 +34,8 @@
   },
   "devDependencies": {
     "@bybas/weather-icons": "^2.0.0",
-    "@phosphor-icons/core": "^2.1.1"
+    "@phosphor-icons/core": "^2.1.1",
+    "vitest": "^4.1.5"
   },
   "models": [
     "qwen2.5:14b",
