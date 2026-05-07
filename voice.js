@@ -14,6 +14,7 @@ import * as SetupModal from "./setup-modal.js";
 import * as MicTest from "./mic-test.js";
 import * as TimerHud from "./timer-hud.js";
 import * as WhisperStt from "./whisper-stt.js";
+import * as DemoRecorder from "./demo-recorder.js";
 
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
@@ -685,7 +686,10 @@ async function speakStream(query, history) {
   wf.speakingAnalyser = analyser;
   wf.speakingBuffer = buffer;
   wf.mode = "speaking-real";
-  if (recDestination) { try { TTS.setRecordingDestination(recDestination); } catch {} }
+  /* If demo recording is active, route Kokoro audio into the demo mix so
+   * client demos capture both sides of the conversation. */
+  const _recDest = DemoRecorder.getRecDestination();
+  if (_recDest) { try { TTS.setRecordingDestination(_recDest); } catch {} }
 
   /* Filler phrase — randomised acknowledgement that buys time while the LLM thinks.
    *
@@ -856,7 +860,7 @@ async function playWavWithAnalyser(wavBuffer) {
   source.connect(analyser);
   analyser.connect(wf.audioCtx.destination);
   // Tap into the demo-recording mix if it's been set up (recorder is active)
-  if (recDestination) { try { analyser.connect(recDestination); } catch (_) {} }
+  DemoRecorder.tapTtsToRec(analyser);
 
   // Swap waveform mode to read from this analyser instead of synthetic
   wf.speakingAnalyser = analyser;
@@ -1497,106 +1501,6 @@ function startSilenceWatcher() {
 window.getTierPreset = SetupModal.getTierPreset;
 
 
-/* ---------- DEMO RECORDER ----------
- * Press R (no modifiers) to toggle. Captures screen video via getDisplayMedia + mic + Kokoro TTS audio,
- * combines into a single WebM, downloads on stop. Kokoro audio is tapped from the Web Audio context
- * (more reliable than macOS system-audio capture). */
-let demoRec = null;
-let demoStreams = [];
-let demoTimerId = 0;
-let demoStartTs = 0;
-let recDestination = null;   // shared MediaStreamDestination for mic + TTS audio mix
-
-/** Get a destination that mixes mic + Kokoro output. Lazily create on first use. */
-function ensureRecAudioMix() {
-  if (recDestination) return recDestination;
-  if (!wf.audioCtx) wf.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  recDestination = wf.audioCtx.createMediaStreamDestination();
-  // Mic stream → destination (if available). When wfStartListening creates a mic source, it gets routed too.
-  if (wf.micStream) {
-    try { wf.audioCtx.createMediaStreamSource(wf.micStream).connect(recDestination); } catch (_) {}
-  }
-  return recDestination;
-}
-
-/** Tap the Kokoro speaking-analyser into the recording mix (called when speak() starts). */
-function tapTtsToRec(analyser) {
-  if (!recDestination) return;
-  try { analyser.connect(recDestination); } catch (_) {}
-}
-
-async function toggleDemoRecording() {
-  if (demoRec) { stopDemo(); return; }
-  let display;
-  try {
-    display = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 30 },
-      audio: false,   // we mix audio ourselves below for reliability
-    });
-  } catch (e) { console.warn("[Flat-Out] screen capture cancelled:", e.message); return; }
-
-  // Make sure mic is open + analyser routed
-  await wfStartListening();
-  ensureRecAudioMix();
-  // Re-route the existing mic source into the destination (in case it wasn't when ensureRecAudioMix ran)
-  if (wf.micStream) {
-    try { wf.audioCtx.createMediaStreamSource(wf.micStream).connect(recDestination); } catch (_) {}
-  }
-
-  // Combined: video from screen, audio from our mix destination
-  const audioTracks = recDestination.stream.getAudioTracks();
-  const combined = new MediaStream([
-    display.getVideoTracks()[0],
-    ...audioTracks,
-  ]);
-
-  demoStreams = [display];
-  const chunks = [];
-  // VP9+Opus is the most efficient WebM combo Chrome supports out of the box
-  const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-    ? "video/webm;codecs=vp9,opus" : "video/webm";
-  demoRec = new MediaRecorder(combined, { mimeType, videoBitsPerSecond: 5_000_000, audioBitsPerSecond: 128_000 });
-  demoRec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-  demoRec.onstop = () => {
-    const blob = new Blob(chunks, { type: "video/webm" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `flat-out-demo-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.webm`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    console.log(`[Flat-Out] demo saved (${(blob.size / 1e6).toFixed(1)} MB)`);
-  };
-  // If user stops sharing via the browser bar, we stop too
-  display.getVideoTracks()[0].addEventListener("ended", stopDemo);
-  demoRec.start(1000);
-  demoStartTs = Date.now();
-  showRecIndicator(true);
-}
-
-function stopDemo() {
-  if (!demoRec) return;
-  try { demoRec.stop(); } catch (_) {}
-  demoStreams.forEach(s => s.getTracks().forEach(t => t.stop()));
-  demoRec = null;
-  demoStreams = [];
-  showRecIndicator(false);
-}
-
-function showRecIndicator(on) {
-  const ind = document.getElementById("recIndicator");
-  if (!ind) return;
-  ind.hidden = !on;
-  if (on) {
-    if (demoTimerId) clearInterval(demoTimerId);
-    demoTimerId = setInterval(() => {
-      const s = Math.floor((Date.now() - demoStartTs) / 1000);
-      const mm = Math.floor(s / 60), ss = s % 60;
-      const el = document.getElementById("recTime");
-      if (el) el.textContent = `${mm}:${ss.toString().padStart(2, "0")}`;
-    }, 500);
-  } else if (demoTimerId) { clearInterval(demoTimerId); demoTimerId = 0; }
-}
 
 /* ---------- WIRE UP UI ---------- */
 function wireUI() {
@@ -1640,6 +1544,14 @@ function wireUI() {
     dbgSet,
     getAudioCtx: () => wf.audioCtx,
   });
+  /* Demo recorder shares the AudioContext + mic with the voice loop.
+   * ensureMicStream → wfStartListening so the recorder can guarantee a
+   * mic before screen-capture starts. */
+  DemoRecorder.setHandlers({
+    getAudioCtx: () => wf.audioCtx,
+    getMicStream: () => wf.micStream,
+    ensureMicStream: () => wfStartListening(),
+  });
   SetupModal.init({ autoPickMic: MicTest.autoPickMic, getPreferredDeviceId, setPreferredDevice, wf });
   SetupModal.maybeShowSetup();        // first-run setup modal (no-op after first completion)
 
@@ -1647,7 +1559,7 @@ function wireUI() {
   document.addEventListener("keydown", (e) => {
     if ((e.key === "r" || e.key === "R") && !e.metaKey && !e.ctrlKey && !e.altKey) {
       const onInput = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
-      if (!onInput) { e.preventDefault(); toggleDemoRecording(); }
+      if (!onInput) { e.preventDefault(); DemoRecorder.toggleDemoRecording(); }
     }
   });
 
