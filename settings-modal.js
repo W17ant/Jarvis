@@ -23,6 +23,7 @@
  */
 
 import * as Storage from "./storage.js";
+import * as WakeParse from "./wake-parsing.js";
 
 const VOICE_KEY = "voice";
 
@@ -115,6 +116,8 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   const voiceSel = document.getElementById("settingsVoice");
   const modelSel = document.getElementById("settingsModel");
   const previewBtn = document.getElementById("settingsVoicePreview");
+  const wakeTestBtn = document.getElementById("settingsWakeTest");
+  const wakeStatusEl = document.getElementById("settingsWakeStatus");
   const saveBtn = document.getElementById("settingsSave");
   const cancelBtn = document.getElementById("settingsCancel");
   const closeBtn = document.getElementById("settingsClose");
@@ -896,11 +899,96 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
     setTimeout(hideSuggest, 150);
   });
 
+  /* ---- Wake-word check ----
+   * Records 3s from the operator's preferred mic, sends to Whisper, and
+   * runs WakeParse.containsWake() against the transcript. Confirms Adam's
+   * accent + mic combo reliably triggers the wake word before he hits a
+   * "I keep saying Hey Flat-Out and nothing happens" rabbit hole.
+   *
+   * Doesn't go through the voice loop — direct getUserMedia → MediaRecorder
+   * → POST /transcribe → WakeParse — so it works even when passive listening
+   * isn't running. The status pill takes operator-readable verdicts only:
+   * "Heard X clearly" / "Didn't catch the wake word — heard \"…\" instead". */
+  async function runWakeTest() {
+    if (!wakeTestBtn || !wakeStatusEl) return;
+    wakeTestBtn.disabled = true;
+    wakeTestBtn.textContent = "RECORDING (3s)…";
+    wakeStatusEl.textContent = "speak now…";
+    wakeStatusEl.classList.remove("is-pass", "is-fail");
+
+    let stream;
+    try {
+      const id = Storage.get("preferredAudioDeviceId", "");
+      const constraints = id
+        ? { deviceId: { exact: id }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        : { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+      stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    } catch (e) {
+      wakeStatusEl.textContent = `mic error: ${e.name}`;
+      wakeStatusEl.classList.add("is-fail");
+      wakeTestBtn.disabled = false;
+      wakeTestBtn.textContent = "TEST WAKE WORD (3s)";
+      return;
+    }
+
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+    const rec = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 64000 });
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    rec.start(250);
+    await new Promise((r) => setTimeout(r, 3000));
+    /* Stop + wait for final ondataavailable so we don't truncate the last chunk. */
+    await new Promise((r) => { rec.onstop = r; rec.stop(); });
+    stream.getTracks().forEach((t) => t.stop());
+
+    if (chunks.length === 0) {
+      wakeStatusEl.textContent = "no audio captured";
+      wakeStatusEl.classList.add("is-fail");
+      wakeTestBtn.disabled = false;
+      wakeTestBtn.textContent = "TEST WAKE WORD (3s)";
+      return;
+    }
+
+    wakeTestBtn.textContent = "TRANSCRIBING…";
+    const blob = new Blob(chunks, { type: chunks[0].type || "audio/webm" });
+    let heard = "";
+    try {
+      const r = await fetch("http://localhost:8768/transcribe", {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: blob,
+      });
+      if (!r.ok) throw new Error(`whisper ${r.status}`);
+      const j = await r.json();
+      heard = (j.text || "").trim();
+    } catch (e) {
+      wakeStatusEl.textContent = `whisper error: ${e.message}`;
+      wakeStatusEl.classList.add("is-fail");
+      wakeTestBtn.disabled = false;
+      wakeTestBtn.textContent = "TEST WAKE WORD (3s)";
+      return;
+    }
+
+    if (!heard) {
+      wakeStatusEl.textContent = "didn't hear anything — try again, louder";
+      wakeStatusEl.classList.add("is-fail");
+    } else if (WakeParse.containsWake(heard)) {
+      wakeStatusEl.textContent = `✓ heard "${heard}"`;
+      wakeStatusEl.classList.add("is-pass");
+    } else {
+      wakeStatusEl.textContent = `✗ no wake match — heard "${heard}"`;
+      wakeStatusEl.classList.add("is-fail");
+    }
+    wakeTestBtn.disabled = false;
+    wakeTestBtn.textContent = "TEST WAKE WORD (3s)";
+  }
+
   btn.addEventListener("click", openModal);
   closeBtn.addEventListener("click", () => closeModal());
   cancelBtn.addEventListener("click", () => closeModal());
   saveBtn.addEventListener("click", save);
   previewBtn.addEventListener("click", previewVoice);
+  if (wakeTestBtn) wakeTestBtn.addEventListener("click", runWakeTest);
   locateBtn.addEventListener("click", redetectLocation);
 
   /* API-key show/hide toggles. Each toggle button has data-target=<input id>;

@@ -492,6 +492,15 @@
         </div>
 
         <div class="settings-modal__field">
+          <label><img src="assets/icons/microphone.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Wake word check</label>
+          <div class="settings-modal__row">
+            <button id="settingsWakeTest" type="button">TEST WAKE WORD (3s)</button>
+            <span id="settingsWakeStatus" class="settings-modal__wake-status">—</span>
+          </div>
+          <small>Tap, say your wake phrase ("Hey Flat-Out") clearly. Confirms Whisper hears it through your accent. If it fails repeatedly, try a different mic from the setup wizard.</small>
+        </div>
+
+        <div class="settings-modal__field">
           <label><img src="assets/icons/cpu.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Language model</label>
           <div class="settings-modal__row">
             <select id="settingsModel"></select>

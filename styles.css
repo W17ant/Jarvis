@@ -2428,6 +2428,24 @@ body.is-demo .waveform { height: 76px; }
 .settings-modal__field label img.settings-modal__icon[src*="monitor"]      { -webkit-mask-image: url("assets/icons/monitor.svg");      mask-image: url("assets/icons/monitor.svg"); }
 .settings-modal__field label img.settings-modal__icon[src*="folder"]       { -webkit-mask-image: url("assets/icons/folder.svg");       mask-image: url("assets/icons/folder.svg"); }
 .settings-modal__field label img.settings-modal__icon[src*="sliders"]      { -webkit-mask-image: url("assets/icons/sliders-horizontal.svg"); mask-image: url("assets/icons/sliders-horizontal.svg"); }
+.settings-modal__field label img.settings-modal__icon[src*="microphone"]   { -webkit-mask-image: url("assets/icons/microphone.svg");   mask-image: url("assets/icons/microphone.svg"); }
+
+/* Wake-word check status pill — neutral by default, green on pass, amber on fail.
+ * Sits inline with the TEST button so the verdict is unambiguous. */
+.settings-modal__wake-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  flex: 1;
+  min-width: 0;
+  /* Long transcripts overflow gracefully. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-modal__wake-status.is-pass { color: #5fc26b; }
+.settings-modal__wake-status.is-fail { color: #f39c12; }
 
 /* Folders block — two stacked rows with a 70px monospace label so "Shoots in" / "Output to"
  * line up like a labelled instrument readout. The text input owns the remaining width. */
