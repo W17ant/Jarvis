@@ -62,6 +62,7 @@ import * as EodDigest from "./eod-digest.mjs";
 import * as FastPath from "./fast-path.mjs";
 import * as Crew from "./crew.mjs";
 import * as CrewHelpers from "./crew-helpers.mjs";
+import * as StudioMap from "./studio-map.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1797,6 +1798,19 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "studio_map",
+      description: "Quick-orient digest of what's in the kiosk right now: active projects, recent shoot folders, upcoming media days, last conversation. Cached for 60s. Use this BEFORE running heavy workflows so you have grounded context — saves a chain of recall + list_projects + list_shoots calls.",
+      parameters: {
+        type: "object",
+        properties: {
+          force: { type: "boolean", description: "Skip cache and rebuild fresh. Default false." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "compare_products",
       description:
         "Compare a product across multiple online retailers IN PARALLEL. Builds a multi-agent crew under the hood — one research agent per merchant runs simultaneously via request_browse, then a synthesis agent merges findings into a comparison table. Use for: 'compare 50mm primes across WEX, MPB and Park Cameras', 'find me the best deal on a vacuum across Currys and AO and John Lewis'. Requires a cloud vision provider (anthropic / openai) because each research agent uses request_browse. ~3x faster than sequentially asking the LLM to research each merchant.",
@@ -2285,6 +2299,7 @@ async function _executeToolInner(name, args) {
       return digest;
     }
     case "compare_products": return await CrewHelpers.compareProducts(args || {});
+    case "studio_map":       return await StudioMap.buildStudioMap(args || {});
     case "spawn_crew": {
       /* Crew validation lives inside runCrew — the LLM gets a clean error
        * envelope back if the spec is malformed (missing agentId, circular
