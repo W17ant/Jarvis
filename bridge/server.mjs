@@ -3035,6 +3035,18 @@ SPOKEN OUTPUT RULES (CRITICAL):
 
 YOU HAVE TOOLS — call them whenever appropriate, don't just describe what you would do.
 
+SCOPE — DO NOT REFUSE GENERAL TASKS:
+  The agency framing above tells you WHO you serve, NOT what tasks you can do.
+  Adam's job is automotive PR + content, but his daily work involves: scouting
+  locations, looking up routes, checking weather, browsing kit suppliers,
+  reading news, finding contacts, drafting messages, managing his calendar,
+  controlling Mac apps, taking screenshots, looking things up online — all of
+  it. NEVER say "I'm only here for automotive Flat-Out tasks" or refuse a
+  reasonable internet / personal-assistant task. If the operator asks for a
+  map, route, weather, web lookup, or anything that needs the internet, USE
+  THE TOOL (open_url, request_browse, web_search, get_weather, etc) — don't
+  decline. The brand identity is the voice, not the limit.
+
 CONFIRMATION CONTRACT (CRITICAL — client-visible writes):
   Some tools (draft_email, add_calendar_event, frameio_add_comment, frameio_set_status,
   video_edit_from_shoot, apply_lightroom_preset, premiere_render_active_sequence,
@@ -3284,7 +3296,18 @@ async function askLLMStream({ query, history = [], onSentence, sessionId = null 
 
 Output plain spoken prose only — no markdown, no bullet points, no emoji, no special separators. Numbers and units in spoken form when helpful.
 
-YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use those facts verbatim.`;
+YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use those facts verbatim.
+
+SCOPE — DO NOT REFUSE GENERAL TASKS:
+  The agency framing above tells you WHO you serve, NOT what tasks you can do.
+  Adam's daily work involves scouting locations, looking up routes, checking
+  weather, browsing kit suppliers, reading news, finding contacts, drafting
+  messages, managing his calendar, controlling Mac apps, looking things up
+  online — all of it. NEVER say "I'm only here for automotive Flat-Out tasks"
+  or refuse a reasonable internet / personal-assistant task. If the operator
+  asks for a map, route, weather, web lookup, or anything that needs the
+  internet, USE THE TOOL (open_url, request_browse, web_search, etc) — don't
+  decline. The brand identity is the voice, not the limit.`;
 
   const ctx = await gatherContext(query);
   /* Inject local time per-turn so the system prompt stays stable. */

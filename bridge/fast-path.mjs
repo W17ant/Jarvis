@@ -83,15 +83,36 @@ const HANDLERS = [
     }),
   },
 
-  /* ---------- Open URL — Google Maps + simple "open X" -----------
-   *  We handle two shapes:
-   *    "(open|pull up) (a |the )?map of <place>"  → google maps URL
-   *    "open <site>"                                → open the matching site
-   *  Anything else falls through to the LLM (which has open_url available). */
+  /* ---------- Open URL — Google Maps -----------
+   *  Accepts a wide variety of operator phrasings + tolerates trailing
+   *  context ("to scout a shoot", "for tomorrow's location"). The original
+   *  regex only matched start-of-string "open|pull up|show me" — Adam
+   *  hit a refusal loop saying "bring up a map of X to scout a shoot"
+   *  because "bring" wasn't covered AND the trailing clause broke the
+   *  end-anchor. Liberalised: any of the common verbs anywhere in the
+   *  string, captures the place phrase up to a natural-language stopword
+   *  ("to", "for", "so", "and", "please", trailing punctuation, EOS).
+   *
+   *  Examples that now match:
+   *    "bring up a map of Goodwood"
+   *    "pull a map of Silverstone for tomorrow's shoot"
+   *    "show me a map of Manchester to scout locations"
+   *    "find a map of the Goodwood paddock please"
+   *    "map of the Bentley factory" */
   {
-    test: /^(?:open|pull\s*up|show\s*(?:me)?)\s*(?:a\s+|the\s+)?map(?:\s+of)?\s+(.+?)\.?$/i,
+    test: /\b(?:(?:open|pull|show|bring|find|get|give)(?:\s+me)?(?:\s+up)?\s+(?:a\s+|the\s+)?)?map\s+(?:of\s+|for\s+)?(.+?)(?:\s+(?:to|for|so|and|please|because)\b|[?.!,;]|$)/i,
     handle: (q, m) => {
-      const place = m[1].trim();
+      const place = m[1].trim().replace(/[?.!,;:]+$/, "");
+      /* Guard against false positives:
+       *   - pronouns/prepositions captured by the loose regex ("map me to X")
+       *   - too-short places (under 3 chars) — likely junk
+       *   - phrases that start with "studio …" / "with …" / "and …"
+       *     suggesting we matched mid-sentence noise rather than a real
+       *     place phrase. Falls through to LLM, which can decide. */
+      const lower = place.toLowerCase();
+      if (place.length < 3) return { match: false };
+      if (/^(?:me|you|us|him|her|them|it|that|this)\b/.test(lower)) return { match: false };
+      if (/^(?:studio|with|and|or|but)\b/.test(lower)) return { match: false };
       const url = `https://www.google.com/maps/search/${encodeURIComponent(place)}`;
       return {
         match: true,
