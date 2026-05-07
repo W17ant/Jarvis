@@ -65,6 +65,7 @@ import * as CrewHelpers from "./crew-helpers.mjs";
 import * as StudioMap from "./studio-map.mjs";
 import * as IMessageListener from "./imessage-listener.mjs";
 import * as Knowledge from "./knowledge.mjs";
+import * as CodeAgent from "./code-agent.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1800,6 +1801,23 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "code_agent_run",
+      description: "Run LLM-authored async JavaScript in a sandboxed worker. Use when no pre-built tool combination expresses the workflow you need — e.g. 'for each shoot folder modified today, generate a contact sheet then watermark the cheapest result'. Inside the sandbox: `await tools.<name>(args)` calls any allowedTools. Standard JS builtins (Math, JSON, Date, Promise, Array, etc) plus console.log are available. NO fs, network, process, or require — those are reachable only via tools the operator explicitly allowed. ALWAYS confirmation-gated: the operator hears a one-line summary and says 'yes' before any code runs. Returns the script's return value plus captured stdout/stderr.",
+      parameters: {
+        type: "object",
+        properties: {
+          code:         { type: "string", description: "JS source. Treated as the body of an async IIFE — `return value` to provide a result, `await` works at top level." },
+          allowedTools: { type: "array", items: { type: "string" }, description: "Whitelist of tool names the script may call. Required — explicitly enumerate what the script needs. Empty array = no tools." },
+          timeoutMs:    { type: "number", description: "Hard timeout (worker.terminate). Default 30000, cap 120000." },
+          purpose:      { type: "string", description: "One-sentence description of what this script does. Goes in the audit log; helps the operator understand what they're approving." },
+        },
+        required: ["code", "allowedTools", "purpose"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_knowledge",
       description: "Search the operator's curated knowledge base — brand briefs, client onboarding docs, past press releases, anything they dropped into docs/knowledge/. Hybrid retrieval: vector cosine similarity + BM25 keyword fusion via Reciprocal Rank Fusion. Returns top-K chunks with source citations (rel path, title, format) so replies can quote the source. Use whenever the operator asks something that might be in their docs — 'what did the client brief say about deliverables', 'what's the FOM brand voice on hashtags', 'how did we phrase the Bentley press release'.",
       parameters: {
@@ -1992,6 +2010,11 @@ Personal.setBroadcaster(broadcastToClients);
  * / etc on top of the chat() call (without it, agents are chat-only). */
 Crew.setBroadcaster(broadcastToClients);
 Crew.setToolDispatch({ tools: TOOLS, executeTool });
+/* Code agent — escape hatch for novel workflow composition. Wire the
+ * executeTool ref so user-authored JS in the worker can call tools.* and
+ * have those calls round-trip back here for dispatch. */
+CodeAgent.setToolExecutor(executeTool);
+CodeAgent.setBroadcaster(broadcastToClients);
 
 /* Knowledge base — boot-time ingest of docs/knowledge/ + folder watcher.
  * Initial scan picks up any files dropped while the bridge was offline;
@@ -2137,6 +2160,16 @@ const NEEDS_CONFIRMATION = {
    * Force a verbal confirm so the credential leaves 1Password only on
    * explicit human go-ahead. */
   lookup_password: (a) => `Look up "${a?.label || "(no label)"}" in 1Password (field: ${a?.field || "password"}). Read the value out?`,
+  /* Code execution is the highest-trust thing the LLM can request. Even
+   * with the allowedTools allowlist + worker isolation, running arbitrary
+   * LLM-authored JS shouldn't happen silently — the operator hears the
+   * purpose + tool subset + a code preview before approving. */
+  code_agent_run: (a) => {
+    const purpose = String(a?.purpose || "(no purpose given)").slice(0, 140);
+    const tools = Array.isArray(a?.allowedTools) ? a.allowedTools.slice(0, 6).join(", ") : "(none)";
+    const lines = String(a?.code || "").split("\n").length;
+    return `Run a code-agent script — purpose: "${purpose}". Allowed tools: ${tools}. ${lines} lines. Confirm before execution?`;
+  },
 };
 
 /** Wrapped tool dispatch — logs every call (success + error) to the audit log
@@ -2175,6 +2208,9 @@ const PLAN_PROPOSED_TOOLS = new Set([
    * before the parallel fan-out fires. */
   "spawn_crew",
   "compare_products",
+  /* Code agent: highest-trust action available — operator wants to see
+   * the purpose + line count + tool subset before they say yes. */
+  "code_agent_run",
   /* Personal-assistant tools that touch the operator's wider digital life —
    * iMessage and music are visible to other people / out of the HUD. Plan-stage
    * the intent so the operator can interrupt before send/play. */
@@ -2227,6 +2263,10 @@ function summariseToolCall(name, args) {
     case "compare_products": {
       const merchants = Array.isArray(a.merchants) ? a.merchants : [];
       return `Compare "${(a.item || "?").slice(0, 40)}" across ${merchants.length} merchants in parallel`;
+    }
+    case "code_agent_run": {
+      const lines = String(a.code || "").split("\n").length;
+      return `Run code-agent: ${(a.purpose || "(no purpose)").slice(0, 50)} · ${lines} lines`;
     }
     case "request_browse":
       return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
@@ -2380,6 +2420,7 @@ async function _executeToolInner(name, args) {
     case "studio_map":       return await StudioMap.buildStudioMap(args || {});
     case "search_knowledge": return await Memory.searchKnowledge(args || {});
     case "ingest_knowledge": return await Knowledge.ingestAll();
+    case "code_agent_run":   return await CodeAgent.runCode(args || {});
     case "spawn_crew": {
       /* Crew validation lives inside runCrew — the LLM gets a clean error
        * envelope back if the spec is malformed (missing agentId, circular
@@ -3396,6 +3437,18 @@ const httpServer = createServer(async (req, res) => {
       toolCount: TOOLS.length,
       toolRouter: ToolRouter.indexStatus(),
     }));
+    return;
+  }
+
+  /* GET /code-agent/audit — recent code_agent_run rows. Read-only; the
+   * Agent Console renders these as a "what scripts has Jarvis run for me"
+   * panel. Honours ?limit=N (default 20, max 200). */
+  if (req.url?.startsWith("/code-agent/audit") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 20));
+    const runs = await CodeAgent.recentRuns({ limit });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, runs }));
     return;
   }
 
