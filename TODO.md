@@ -49,6 +49,34 @@ Audit pass over OpenClaw + NextChat + Cherry Studio + AionUi (Open-Assistant is 
 - ❌ **MCP marketplace UI** (Cherry Studio) — niche; Jarvis already exposes MCP at `/mcp`. A marketplace assumes a community that doesn't exist yet.
 - ❌ **Open-Assistant patterns** — archived 2023; the inference / RLHF tooling targets cloud LLM training, irrelevant to a local voice kiosk.
 
+### Multi-agent orchestration (audit pass over CrewAI / OpenAI Agents SDK / smolagents / Aider / Goose)
+
+The bottleneck on local hardware is one Ollama process serving requests sequentially — concurrent agents thrash the GPU. **Cloud APIs (Anthropic / OpenAI) don't share that constraint** — 3-5 concurrent Claude calls is fine for the API and bounded by API key rate limits, not by Adam's M5 Max. So multi-agent is genuinely viable when the workload routes to cloud.
+
+**Worth building (highest priority of this audit):**
+
+- 🟥 🚀 **Crew orchestrator** (~3-5 days, CrewAI-shaped) — `bridge/crew.mjs` with two orchestration modes:
+  - `sequential` — pipeline tasks (research → draft → format → publish). Each step on its own agent with its own tool subset.
+  - `parallel` — manager dispatches independent sub-agents simultaneously. Cloud-only — agents routed to Ollama queue serially since GPU is single-context. Cloud agents fan out properly concurrent.
+
+  New tool: `spawn_crew({ task, mode, agents })`. Each agent spec includes role, goal, allowed tools, and a provider override (so you can force a sub-agent to use Claude even when the main loop is on Ollama).
+
+  First real workflow: "compare these three lenses across WEX / MPB / Park Cameras" → 3 parallel `request_browse` agents on Claude → results merged for the operator. Currently the same query runs 3 sequential browses, ~90s. With cloud parallelism: ~30s.
+
+- 🟧 🚀 **CodeAgent escape hatch** (~2 days, smolagents pattern) — `code_agent_run({ goal })` lets the LLM write a small Python (or TypeScript) script that calls Jarvis tools dynamically, runs in a sandbox, returns the result. Escapes the static tool catalogue when a workflow needs novel composition the LLM didn't have a tool for. Pairs with the bridge's existing `run_shell` confirmation gate but with a tighter sandboxed runtime.
+
+- 🟧 ⚙️ **Provider concurrency guard** (~half day) — formalise the cloud-only parallelism rule in `llm/providers.mjs`: any code path requesting >1 concurrent call MUST route to a cloud provider with a key set; Ollama requests serialise behind a single in-flight semaphore. Not user-visible but stops the LLM from accidentally crashing the GPU by spawning a parallel local crew.
+
+- 🟧 🚀 **"Studio map" / project-state summary** (~1 day, Aider repo-map pattern) — pre-compute a structured "what's in this kiosk right now" digest (active shoots + their state, recent tasks, top contacts, current Frame.io review queue) that's cheap context for any LLM call. Cached, refreshed on inbox-watcher events. Tokens-on-budget so it scales.
+
+**Considered + skipped:**
+
+- ❌ **Goose's ACP (Agent Communication Protocol)** — over-engineered for a single-kiosk scenario. Useful if Jarvis becomes multi-process or multi-machine; revisit then. The pattern overlaps with the plugin SDK shape we're already adding.
+- ❌ **Aider's "multiple coder modes"** — Jarvis's tool routing already differentiates drafting vs chat vs tool-call hops via the cascade router + tool-router filter. Adding mode-specific coders would duplicate that.
+- ❌ **OpenAI Agents SDK (Swarm successor)** — Python-only, would require a Python service alongside the Node bridge. The orchestration patterns it ships are simpler than CrewAI's; we can replicate them in `bridge/crew.mjs` without taking on a Python runtime.
+
+**Why this matters more than other items in this section:** Adam asked about it directly. The infrastructure to make it work (pluggable providers, cost telemetry, tool router, cancel) is all already shipped in PR #1. The crew orchestrator is the natural follow-on — it's the layer that turns "Jarvis runs one tool at a time" into "Jarvis dispatches a task force when the workload justifies it".
+
 ---
 
 ## Shipped (was previously listed as outstanding)
