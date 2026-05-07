@@ -61,6 +61,7 @@ import * as UsageLog from "./usage-log.mjs";
 import * as EodDigest from "./eod-digest.mjs";
 import * as FastPath from "./fast-path.mjs";
 import * as Crew from "./crew.mjs";
+import * as CrewHelpers from "./crew-helpers.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1796,6 +1797,23 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "compare_products",
+      description:
+        "Compare a product across multiple online retailers IN PARALLEL. Builds a multi-agent crew under the hood — one research agent per merchant runs simultaneously via request_browse, then a synthesis agent merges findings into a comparison table. Use for: 'compare 50mm primes across WEX, MPB and Park Cameras', 'find me the best deal on a vacuum across Currys and AO and John Lewis'. Requires a cloud vision provider (anthropic / openai) because each research agent uses request_browse. ~3x faster than sequentially asking the LLM to research each merchant.",
+      parameters: {
+        type: "object",
+        properties: {
+          item:        { type: "string", description: "Plain-English product description, e.g. '50mm f1.4 prime' or 'compact dishwasher under 50dB'." },
+          merchants:   { type: "array", items: { type: "string" }, description: "2-4 merchant domains or labels from the allowlist. e.g. ['wexphotovideo.com', 'mpb.com', 'parkcameras.com']." },
+          maxPriceGbp: { type: "number", description: "Optional upper bound for candidate filtering." },
+        },
+        required: ["item", "merchants"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "spawn_crew",
       description:
         "Spawn a multi-agent crew to tackle a task that benefits from role-splitting or parallel execution. Use for: structured pipelines (research → draft → format), comparison tasks across multiple sources (compare lenses across WEX/MPB/Park Cameras), or any workload where multiple sub-agents working independently produces a better result than one agent doing it all sequentially. Sub-agents can use cloud providers (anthropic / openai) for true parallelism — local Ollama agents serialise behind a single GPU slot.",
@@ -1930,8 +1948,11 @@ Tasks.setBroadcaster(broadcastToClients);
  * events the HUD listens for to render the countdown badge + speak the label on fire. */
 Personal.setBroadcaster(broadcastToClients);
 /* Wire the crew orchestrator — emits crew.started / crew.agent.* / crew.complete
- * events the HUD will surface as parallel lanes once that UI ships. */
+ * events the HUD will surface as parallel lanes once that UI ships. Plus the
+ * tool-dispatch hook so crew agents can actually call request_browse / web_search
+ * / etc on top of the chat() call (without it, agents are chat-only). */
 Crew.setBroadcaster(broadcastToClients);
+Crew.setToolDispatch({ tools: TOOLS, executeTool });
 /* Wire the notifications scheduler. Each emitter calls back into broadcastToClients
  * via this hook. Tier 1-4+6 from the operator's pick list — calendar reminders,
  * press-radar pings, mail digest, frame.io activity, bridge health. */
@@ -2061,6 +2082,7 @@ const PLAN_PROPOSED_TOOLS = new Set([
    * calls per crew). Plan-broadcast surfaces the agent count + cost shape
    * before the parallel fan-out fires. */
   "spawn_crew",
+  "compare_products",
   /* Personal-assistant tools that touch the operator's wider digital life —
    * iMessage and music are visible to other people / out of the HUD. Plan-stage
    * the intent so the operator can interrupt before send/play. */
@@ -2109,6 +2131,10 @@ function summariseToolCall(name, args) {
       const agentCount = Array.isArray(a.agents) ? a.agents.length : 0;
       const taskCount = Array.isArray(a.tasks) ? a.tasks.length : 0;
       return `Spawn ${mode} crew · ${agentCount} agents · ${taskCount} tasks`;
+    }
+    case "compare_products": {
+      const merchants = Array.isArray(a.merchants) ? a.merchants : [];
+      return `Compare "${(a.item || "?").slice(0, 40)}" across ${merchants.length} merchants in parallel`;
     }
     case "request_browse":
       return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
@@ -2258,6 +2284,7 @@ async function _executeToolInner(name, args) {
       digest.spoken = EodDigest.digestToText(digest);
       return digest;
     }
+    case "compare_products": return await CrewHelpers.compareProducts(args || {});
     case "spawn_crew": {
       /* Crew validation lives inside runCrew — the LLM gets a clean error
        * envelope back if the spec is malformed (missing agentId, circular

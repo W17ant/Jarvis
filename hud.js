@@ -247,6 +247,14 @@ function connectBridge() {
      * render directly here (the modal might not exist yet); the ring buffer
      * is read at modal-open time. */
     if (m.type === "tool.picked") rememberToolPick(m.data);
+    /* Crew orchestrator — render parallel lanes for each in-flight crew.
+     * Five event types map to lifecycle hooks on a single CrewLanes object. */
+    if (m.type === "crew.started")        crewLanesOnStart(m.data);
+    if (m.type === "crew.agent.started")  crewLanesOnAgentStart(m.data);
+    if (m.type === "crew.agent.tool")     crewLanesOnAgentTool(m.data);
+    if (m.type === "crew.agent.complete") crewLanesOnAgentComplete(m.data);
+    if (m.type === "crew.agent.failed")   crewLanesOnAgentFailed(m.data);
+    if (m.type === "crew.complete")       crewLanesOnComplete(m.data);
   });
 
   bridgeWS.addEventListener("close", () => {
@@ -1483,6 +1491,198 @@ document.addEventListener("keydown", (e) => {
     _helpModalEl.hidden = true;
   }
 });
+
+/* ---------- CREW LANES ----------
+ *  Live visualisation of in-flight multi-agent crews. Mounts a panel
+ *  bottom-right when a crew starts; shows one lane per agent with
+ *  status (queued / running / done / failed), provider badge, current
+ *  task description, tool-call chips firing in real time, and elapsed
+ *  ms once the agent finishes. Whole panel auto-hides ~6s after the
+ *  crew completes so the kiosk doesn't fill with stale UI.
+ *
+ *  Why bottom-right rather than centre: the kiosk's main visual is the
+ *  speedometer; crews are operational telemetry that should live at
+ *  the periphery. The operator can read it while still tracking voice
+ *  state on the speedo.
+ *
+ *  Multiple crews running concurrently each get their own panel
+ *  stacked vertically — keyed by crewId so events from one don't
+ *  bleed into another. */
+
+const _crewPanels = new Map();   // crewId → { root, agents: Map<agentId, laneEl> }
+
+function ensureCrewLanesContainer() {
+  let host = document.getElementById("crewLanesContainer");
+  if (host) return host;
+  host = document.createElement("div");
+  host.id = "crewLanesContainer";
+  host.style.cssText = "position:fixed;right:18px;bottom:60px;z-index:9988;display:flex;flex-direction:column;gap:10px;align-items:flex-end;font-family:var(--mono,monospace);pointer-events:none;";
+  document.body.appendChild(host);
+  /* Shared style block — added once. Subsequent panels reuse it. */
+  if (!document.getElementById("crewLanesStyles")) {
+    const s = document.createElement("style");
+    s.id = "crewLanesStyles";
+    s.textContent = `
+      .crew-panel { background: rgba(11,11,11,0.94); border: 1px solid var(--brand-primary, #ff3b3b); padding: 10px 14px 12px; min-width: 340px; max-width: 420px; pointer-events: auto; box-shadow: 0 0 24px rgba(255,59,59,0.22); animation: crewPanelIn 220ms ease forwards; }
+      @keyframes crewPanelIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+      .crew-panel.is-fading { opacity: 0; transition: opacity 600ms ease; }
+      .crew-panel-head { color: var(--brand-primary, #ff3b3b); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: baseline; }
+      .crew-panel-mode { color: #888; font-size: 9px; letter-spacing: 0.12em; }
+      .crew-lane { padding: 6px 0; border-top: 1px dashed #1a1a1a; }
+      .crew-lane:first-of-type { border-top: none; padding-top: 4px; }
+      .crew-lane-row { display: flex; gap: 8px; align-items: baseline; margin-bottom: 3px; }
+      .crew-lane-status { font-size: 9px; letter-spacing: 0.12em; padding: 1px 5px; border: 1px solid #333; color: #888; min-width: 56px; text-align: center; }
+      .crew-lane-status.is-running { border-color: #ffaa00; color: #ffaa00; animation: crewPulse 1.6s infinite; }
+      .crew-lane-status.is-done { border-color: #00ff88; color: #00ff88; }
+      .crew-lane-status.is-failed { border-color: var(--brand-primary, #ff3b3b); color: var(--brand-primary, #ff3b3b); }
+      @keyframes crewPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      .crew-lane-role { color: #fff; font-size: 11px; flex: 1; }
+      .crew-lane-provider { color: #555; font-size: 9px; letter-spacing: 0.1em; }
+      .crew-lane-meta { color: #666; font-size: 9px; line-height: 1.4; }
+      .crew-lane-tools { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+      .crew-lane-tool-chip { background: rgba(255,170,0,0.12); color: #ffaa00; border: 1px solid rgba(255,170,0,0.3); font-size: 8px; padding: 0 4px; letter-spacing: 0.06em; }
+      .crew-panel-foot { color: #555; font-size: 9px; letter-spacing: 0.06em; margin-top: 8px; padding-top: 6px; border-top: 1px solid #1a1a1a; display: flex; justify-content: space-between; }
+      .crew-panel-cancel { color: #888; cursor: pointer; text-decoration: underline; }
+      .crew-panel-cancel:hover { color: var(--brand-primary, #ff3b3b); }
+    `;
+    document.head.appendChild(s);
+  }
+  return host;
+}
+
+function crewLanesOnStart(data) {
+  const host = ensureCrewLanesContainer();
+  const crewId = data.crewId;
+  const root = document.createElement("div");
+  root.className = "crew-panel";
+  root.dataset.crewId = crewId;
+  /* Header — crew id (last 6 of hash) + mode + maxParallel hint. */
+  const head = document.createElement("div");
+  head.className = "crew-panel-head";
+  const headLabel = document.createElement("span");
+  headLabel.textContent = `CREW ${crewId.slice(-6)}`;
+  head.appendChild(headLabel);
+  const modeSpan = document.createElement("span");
+  modeSpan.className = "crew-panel-mode";
+  modeSpan.textContent = `${data.mode}${data.mode === "parallel" ? ` · ${data.maxParallel}-wide` : ""}`;
+  head.appendChild(modeSpan);
+  root.appendChild(head);
+  /* Lanes — one per agent. Pre-render all in queued state so the
+   * operator sees the planned shape of the crew immediately. */
+  const lanes = new Map();
+  for (const a of data.agents || []) {
+    const lane = renderLane(a, "queued");
+    lanes.set(a.id, lane);
+    root.appendChild(lane);
+  }
+  /* Footer — cancel link + cost placeholder. */
+  const foot = document.createElement("div");
+  foot.className = "crew-panel-foot";
+  const costSpan = document.createElement("span");
+  costSpan.textContent = "—";
+  foot.appendChild(costSpan);
+  const cancel = document.createElement("a");
+  cancel.className = "crew-panel-cancel";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => {
+    fetch("http://localhost:8766/cancel", { method: "POST" }).catch(() => {});
+    cancel.textContent = "Cancelling…";
+  });
+  foot.appendChild(cancel);
+  root.appendChild(foot);
+  host.appendChild(root);
+  _crewPanels.set(crewId, { root, lanes, costSpan, startedAt: Date.now() });
+}
+
+function renderLane(agent, status) {
+  const lane = document.createElement("div");
+  lane.className = "crew-lane";
+  lane.dataset.agentId = agent.id;
+  const row = document.createElement("div");
+  row.className = "crew-lane-row";
+  const statusEl = document.createElement("span");
+  statusEl.className = `crew-lane-status is-${status}`;
+  statusEl.textContent = status.toUpperCase();
+  row.appendChild(statusEl);
+  const role = document.createElement("span");
+  role.className = "crew-lane-role";
+  role.textContent = agent.role;
+  row.appendChild(role);
+  const provider = document.createElement("span");
+  provider.className = "crew-lane-provider";
+  provider.textContent = (agent.provider || "?").toUpperCase();
+  row.appendChild(provider);
+  lane.appendChild(row);
+  const meta = document.createElement("div");
+  meta.className = "crew-lane-meta";
+  meta.textContent = "Queued…";
+  lane.appendChild(meta);
+  const tools = document.createElement("div");
+  tools.className = "crew-lane-tools";
+  lane.appendChild(tools);
+  lane._refs = { statusEl, meta, tools };
+  return lane;
+}
+
+function setLaneStatus(lane, status, metaText) {
+  if (!lane?._refs) return;
+  const { statusEl, meta } = lane._refs;
+  statusEl.className = `crew-lane-status is-${status}`;
+  statusEl.textContent = status.toUpperCase();
+  if (metaText != null) meta.textContent = metaText;
+}
+
+function crewLanesOnAgentStart(data) {
+  const panel = _crewPanels.get(data.crewId);
+  if (!panel) return;
+  const lane = panel.lanes.get(data.agentId);
+  setLaneStatus(lane, "running", data.description || "Working…");
+  lane._startedAt = Date.now();
+}
+
+function crewLanesOnAgentTool(data) {
+  const panel = _crewPanels.get(data.crewId);
+  if (!panel) return;
+  const lane = panel.lanes.get(data.agentId);
+  if (!lane) return;
+  const chip = document.createElement("span");
+  chip.className = "crew-lane-tool-chip";
+  chip.textContent = data.tool;
+  lane._refs.tools.appendChild(chip);
+}
+
+function crewLanesOnAgentComplete(data) {
+  const panel = _crewPanels.get(data.crewId);
+  if (!panel) return;
+  const lane = panel.lanes.get(data.agentId);
+  if (!lane) return;
+  const cost = data.costUSD > 0 ? ` · $${data.costUSD.toFixed(4)}` : "";
+  setLaneStatus(lane, "done", `${data.elapsedMs}ms${cost} · ${(data.output || "").slice(0, 80)}`);
+}
+
+function crewLanesOnAgentFailed(data) {
+  const panel = _crewPanels.get(data.crewId);
+  if (!panel) return;
+  const lane = panel.lanes.get(data.agentId);
+  setLaneStatus(lane, "failed", data.error?.slice(0, 120) || "failed");
+}
+
+function crewLanesOnComplete(data) {
+  const panel = _crewPanels.get(data.crewId);
+  if (!panel) return;
+  /* Finalise footer — total cost + total elapsed. Then auto-fade after 6s
+   * so the kiosk doesn't accumulate stale crew panels. Cancel link becomes
+   * a "dismiss" link in case the operator wants to clear it sooner. */
+  const cost = data.totalCostUSD > 0 ? `$${data.totalCostUSD.toFixed(4)}` : "free";
+  panel.costSpan.textContent = `${data.successCount}/${data.taskCount} ok · ${data.totalElapsedMs}ms · ${cost}`;
+  setTimeout(() => {
+    panel.root.classList.add("is-fading");
+    setTimeout(() => {
+      panel.root.remove();
+      _crewPanels.delete(data.crewId);
+    }, 700);
+  }, 6000);
+}
 
 /* ---------- COMMAND PALETTE (Cmd+K) ----------
  *  Spotlight-style palette over the HUD. Two modes:
