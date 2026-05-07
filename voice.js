@@ -11,6 +11,7 @@ import * as History from "./history.js";
 import * as WakeParse from "./wake-parsing.js";
 import * as SettingsModal from "./settings-modal.js";
 import * as SetupModal from "./setup-modal.js";
+import * as MicTest from "./mic-test.js";
 
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
@@ -1560,156 +1561,6 @@ async function transcribeAndHandle() {
   }
 }
 
-/** Iterate every audioinput device, sample 600ms of raw PCM from each, pick the one with the
- *  highest peak above noise floor. Saves that deviceId to localStorage. Bypasses Chrome's
- *  reluctance to expose device labels — works directly on deviceIds. */
-async function autoPickMic() {
-  const btn = document.getElementById("dbgAutoPickBtn");
-  if (!btn) return;
-  btn.disabled = true; btn.textContent = "TESTING DEVICES…";
-  dbgSet("error", "—");
-
-  // Make sure we have permission first so enumerateDevices returns ALL devices
-  try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()); } catch {}
-  await new Promise(r => setTimeout(r, 200));
-  const all = await navigator.mediaDevices.enumerateDevices();
-  const inputs = all.filter(d => d.kind === "audioinput");
-
-  if (inputs.length === 0) {
-    dbgSet("error", "no audio inputs found");
-    btn.disabled = false; btn.textContent = "AUTO-PICK WORKING MIC";
-    return;
-  }
-
-  /* Why: the silent built-in is what gets picked when constraint is loose, so we explicitly
-   * test every distinct deviceId and rank by peak. We need a tiny bit of audio to ride —
-   * user can speak / click / make any noise during the 0.6s × N total. */
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
-  if (ctx.state === "suspended") await ctx.resume();
-  const SAMPLE_MS = 600;
-  const results = [];
-
-  for (let i = 0; i < inputs.length; i++) {
-    const d = inputs[i];
-    const idTail = d.deviceId ? d.deviceId.slice(0, 8) : "default";
-    const label = d.label || `(unlabeled ${idTail})`;
-    btn.textContent = `TESTING ${i + 1}/${inputs.length}…`;
-    dbgSet("device", `probing: ${label}`);
-
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: d.deviceId ? { exact: d.deviceId } : undefined,
-                 echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      });
-    } catch (e) {
-      results.push({ device: d, peak: 0, rms: 0, error: e.name });
-      continue;
-    }
-    const src = ctx.createMediaStreamSource(stream);
-    const sp = ctx.createScriptProcessor(2048, 1, 1);
-    let peak = 0, sumSq = 0, n = 0;
-    sp.onaudioprocess = (e) => {
-      const samples = e.inputBuffer.getChannelData(0);
-      for (let j = 0; j < samples.length; j++) {
-        const v = Math.abs(samples[j]);
-        if (v > peak) peak = v;
-        sumSq += samples[j] * samples[j];
-        n++;
-      }
-    };
-    src.connect(sp); sp.connect(ctx.destination);
-    await new Promise(r => setTimeout(r, SAMPLE_MS));
-    src.disconnect(); sp.disconnect();
-    stream.getTracks().forEach(t => t.stop());
-    const rms = n ? Math.sqrt(sumSq / n) : 0;
-    results.push({ device: d, peak, rms, label });
-  }
-  ctx.close();
-
-  // Pick highest-peak device above noise floor
-  results.sort((a, b) => b.peak - a.peak);
-  const winner = results[0];
-  console.log("[Flat-Out] mic auto-pick results:", results.map(r => `${r.label}: peak=${r.peak.toFixed(4)}`));
-
-  if (winner && winner.peak > 0.001) {
-    setPreferredDevice(winner.device.deviceId, winner.label);
-    if (wf.micStream) wf.micStream.getTracks().forEach(t => t.stop());
-    wf.micStream = null; wf.analyser = null;
-    dbgSet("device", `${winner.label} (auto-picked, peak=${winner.peak.toFixed(3)})`);
-    dbgSet("error", "✓ working mic chosen — tap wake to use it");
-    refreshDevicePicker();
-  } else {
-    const summary = results.map(r => `${r.label}: ${r.peak.toFixed(3)}`).join(" / ");
-    dbgSet("error", `all silent: ${summary}`);
-  }
-
-  btn.disabled = false; btn.textContent = "AUTO-PICK WORKING MIC";
-}
-
-/** Standalone mic test — bypasses MediaRecorder. Captures 3s of raw PCM, reports peak/RMS.
- *  This proves whether macOS is delivering audio at ALL, separate from any encoder issues. */
-async function runMicTest() {
-  const btn = document.getElementById("dbgTestBtn");
-  if (!btn) return;
-  btn.disabled = true; btn.textContent = "TESTING…";
-  dbgSet("error", "—");
-
-  let stream;
-  try {
-    const id = getPreferredDeviceId();
-    const constraints = id
-      ? { deviceId: { exact: id }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-      : { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
-    stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-  } catch (e) {
-    dbgSet("error", `getUserMedia: ${e.name} ${e.message}`);
-    btn.disabled = false; btn.textContent = "TEST MIC (3s)";
-    return;
-  }
-
-  const ctx = wf.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-  if (ctx.state === "suspended") await ctx.resume();
-  const src = ctx.createMediaStreamSource(stream);
-
-  /* Why: ScriptProcessor is deprecated but it's the simplest way to pull raw PCM samples in 3s.
-   * AudioWorklet would be cleaner but adds boilerplate. */
-  const sp = ctx.createScriptProcessor(2048, 1, 1);
-  let peak = 0;
-  let sumSq = 0;
-  let n = 0;
-  sp.onaudioprocess = (e) => {
-    const samples = e.inputBuffer.getChannelData(0);
-    for (let i = 0; i < samples.length; i++) {
-      const v = Math.abs(samples[i]);
-      if (v > peak) peak = v;
-      sumSq += samples[i] * samples[i];
-      n++;
-    }
-  };
-  src.connect(sp);
-  sp.connect(ctx.destination);
-
-  const track = stream.getAudioTracks()[0];
-  dbgSet("device", track.label || "?");
-  dbgSet("track", `${track.readyState}/${track.muted ? "muted" : "live"}/${track.enabled ? "on" : "off"}`);
-
-  await new Promise(r => setTimeout(r, 3000));
-
-  src.disconnect(); sp.disconnect();
-  stream.getTracks().forEach(t => t.stop());
-
-  const rms = n ? Math.sqrt(sumSq / n) : 0;
-  dbgSet("peak", `peak=${peak.toFixed(4)} rms=${rms.toFixed(4)} samples=${n}`);
-  if (peak < 0.0005) {
-    dbgSet("error", "MIC SILENT — macOS not delivering audio");
-  } else if (peak < 0.01) {
-    dbgSet("error", "very quiet — check input gain in System Settings → Sound → Input");
-  } else {
-    dbgSet("error", "mic audio reaching browser ✓");
-  }
-  btn.disabled = false; btn.textContent = "TEST MIC (3s)";
-}
 
 /* First-run setup modal + the saved-preference accessors moved to
  * ./setup-modal.js. window.getTierPreset is re-exposed below for HUD
@@ -1841,10 +1692,11 @@ function wireUI() {
 
   wfInit();   // start the state-aware waveform on boot
   refreshDevicePicker();   // populate the input dropdown + auto-select non-built-in
-  /* Wire deps into the setup-modal module before maybeShowSetup runs.
-   * Idempotent — re-init on profile switch picks up the new wf instance
-   * if the operator switches mid-session. */
-  SetupModal.init({ autoPickMic, getPreferredDeviceId, setPreferredDevice, wf });
+  /* Wire deps into the mic-test + setup-modal modules before maybeShowSetup
+   * runs. Idempotent — re-init on profile switch picks up the new wf
+   * instance if the operator switches mid-session. */
+  MicTest.init({ dbgSet, getPreferredDeviceId, setPreferredDevice, refreshDevicePicker, wf });
+  SetupModal.init({ autoPickMic: MicTest.autoPickMic, getPreferredDeviceId, setPreferredDevice, wf });
   SetupModal.maybeShowSetup();        // first-run setup modal (no-op after first completion)
 
   // R toggles demo recording (no modifiers — Cmd/Ctrl-R reloads, leave that alone)
@@ -1873,7 +1725,7 @@ function wireUI() {
 
   // Wire the debug "TEST MIC" button
   const testBtn = document.getElementById("dbgTestBtn");
-  if (testBtn) testBtn.addEventListener("click", runMicTest);
+  if (testBtn) testBtn.addEventListener("click", MicTest.runMicTest);
 
   SettingsModal.wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibility });
 }
