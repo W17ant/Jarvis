@@ -32,12 +32,19 @@ MODEL_SIZE = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 BACKEND_PREF = os.environ.get("WHISPER_BACKEND", "auto").lower()
 
 # Why: this prompt is fed to Whisper as "previous context" so it expects these proper nouns.
-# Massively improves recognition of "Flat-Out", car brands, and automotive jargon.
+# Improves recognition of "Flat-Out", car brands, and automotive jargon.
+#
+# IMPORTANT: keep this list to BARE TOKENS only — no example sentences. Earlier
+# versions included "Hey Flat-Out, what's the time?" / "…what's the weather?"
+# as priming examples. On short or quiet clips Whisper biased toward those
+# example phrases and hallucinated "what's" / "What's the weather? × 27" when
+# the operator actually said "Hey Flat-Out" alone. Reported by Adam — clip
+# came back transcribed as `"whats'"` against the wake-test button. Removing
+# the example sentences ended the bias; brand tokens still help recognition.
 WHISPER_INITIAL_PROMPT = (
     "Hey Flat-Out. Flat-Out Media. Aston Martin. Vulcan. AMR Pro. DBX. Audi RS6. "
     "Porsche. Ferrari. Bentley. McLaren. Lamborghini. Quattro. Avant. Manchester. "
-    "Goodwood. Silverstone. Capture One. Adobe Premiere. Lightroom. "
-    "Hey Flat-Out, what's the time? Hey Flat-Out, edit the shoot. Hey Flat-Out, what's the weather?"
+    "Goodwood. Silverstone. Capture One. Adobe Premiere. Lightroom."
 )
 
 # ──────────────────────────────────────────────────────────────────
