@@ -1,32 +1,42 @@
 # Flat-Out HUD — Outstanding Work
 
-Living todo list. Honest reckoning: a lot of this list was stale by the time anyone read it — many items marked outstanding had already shipped. Cleaned up below.
+Living todo list. Honest reckoning: a lot of this list was stale by the time anyone read it. **Last sync: 2026-05-07** after a major sprint that shipped 22+ commits in one session (MLX Whisper, voice loop ~3-4× faster, six voice.js extractions, vitest scaffold, CONTRIBUTING.md).
 
 **Legend**: 🟥 critical · 🟧 high · 🟨 medium · 🟩 low · ⚙️ architecture · 🚀 FOM workflow win
 
 ---
 
-## Genuinely outstanding
+## Currently outstanding
 
-These are NOT shipped and need real work. Everything else in the file is shipped (some sections below are kept for reference but most marked outstanding turned out to be already coded — see the Shipped section).
+Items that are NOT shipped and need real work. The "Shipped" sections below capture what was previously here as outstanding but is now done.
 
-- 🟥 ⚙️ **voice.js extraction** (~2 days) — file is 3000+ LOC and growing every patch. Refactor into bridge-client / tts / state / modal-queue / drawer modules. Not user-visible; pure structural debt. Risky to do mid-sprint.
-- 🟧 🚀 **Multi-machine memory sync** (~3-5 days) — periodic backup of `data/memory.db` to NAS or shared encrypted folder. Operator A's contacts visible on operator B's kiosk. Agency-wide knowledge not personal. Needs conflict-resolution design first.
+### Tractable in a focused session (under a day)
+
+- 🟧 ⚙️ **voice.js extraction tail** — six modules out, voice.js at 1620 LOC (down from 3105). Remaining: `passive-vad.js` (~250 LOC, biggest), `tts-pipeline.js` (~150 LOC, speakStream + barge-in), `conversation-mode.js` (~150 LOC), `demo-recorder.js` (~100 LOC), inbox/PDF/thumbnail event-handler cluster (~150 LOC). All need the deps-injection pattern established this sprint.
+- 🟧 ⚙️ **Per-runId abort flags** — tonight shipped a HUD STOP button but it's still global cancel only. Crew has per-crewId abort already; Vision and Browse need the same. Then `/cancel?runId=X` + per-row × buttons in tasks.js.
+- 🟧 🚀 **Lightroom catalogue read-only via SQLite** — `.lrcat` files are SQLite. New tool `find_lr_photo({rating, date_range, keyword})` for "find five-star shots from the Bentley shoot". No plugin install needed; read-only is safe.
+- 🟧 **Anthropic prompt caching** — when `LLM_PROVIDER=anthropic`, wrap system+tools in `cache_control: ephemeral`. ~90% input-token cost cut + ~500ms TTFT improvement on repeat turns. Cloud-only — no effect on Ollama.
+- 🟨 **Frame.io official SDK migration** — replace hand-rolled REST client in `bridge/frameio.mjs` with `@frameio/api`. Saves writing types.
+
+### Multi-day projects
+
 - 🟧 🚀 **Live shoot mode (phone-as-mic)** (~1 week) — the one transformative piece of the original Phase 5 plan still missing. Phone walks the studio, real-time captions per shot, "flag this as hero" mid-frame, contact sheet ready by lunch.
+- 🟧 🚀 **Multi-machine memory sync** (~3-5 days) — periodic backup of `data/memory.db` to NAS / shared encrypted folder. Needs conflict-resolution design first.
+- 🟧 ⚙️ **Plugin SDK shape** (~3-5 days) — `bridge/skills/<name>/` convention so new tools drop in without editing `server.mjs`. Architectural — design pass first.
 - 🟨 ⚙️ **Containerised render env polish** (~3-5 days) — Docker per video job with ffmpeg + ImageMagick + exiftool pre-baked. Scaffold ships behind `RENDER_USE_DOCKER=1`; reliable parity with host pipeline isn't done.
-- 🟨 **Lane-grouped progress viz** (~1-2 days) — video pipeline stages as parallel lanes in the task strip. Bonus for client demos: they watch the work happen.
+- 🟨 **Lane-grouped progress viz** (~1-2 days) — video pipeline stages as parallel lanes in the task strip.
 - 🟩 **Tablet/iPad responsive variant** (~2-3 days) — operator's iPad mirrors HUD when away from desk.
 - 🟩 **Layout customisation** (~3 days) — drag panels to reposition, save per-profile.
 
-### Things I'd file under "could meaningfully sharpen"
+### Needs Adam's involvement
 
-Not in the original TODO but real opportunities:
+- 🟧 **Argos / Amazon UK / MPB checkout codegen** — adapter scaffolds shipped weeks ago, click-by-click checkout intentionally stubbed. Needs Playwright codegen against a real logged-in basket session.
+- 🟨 **Hand-over doc with screenshots** — full visual walkthrough of installation + setup. Needs Adam's screenshots from a fresh M-series Mac install.
 
-- 🟧 **MLX-accelerated Whisper** (~half day) — currently `faster-whisper` runs CPU int8. MLX-whisper runs on Apple GPU, 2-3× faster STT. Drops voice-loop floor from ~1.5s to ~700ms.
-- 🟧 **Streaming Whisper (partial transcripts)** (~1 day) — start the LLM call as soon as a confident partial transcript exists, not at end-of-utterance. Saves ~300-500ms.
-- 🟨 **Fast-path expansion** (~ongoing) — current `bridge/fast-path.mjs` covers ~10 patterns. As Adam uses the kiosk, common queries that fall through to the LLM should migrate to fast-path. A `fast-path candidates` log entry could surface these automatically.
-- 🟨 **Cancel-from-HUD button** (~30 min) — there's a `cancel_active_jobs` tool now and a `/cancel` HTTP endpoint, but no visible button. A small X on the active task strip would make it discoverable.
-- 🟨 **First-run wake-word training** (~half day) — current install asks for a wake phrase but doesn't validate the operator's accent against it. A 30-second mic test on first boot could tighten the false-positive rate.
+### Already evaluated and discarded — don't waste time
+
+- ❌ **MLX-LM for the chat model** — tested 7th May 2026; Ollama wins on hot TTFT (74ms vs 133ms) due to its prefix cache. MLX wins cold start but `KEEP_ALIVE=24h` keeps weights hot.
+- ❌ **Kokoro sub-sentence streaming** — tested 7th May 2026; `create_stream` yields one chunk per sentence. No latency win at sentence granularity.
 
 ### Borrowable from competitor / adjacent projects
 
@@ -76,6 +86,28 @@ The bottleneck on local hardware is one Ollama process serving requests sequenti
 - ❌ **OpenAI Agents SDK (Swarm successor)** — Python-only, would require a Python service alongside the Node bridge. The orchestration patterns it ships are simpler than CrewAI's; we can replicate them in `bridge/crew.mjs` without taking on a Python runtime.
 
 **Why this matters more than other items in this section:** Adam asked about it directly. The infrastructure to make it work (pluggable providers, cost telemetry, tool router, cancel) is all already shipped in PR #1. The crew orchestrator is the natural follow-on — it's the layer that turns "Jarvis runs one tool at a time" into "Jarvis dispatches a task force when the workload justifies it".
+
+---
+
+## Shipped — sprint of 2026-05-06 → 2026-05-07
+
+The big push. Voice loop ~3-4× faster end-to-end, voice.js -48% in size, real test net in place.
+
+- ✅ **MLX-accelerated Whisper** (commit `9ed7d36`) — 6.78× faster STT (3080ms → 450ms hot on a 7.8s clip). `whisper_server.py` auto-selects MLX on Apple Silicon, falls back to faster-whisper. Bridge `/healthz` surfaces active backend; HUD pip tooltip shows it.
+- ✅ **Tier-1 voice-loop latency wins** (`0453e12`) — `SILENCE_MS` 1400→800ms, faster-whisper VAD 300→150ms, deferred filler with cancel-on-first-sentence. ~1s shaved off every turn.
+- ✅ **Speculative mid-utterance whisper partial** (`9da199c`) — fires at chunk #6 (~1.5s), uses partial directly if silence-detect arrives within 1s. Saves another ~450ms on short queries.
+- ✅ **Ollama prefix-cache fix** (`101f0a4`) — local time was in SYSTEM, invalidated cache every minute. Moved to user message; SYSTEM stable through the whole day → consistent 74ms TTFT.
+- ✅ **Filler-phrase TTS cache** (`c86d7ed`) — first call pays full Kokoro synth (~400-1100ms), every repeat returns cached WAV in ~10ms. ~100× speedup on warm fillers.
+- ✅ **HUD STOP button** (`3e6e4e4`) — visible kill-switch above the active-task strip. Per-task × buttons deferred (`/cancel` is global today).
+- ✅ **Wake-word check button** (`62482f0`) — settings modal records 3s, transcribes via Whisper, runs `WakeParse.containsWake` — pass/fail verdict pill.
+- ✅ **Vitest scaffold + 58 tests** (`a3b89f3` + `6c1671e`) — fast-path regression coverage including all of Adam's reported phrasings, plus tool-router fallback paths. `npm test` runs in ~140ms.
+- ✅ **5 fast-path gap closes** (`6c1671e`) — `whats the time` (no apostrophe), `what time is it right now` (trailing context), `set timer for 10 minutes`, `sleep mode` / `go quiet` / `shush`, `thats all` / `thats enough`.
+- ✅ **Scope-refusal bug fix** (`c0a2417`) — Adam reported "I'm only here for automotive Flat-Out tasks" refusal on map queries. Fast-path regex liberalised + SYSTEM prompt got an explicit "DO NOT REFUSE GENERAL TASKS" block.
+- ✅ **macOS device-change auto-recovery** (`892f0cb`) — listens for `navigator.mediaDevices.devicechange`, drops cached `wf.micStream` + analyser when the operator switches input. Self-healing.
+- ✅ **Whisper `initial_prompt` slim** (`126ed65`) — example sentences ("Hey Flat-Out, what's the time?") were biasing Whisper toward "what's" hallucinations on quiet clips. Brand tokens only now.
+- ✅ **Passive cycle ReferenceError fix** (`e68b563`) — voice.js extraction removed `WHISPER_URL` const but cyclePassive still referenced it. Every wake-detect attempt was failing silently. Restored.
+- ✅ **CONTRIBUTING.md** (`892f0cb`) — workflow guide for Adam to use Claude Code on the codebase: branch convention, commit style, service map, test commands, curated task list.
+- ✅ **voice.js extractions × 6** (3105 → 1620 LOC, -48%): wake-parsing (`00f2705`), settings-modal (`7cb0616`, -1000 LOC), setup-modal (`15000b5`), mic-test (`d2fb671`), timer-hud (`9466003`), whisper-stt (`c0883cf`).
 
 ---
 
