@@ -60,6 +60,7 @@ import * as Transcribe from "./transcribe.mjs";
 import * as UsageLog from "./usage-log.mjs";
 import * as EodDigest from "./eod-digest.mjs";
 import * as FastPath from "./fast-path.mjs";
+import * as Crew from "./crew.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1795,6 +1796,55 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "spawn_crew",
+      description:
+        "Spawn a multi-agent crew to tackle a task that benefits from role-splitting or parallel execution. Use for: structured pipelines (research → draft → format), comparison tasks across multiple sources (compare lenses across WEX/MPB/Park Cameras), or any workload where multiple sub-agents working independently produces a better result than one agent doing it all sequentially. Sub-agents can use cloud providers (anthropic / openai) for true parallelism — local Ollama agents serialise behind a single GPU slot.",
+      parameters: {
+        type: "object",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["sequential", "parallel"],
+            description: "sequential = pipeline (each task waits for upstream). parallel = independent tasks run simultaneously (cloud-only — Ollama serialises).",
+          },
+          agents: {
+            type: "array",
+            description: "Agent specs. Each: { id, role, goal, provider?, model?, maxSteps? }. provider defaults to the workload-routed default (usually ollama).",
+            items: {
+              type: "object",
+              properties: {
+                id:       { type: "string", description: "Unique within the crew." },
+                role:     { type: "string", description: "Short title — e.g. 'WEX researcher', 'press release drafter'." },
+                goal:     { type: "string", description: "What this agent is trying to accomplish, in one sentence." },
+                provider: { type: "string", enum: ["anthropic", "openai", "ollama"], description: "Optional override — for parallel mode at least one cloud agent is required." },
+              },
+              required: ["id", "role", "goal"],
+            },
+          },
+          tasks: {
+            type: "array",
+            description: "Task specs. Each: { id, description, agentId, dependsOn?, expectedOutput? }. dependsOn lists upstream task ids whose results pass into this task's context.",
+            items: {
+              type: "object",
+              properties: {
+                id:             { type: "string" },
+                description:    { type: "string" },
+                agentId:        { type: "string" },
+                dependsOn:      { type: "array", items: { type: "string" } },
+                expectedOutput: { type: "string" },
+              },
+              required: ["id", "description", "agentId"],
+            },
+          },
+          maxParallel: { type: "number", description: "Max concurrent agents in parallel mode. Default 4, max 8. Sequential mode ignores this." },
+        },
+        required: ["mode", "agents", "tasks"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "request_eod_digest",
       description: "Generate the operator's end-of-day activity digest — replies count, purchases made (settled + blocked), renders shipped, files dropped into the inbox, top tools used, LLM spend. Use when operator says 'what did I do today', 'summarise my day', 'daily wrap'. Returns a structured JSON plus a plain-text version the LLM can read aloud verbatim.",
       parameters: {
@@ -1879,6 +1929,9 @@ Tasks.setBroadcaster(broadcastToClients);
 /* Wire the personal-assistant timer broadcaster — fires timer.set/timer.fire/timer.cancel
  * events the HUD listens for to render the countdown badge + speak the label on fire. */
 Personal.setBroadcaster(broadcastToClients);
+/* Wire the crew orchestrator — emits crew.started / crew.agent.* / crew.complete
+ * events the HUD will surface as parallel lanes once that UI ships. */
+Crew.setBroadcaster(broadcastToClients);
 /* Wire the notifications scheduler. Each emitter calls back into broadcastToClients
  * via this hook. Tier 1-4+6 from the operator's pick list — calendar reminders,
  * press-radar pings, mail digest, frame.io activity, bridge health. */
@@ -2004,6 +2057,10 @@ const PLAN_PROPOSED_TOOLS = new Set([
   "request_browse",
   /* Transcribe: 30-90s job. Plan-stage so operator sees what's happening. */
   "transcribe_video",
+  /* Crew: multi-agent dispatch is high-leverage and high-cost (multiple LLM
+   * calls per crew). Plan-broadcast surfaces the agent count + cost shape
+   * before the parallel fan-out fires. */
+  "spawn_crew",
   /* Personal-assistant tools that touch the operator's wider digital life —
    * iMessage and music are visible to other people / out of the HUD. Plan-stage
    * the intent so the operator can interrupt before send/play. */
@@ -2047,6 +2104,12 @@ function summariseToolCall(name, args) {
       return `Transcribe video: ${(a.path || "(?)").slice(0, 60)}${a.includeVisual === false ? " (audio only)" : ""}`;
     case "request_eod_digest":
       return `End-of-day digest`;
+    case "spawn_crew": {
+      const mode = a.mode || "?";
+      const agentCount = Array.isArray(a.agents) ? a.agents.length : 0;
+      const taskCount = Array.isArray(a.tasks) ? a.tasks.length : 0;
+      return `Spawn ${mode} crew · ${agentCount} agents · ${taskCount} tasks`;
+    }
     case "request_browse":
       return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
     case "open_url":
@@ -2194,6 +2257,28 @@ async function _executeToolInner(name, args) {
       const digest = await EodDigest.buildDigest(args || {});
       digest.spoken = EodDigest.digestToText(digest);
       return digest;
+    }
+    case "spawn_crew": {
+      /* Crew validation lives inside runCrew — the LLM gets a clean error
+       * envelope back if the spec is malformed (missing agentId, circular
+       * dependsOn, all-ollama parallel, etc). On success, returns the
+       * aggregated results array + cost + elapsed. */
+      const result = await Crew.runCrew(args || {});
+      /* Audit broadcast for the HUD — crew's own events fired during the
+       * run; this final envelope marks completion in the agent console. */
+      broadcastToClients({
+        type: "crew.recorded",
+        data: {
+          crewId: result.crewId,
+          ok: result.ok,
+          mode: result.mode,
+          taskCount: result.taskCount,
+          totalCostUSD: result.totalCostUSD,
+          totalElapsedMs: result.totalElapsedMs,
+          error: result.error || null,
+        },
+      });
+      return result;
     }
     case "cancel_active_jobs": {
       Vision.raiseAbort();
@@ -3174,6 +3259,15 @@ const httpServer = createServer(async (req, res) => {
       toolCount: TOOLS.length,
       toolRouter: ToolRouter.indexStatus(),
     }));
+    return;
+  }
+
+  /* GET /crew/concurrency — provider in-flight + queue snapshot. Useful
+   * for debugging "why is this crew taking forever" when ollama agents
+   * are queueing serially behind a single GPU slot. */
+  if (req.url === "/crew/concurrency" && req.method === "GET") {
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, ...Crew.concurrencyStatus() }));
     return;
   }
 
