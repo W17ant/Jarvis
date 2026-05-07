@@ -649,6 +649,29 @@
           <small>Reach the HUD from your phone in Safari (with HTTPS for mic access). Tailscale is private mesh networking — no port forwarding, no public exposure. Authentication is browser-based SSO with your existing Google / GitHub / Apple account; there's no separate password.</small>
         </div>
 
+        <!-- iMessage inbound listener — opt-in. Polls chat.db every N seconds
+             and forwards messages from allow-listed senders that start with
+             the trigger phrase. Reply goes back via the standard send_imessage
+             path. Requires Full Disk Access (macOS prompts on first read). -->
+        <div class="settings-modal__field" id="settingsImessageField">
+          <label><img src="assets/icons/microphone.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>iMessage inbound</label>
+          <div class="settings-modal__row settings-modal__row--inline">
+            <label class="settings-modal__check">
+              <input type="checkbox" id="settingsImessageEnabled" />
+              <span>Enable inbound iMessage</span>
+            </label>
+            <span id="settingsImessageStatus" class="settings-modal__wake-status">—</span>
+          </div>
+          <div class="settings-modal__row">
+            <input id="settingsImessageSenders" type="text" placeholder="Allowed senders (comma-separated phones / emails)" autocomplete="off" />
+          </div>
+          <div class="settings-modal__row settings-modal__row--inline">
+            <input id="settingsImessageTrigger" type="text" placeholder="Trigger phrase — e.g. hey flat-out" autocomplete="off" />
+            <input id="settingsImessagePoll" type="number" min="1" max="60" placeholder="Poll (s)" />
+          </div>
+          <small>Text Jarvis from your phone. Only allow-listed senders can trigger; only messages starting with the trigger phrase forward to the LLM. Replies skip the voice-confirmation gate (your inbound message IS the consent). Requires Full Disk Access in <a href="x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" target="_blank">System Settings → Privacy</a>.</small>
+        </div>
+
         <div class="settings-modal__field">
           <label><img src="assets/icons/map-pin-line.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Location</label>
           <div class="settings-modal__row settings-modal__row--searchable">

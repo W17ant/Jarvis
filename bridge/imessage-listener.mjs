@@ -251,17 +251,44 @@ export function stop() {
   if (_pollHandle) { clearInterval(_pollHandle); _pollHandle = null; _onMessage = null; }
 }
 
-/** Diagnostic snapshot for /imessage/status. */
+/** Diagnostic snapshot for /imessage/status. Returns the FULL config so
+ *  the settings UI can pre-populate fields (allowedSenders + trigger +
+ *  poll interval). lastRowId is also included for the diagnostic tab. */
 export async function status() {
   const config = await loadConfig();
   const state = await loadState();
   return {
     running: !!_pollHandle,
     enabled: config.enabled,
+    allowedSenders: config.allowedSenders,
     allowedSenderCount: config.allowedSenders.length,
     trigger: config.trigger,
     pollIntervalMs: config.pollIntervalMs,
     lastRowId: state.lastRowId,
     chatDbReachable: await fsp.access(CHAT_DB).then(() => true, () => false),
   };
+}
+
+/** Save config to disk. The poll loop reads the file every tick, so the
+ *  next poll picks up changes automatically — no listener restart needed.
+ *
+ *  Validates fields server-side: enabled boolean, allowedSenders array
+ *  of strings, trigger non-empty, pollIntervalMs clamped to 1-60s. Bad
+ *  inputs are coerced to safe defaults rather than rejected so the
+ *  settings UI can't put the listener into an unbootable state. */
+export async function saveConfig(input = {}) {
+  const config = {
+    _comment: DEFAULT_CONFIG._comment,
+    enabled: !!input.enabled,
+    allowedSenders: Array.isArray(input.allowedSenders)
+      ? input.allowedSenders.map((s) => String(s).trim()).filter(Boolean)
+      : [],
+    trigger: String(input.trigger || DEFAULT_CONFIG.trigger).toLowerCase().trim(),
+    pollIntervalMs: Math.max(1000, Math.min(60_000, Number(input.pollIntervalMs) || DEFAULT_CONFIG.pollIntervalMs)),
+  };
+  if (!config.trigger) config.trigger = DEFAULT_CONFIG.trigger;
+  await fsp.mkdir(path.dirname(CONFIG_PATH), { recursive: true });
+  await fsp.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2));
+  console.log(`[imessage] config saved · enabled=${config.enabled} · ${config.allowedSenders.length} allowed sender(s) · trigger="${config.trigger}"`);
+  return config;
 }

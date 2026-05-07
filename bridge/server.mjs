@@ -3646,6 +3646,33 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  /* POST /imessage/config — persist new listener config from the settings
+   * modal. Body: { enabled, allowedSenders[], trigger, pollIntervalMs }.
+   * Saved to data/imessage-config.json which the poll loop re-reads each
+   * tick — change takes effect within one poll interval, no restart. */
+  if (req.url === "/imessage/config" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => body += c);
+    req.on("end", async () => {
+      let parsed;
+      try { parsed = JSON.parse(body); }
+      catch (e) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: `bad json: ${e.message}` }));
+        return;
+      }
+      try {
+        const saved = await IMessageListener.saveConfig(parsed);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, config: saved }));
+      } catch (e) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
   /* GET /crew/concurrency — provider in-flight + queue snapshot. Useful
    * for debugging "why is this crew taking forever" when ollama agents
    * are queueing serially behind a single GPU slot. */

@@ -118,6 +118,12 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   const previewBtn = document.getElementById("settingsVoicePreview");
   const wakeTestBtn = document.getElementById("settingsWakeTest");
   const wakeStatusEl = document.getElementById("settingsWakeStatus");
+  /* iMessage listener config — read on modal open, persist on save. */
+  const imessageEnabled = document.getElementById("settingsImessageEnabled");
+  const imessageSenders = document.getElementById("settingsImessageSenders");
+  const imessageTrigger = document.getElementById("settingsImessageTrigger");
+  const imessagePoll = document.getElementById("settingsImessagePoll");
+  const imessageStatusEl = document.getElementById("settingsImessageStatus");
   const saveBtn = document.getElementById("settingsSave");
   const cancelBtn = document.getElementById("settingsCancel");
   const closeBtn = document.getElementById("settingsClose");
@@ -284,6 +290,33 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
         detectedLocation = { city: op.city, country: op.country, latitude: op.latitude, longitude: op.longitude, timezone: op.timezone };
       }
     } catch {}
+
+    /* iMessage listener config — fetch current state and pre-populate.
+     * Status pill shows running / disabled / FDA-required. */
+    if (imessageEnabled) {
+      try {
+        const r = await fetch("http://localhost:8766/imessage/status");
+        if (r.ok) {
+          const j = await r.json();
+          imessageEnabled.checked = !!j.enabled;
+          imessageSenders.value = (j.allowedSenders || []).join(", ");
+          imessageTrigger.value = j.trigger || "hey flat-out";
+          imessagePoll.value = Math.round((j.pollIntervalMs || 5000) / 1000);
+          if (imessageStatusEl) {
+            imessageStatusEl.classList.remove("is-pass", "is-fail");
+            if (!j.chatDbReachable) {
+              imessageStatusEl.textContent = "needs Full Disk Access";
+              imessageStatusEl.classList.add("is-fail");
+            } else if (j.enabled && j.allowedSenderCount > 0) {
+              imessageStatusEl.textContent = `running · ${j.allowedSenderCount} sender(s)`;
+              imessageStatusEl.classList.add("is-pass");
+            } else {
+              imessageStatusEl.textContent = j.enabled ? "no allowed senders yet" : "disabled";
+            }
+          }
+        }
+      } catch (e) { console.warn("imessage status fetch failed:", e.message); }
+    }
 
     /* Camera mode is a local-only setting (privacy on the device). Read from Storage,
      * write back on save — no bridge round-trip needed. */
@@ -651,6 +684,41 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
       return;
     }
 
+    /* iMessage listener config — POST whenever any field changed. The
+     * server validates + writes to data/imessage-config.json; the running
+     * poll loop re-reads on next tick (no restart needed). */
+    let imessageChanged = false;
+    let imessageError = null;
+    if (imessageEnabled) {
+      try {
+        const senders = (imessageSenders.value || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const trigger = (imessageTrigger.value || "hey flat-out").trim();
+        const pollSec = parseInt(imessagePoll.value, 10);
+        const pollIntervalMs = Math.max(1000, Math.min(60_000, (pollSec || 5) * 1000));
+        const r = await fetch("http://localhost:8766/imessage/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            enabled: !!imessageEnabled.checked,
+            allowedSenders: senders,
+            trigger,
+            pollIntervalMs,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok || !d.ok) throw new Error(d.error || `bridge ${r.status}`);
+        imessageChanged = true;
+      } catch (e) { imessageError = e.message; }
+    }
+    if (imessageError) {
+      setStatus(`imessage: ${imessageError}`, "error");
+      saveBtn.disabled = false;
+      return;
+    }
+
     /* Resolve location: only send if the operator actually edited the city field. */
     const enteredCity = (cityInput.value || "").trim();
     const previousCity = detectedLocation?.city ? `${detectedLocation.city}${detectedLocation.country ? ", " + detectedLocation.country : ""}` : "";
@@ -735,6 +803,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
       if (styleChanged) parts.push("style guide updated");
       if (d.updated.socials) parts.push("socials updated");
       if (apiKeysChanged) parts.push("API keys updated");
+      if (imessageChanged) parts.push("iMessage config updated");
       setStatus(parts.length ? `saved · ${parts.join(", ")}` : "no changes", "ok");
       /* Don't revert colour on close — operator just confirmed it. */
       pendingColour = null;

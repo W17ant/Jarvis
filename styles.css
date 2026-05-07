@@ -2628,6 +2628,18 @@ body.is-demo .waveform { height: 76px; }
  * Limited to 5 results; Open-Meteo's geocoding API is free and disambiguates
  * Manchester-UK vs Manchester-NH cleanly when the operator picks the right one. */
 .settings-modal__row--searchable { position: relative; }
+
+/* Inline row — checkbox + status pill on one line, or two side-by-side
+ * inputs (trigger phrase + poll interval). Keeps vertical density tight
+ * for compact opt-in panels like the iMessage block. */
+.settings-modal__row--inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.settings-modal__row--inline > input[type="number"] { max-width: 100px; }
 .settings-modal__suggest {
   position: absolute;
   top: calc(100% + 4px);
