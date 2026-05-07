@@ -137,7 +137,10 @@ def _transcribe_faster_whisper(path: str, want_segments: bool) -> dict:
         path,
         language="en",
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
+        # Why: was 300ms — pairs with the HUD-side silence-watcher tail (now 800ms).
+        # 150ms lets the VAD release sooner so trailing-silence trim happens within
+        # the captured clip, shaving ~150ms off the transcribe wall-clock.
+        vad_parameters={"min_silence_duration_ms": 150},
         beam_size=5,
         best_of=5,
         temperature=[0.0, 0.2, 0.4],

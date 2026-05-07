@@ -613,6 +613,11 @@ let currentSpeechSession = null;
 function cancelCurrentSpeech() {
   if (!currentSpeechSession) return;
   currentSpeechSession.cancelled = true;
+  /* Why: an unfired filler timer would otherwise enqueue a phantom sentence
+   * AFTER barge-in / cancel — operator interrupts with "stop" and then hears
+   * "Let me check…" 200ms later. Defensive: also harmless if filler already
+   * fired. */
+  if (currentSpeechSession.cancelPendingFiller) currentSpeechSession.cancelPendingFiller();
   TTS.cancelTTS();
   /* Resolve the in-flight finished promise so the caller's await speakStream() unblocks
    * and the state transition to idle happens immediately. */
@@ -636,18 +641,33 @@ async function speakStream(query, history) {
   wf.mode = "speaking-real";
   if (recDestination) { try { TTS.setRecordingDestination(recDestination); } catch {} }
 
-  /* Filler phrase — speak a randomised acknowledgement immediately so audio reaches
-   * the operator within ~200ms. The filler enters the same TTS queue as the streamed
-   * sentences, so the LLM's actual reply naturally plays AFTER the filler finishes.
+  /* Filler phrase — randomised acknowledgement that buys time while the LLM thinks.
    *
-   * Pick the longer filler pool when the query contains slow-tool keywords (diary,
-   * shoot, render, etc) — gives the operator more substantial audio to listen to
-   * while the LLM + AppleScript / vision / ffmpeg work runs. Short pool for
-   * everyday chat where the reply will arrive in ~1s anyway. */
+   * Why deferred: with MLX Whisper at ~450ms STT and qwen2.5 streaming first
+   * sentence in ~600-800ms, fast queries used to play "Let me check…" right
+   * before a one-sentence answer — the filler doubled the perceived reply
+   * length. We now schedule the filler on a 600ms fuse and cancel it the
+   * moment the LLM emits its first sentence. Slow queries (diary / shoot /
+   * vision tasks) still hear filler because they take >600ms; fast queries
+   * skip it entirely.
+   *
+   * Pick the longer filler pool when the query contains slow-tool keywords
+   * (diary, shoot, render, etc) — gives the operator more substantial audio
+   * to listen to while the LLM + AppleScript / vision / ffmpeg work runs. */
   const filler = TTS.pickFiller({ long: TTS.looksSlow(query) });
-  TTS.enqueueSentence(filler, getKokoroVoice());
+  const FILLER_DELAY_MS = 600;
+  let fillerEnqueued = false;
+  let fillerTimer = setTimeout(() => {
+    fillerEnqueued = true;
+    TTS.enqueueSentence(filler, getKokoroVoice());
+  }, FILLER_DELAY_MS);
+  /* Helper for the streamSentence handler to abort the unfired filler when
+   * the real reply beats the fuse. Idempotent. */
+  const cancelPendingFiller = () => {
+    if (fillerTimer) { clearTimeout(fillerTimer); fillerTimer = null; }
+  };
 
-  const session = { runId: null, cancelled: false, accumulated: "", resolveEarly: null };
+  const session = { runId: null, cancelled: false, accumulated: "", resolveEarly: null, cancelPendingFiller };
   currentSpeechSession = session;
 
   /* Start the barge-in monitor — fires cancelCurrentSpeech() if the operator's voice
@@ -667,6 +687,9 @@ async function speakStream(query, history) {
       if (session.runId && msg.runId !== session.runId) return;
       const sentence = msg.data?.text || msg.text;
       if (!sentence) return;
+      /* Real reply beat the filler fuse — kill the pending filler so the
+       * operator doesn't hear "Let me check…" right before a fast answer. */
+      cancelPendingFiller();
       TTS.enqueueSentence(sentence, getKokoroVoice());
       /* Stream the same text into the on-screen transcript so the operator sees + hears
        * in lockstep. Append rather than replace so the full reply scrolls in. */
@@ -1379,7 +1402,14 @@ function stopListening() {
  *  in wfStartListening) and computes RMS. Once RMS stays below threshold for THRESHOLD_MS, stop. */
 function startSilenceWatcher() {
   const SILENCE_RMS = 0.012;
-  const SILENCE_MS = 1400;
+  /* Why: was 1400ms — operators sat through a noticeable pause after every
+   * utterance. With MLX Whisper at ~450ms hot, this silence-tail became the
+   * largest fixed cost in the loop. 800ms keeps a small mid-sentence pause
+   * tolerance (a quick breath / "and uh") while shaving 600ms off every turn.
+   * The MIN_TALK_MS guard below still requires real speech before silence
+   * detection arms, so a quick taps-the-wake-button-and-says-nothing can't
+   * cause a 800ms phantom record. */
+  const SILENCE_MS = 800;
   const MIN_TALK_MS = 600;        // require some voice activity first
   let lastVoiceAt = Date.now();
   let everSpoke = false;
