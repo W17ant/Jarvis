@@ -63,6 +63,7 @@ import * as FastPath from "./fast-path.mjs";
 import * as Crew from "./crew.mjs";
 import * as CrewHelpers from "./crew-helpers.mjs";
 import * as StudioMap from "./studio-map.mjs";
+import * as IMessageListener from "./imessage-listener.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1967,6 +1968,48 @@ Personal.setBroadcaster(broadcastToClients);
  * / etc on top of the chat() call (without it, agents are chat-only). */
 Crew.setBroadcaster(broadcastToClients);
 Crew.setToolDispatch({ tools: TOOLS, executeTool });
+
+/* Inbound iMessage listener — disabled by default (operator opts in via
+ * data/imessage-config.json). When enabled and an allowlisted sender
+ * sends a message starting with the trigger phrase, we strip the trigger
+ * and forward the rest through askLLMStream — same loop as voice — and
+ * reply via the existing send_imessage tool path. The reply skips the
+ * usual confirmation gate since the operator initiated by texting in
+ * (their explicit consent IS the inbound message itself). */
+IMessageListener.start(async ({ from, body, raw }) => {
+  console.log(`[imessage] inbound from ${from}: "${body.slice(0, 80)}"`);
+  /* Plan-broadcast so the HUD shows the inbound + impending reply. */
+  broadcastToClients({
+    type: "imessage.inbound",
+    data: { from, body: body.slice(0, 200), receivedAt: Date.now() },
+  });
+  let reply = "";
+  try {
+    /* sessionId tags imessage turns separately so the H drawer can show
+     * "this thread" filtered to just iMessage exchanges. */
+    reply = await askLLMStream({
+      query: body,
+      history: [],
+      sessionId: `imessage:${from}`,
+      onSentence: () => {}, /* no streaming TTS — text-only reply */
+    });
+  } catch (e) {
+    reply = `Sorry — bridge error: ${e.message}`;
+  }
+  if (!reply || !reply.trim()) reply = "Acknowledged.";
+  /* Send the reply via the same tool the LLM uses. Pass confirmed:true
+   * to bypass the voice confirmation gate — the operator's text IS the
+   * confirmation, asking again over text would be infinite-loop bait. */
+  try {
+    await Personal.sendIMessage({ to: from, body: reply.slice(0, 1500), confirmed: true });
+    broadcastToClients({
+      type: "imessage.replied",
+      data: { to: from, body: reply.slice(0, 200) },
+    });
+  } catch (e) {
+    console.warn(`[imessage] reply send failed: ${e.message}`);
+  }
+});
 /* Wire the notifications scheduler. Each emitter calls back into broadcastToClients
  * via this hook. Tier 1-4+6 from the operator's pick list — calendar reminders,
  * press-radar pings, mail digest, frame.io activity, bridge health. */
@@ -3316,6 +3359,17 @@ const httpServer = createServer(async (req, res) => {
       toolCount: TOOLS.length,
       toolRouter: ToolRouter.indexStatus(),
     }));
+    return;
+  }
+
+  /* GET /imessage/status — diagnostic for the inbound iMessage poller.
+   * Surfaces whether the listener is running, whether the operator has
+   * opted in via data/imessage-config.json, the allowlist size, and
+   * whether chat.db is readable (Full Disk Access proxy). */
+  if (req.url === "/imessage/status" && req.method === "GET") {
+    const status = await IMessageListener.status();
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, ...status }));
     return;
   }
 

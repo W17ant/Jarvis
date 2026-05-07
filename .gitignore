@@ -32,6 +32,7 @@ data/*
 # screenshots/, browse-traces/) stay caught by data/* above.
 !data/spending-limits.json
 !data/merchant-allowlist.json
+!data/imessage-config.json
 
 # Inbox watcher target. Operator drops files here. Per-install, never commit.
 inbox/
