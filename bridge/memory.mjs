@@ -85,6 +85,57 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
 );
 CREATE INDEX IF NOT EXISTS idx_conversation_turns_ts ON conversation_turns(ts);
 CREATE INDEX IF NOT EXISTS idx_conversation_turns_session ON conversation_turns(session_id, ts);
+
+/* Document RAG — knowledge base of operator-curated reference docs.
+ * Distinct from operator memory (facts/contacts/projects): documents are
+ * STATIC reference material (brand briefs, client onboarding PDFs, past
+ * press releases) the LLM cites from. Chunks carry their own embedding
+ * for cosine search; FTS5 virtual table below gives keyword search for
+ * hybrid retrieval. */
+CREATE TABLE IF NOT EXISTS documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  path TEXT NOT NULL UNIQUE,           -- absolute path on disk
+  rel_path TEXT NOT NULL,              -- relative to knowledge root, for display
+  format TEXT NOT NULL,                -- "txt" | "md" | "pdf" | "docx" | "html"
+  bytes INTEGER NOT NULL,
+  hash TEXT NOT NULL,                  -- sha256 of file content; used to detect changes
+  mtime_ms INTEGER NOT NULL,
+  ingested_at INTEGER NOT NULL,
+  chunk_count INTEGER NOT NULL DEFAULT 0,
+  title TEXT,                          -- best-effort title (first heading or filename)
+  notes TEXT                           -- operator-supplied free-form metadata, optional
+);
+CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path);
+CREATE INDEX IF NOT EXISTS idx_documents_format ON documents(format);
+
+CREATE TABLE IF NOT EXISTS doc_chunks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  embedding BLOB,                      -- 768-dim float32, NULL until embedded
+  char_start INTEGER NOT NULL,
+  char_end INTEGER NOT NULL,
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_doc_chunks_document ON doc_chunks(document_id);
+
+/* FTS5 virtual table over chunk content. Lets us do keyword / phrase
+ * search alongside vector similarity for hybrid retrieval. We materialise
+ * the content into the FTS shadow table at insert time; the rowid links
+ * back to doc_chunks.id so we can join scores. */
+CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(
+  content,
+  content='doc_chunks',
+  content_rowid='id',
+  tokenize='porter unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS doc_chunks_ai AFTER INSERT ON doc_chunks BEGIN
+  INSERT INTO doc_chunks_fts(rowid, content) VALUES (new.id, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS doc_chunks_ad AFTER DELETE ON doc_chunks BEGIN
+  INSERT INTO doc_chunks_fts(doc_chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
+END;
 `);
 
 /* ---------- EMBEDDINGS via Ollama ---------- */
@@ -295,6 +346,161 @@ export function recentTurns({ limit = 50, beforeTs = null, sessionId = null } = 
     content: r.content,
     tools: r.tools_json ? (() => { try { return JSON.parse(r.tools_json); } catch { return []; } })() : [],
   }));
+}
+
+/* ---------- DOCUMENT RAG STORAGE ----------
+ * Schema lives at top of file. These functions are the storage primitives;
+ * the chunking/parsing logic lives in bridge/knowledge.mjs which calls
+ * here to persist + retrieve. */
+
+/** Insert (or replace) a document row. If a document with the same path
+ *  already exists, we delete it first (CASCADE drops its chunks too) so
+ *  re-ingest is a clean operation. Returns the new id. */
+export function upsertDocument({ path: filePath, relPath, format, bytes, hash, mtimeMs, title = null, notes = null }) {
+  if (!filePath) throw new Error("path required");
+  db.prepare("DELETE FROM documents WHERE path = ?").run(filePath);
+  const r = db.prepare(`INSERT INTO documents
+    (path, rel_path, format, bytes, hash, mtime_ms, ingested_at, chunk_count, title, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`)
+    .run(filePath, relPath, format, bytes, hash, mtimeMs, Date.now(), title, notes);
+  return r.lastInsertRowid;
+}
+
+/** Insert one chunk. The embedding is computed by the caller (knowledge.mjs)
+ *  to keep this module synchronous. Returns the chunk id. */
+export function insertChunk({ documentId, chunkIndex, content, embedding, charStart, charEnd }) {
+  const emb = embedding ? vectorToBuffer(embedding) : null;
+  const r = db.prepare(`INSERT INTO doc_chunks (document_id, chunk_index, content, embedding, char_start, char_end)
+                        VALUES (?, ?, ?, ?, ?, ?)`)
+              .run(documentId, chunkIndex, content, emb, charStart, charEnd);
+  return r.lastInsertRowid;
+}
+
+/** Update a document's chunk_count after all chunks land. */
+export function setDocumentChunkCount(documentId, count) {
+  db.prepare("UPDATE documents SET chunk_count = ? WHERE id = ?").run(count, documentId);
+}
+
+/** Look up a document by path. Used to detect changes pre-ingest:
+ *  if hash matches what's on disk, skip re-ingest. */
+export function getDocumentByPath(filePath) {
+  return db.prepare("SELECT id, path, rel_path, format, bytes, hash, mtime_ms, ingested_at, chunk_count, title FROM documents WHERE path = ?").get(filePath);
+}
+
+/** Drop a document by path (CASCADE deletes its chunks + FTS rows). */
+export function deleteDocumentByPath(filePath) {
+  return db.prepare("DELETE FROM documents WHERE path = ?").run(filePath).changes;
+}
+
+/** All known documents, newest first. Caps at limit to keep response sane. */
+export function listDocuments({ limit = 200 } = {}) {
+  const cap = Math.max(1, Math.min(1000, Number(limit) || 200));
+  return db.prepare(`SELECT id, path, rel_path, format, bytes, mtime_ms, ingested_at, chunk_count, title
+                     FROM documents ORDER BY ingested_at DESC LIMIT ?`).all(cap);
+}
+
+/** Hybrid search across the knowledge base.
+ *
+ *  1. Vector similarity — embed the query, cosine against every chunk
+ *     embedding. Cheap (a few thousand rows × 768 dims is ~5ms).
+ *  2. FTS5 BM25 — keyword/phrase ranking over the FTS shadow table.
+ *  3. Reciprocal Rank Fusion (RRF) — merge the two ranked lists with
+ *     `score = sum(1 / (k + rank_i))` per chunk. RRF is the standard
+ *     "no-tuning" hybrid combiner — it doesn't require calibrating
+ *     vector vs BM25 score scales which would otherwise drift across
+ *     different domains.
+ *
+ *  Returns top-K chunks with source document metadata for citation.
+ */
+export async function searchKnowledge({ query, topK = 8 } = {}) {
+  const q = String(query || "").trim();
+  if (!q) return { ok: false, error: "query required" };
+  const cap = Math.max(1, Math.min(20, Number(topK) || 8));
+
+  /* Vector pass: rank every chunk by cosine. */
+  let qVec;
+  try { qVec = await embed(q.slice(0, 1500)); }
+  catch (e) { return { ok: false, error: `embedding failed: ${e.message}` }; }
+  const allChunks = db.prepare(`SELECT id, document_id, chunk_index, content, embedding FROM doc_chunks WHERE embedding IS NOT NULL`).all();
+  const vectorRanked = allChunks
+    .map((c) => ({ id: c.id, score: cosine(qVec, bufferToVector(c.embedding)), content: c.content, documentId: c.document_id, chunkIndex: c.chunk_index }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, cap * 3);
+
+  /* FTS5 pass: keyword ranking. SQLite escapes special chars natively when
+   * the query is wrapped in double quotes; we additionally split into terms
+   * for OR-style matching so "press launch" matches docs containing either. */
+  const ftsQuery = q.split(/\s+/).filter(Boolean).map((t) => `"${t.replace(/"/g, '""')}"`).join(" OR ");
+  let ftsRanked = [];
+  if (ftsQuery) {
+    try {
+      ftsRanked = db.prepare(`
+        SELECT doc_chunks.id AS id, doc_chunks.document_id AS documentId, doc_chunks.chunk_index AS chunkIndex,
+               doc_chunks.content AS content, bm25(doc_chunks_fts) AS bm25_score
+        FROM doc_chunks_fts JOIN doc_chunks ON doc_chunks.id = doc_chunks_fts.rowid
+        WHERE doc_chunks_fts MATCH ?
+        ORDER BY bm25_score
+        LIMIT ?
+      `).all(ftsQuery, cap * 3);
+    } catch { /* malformed FTS query — skip and rely on vector */ }
+  }
+
+  /* Reciprocal Rank Fusion — k=60 is the published default. */
+  const RRF_K = 60;
+  const fused = new Map();
+  vectorRanked.forEach((c, i) => {
+    fused.set(c.id, { id: c.id, content: c.content, documentId: c.documentId, chunkIndex: c.chunkIndex, score: 1 / (RRF_K + i), vectorRank: i + 1, vectorScore: c.score });
+  });
+  ftsRanked.forEach((c, i) => {
+    const existing = fused.get(c.id);
+    if (existing) {
+      existing.score += 1 / (RRF_K + i);
+      existing.ftsRank = i + 1;
+    } else {
+      fused.set(c.id, { id: c.id, content: c.content, documentId: c.documentId, chunkIndex: c.chunkIndex, score: 1 / (RRF_K + i), ftsRank: i + 1 });
+    }
+  });
+  const merged = [...fused.values()].sort((a, b) => b.score - a.score).slice(0, cap);
+
+  /* Hydrate with document metadata for citation. We pull paths in one
+   * query rather than per-chunk for performance. */
+  const docIds = [...new Set(merged.map((m) => m.documentId))];
+  const docs = docIds.length
+    ? db.prepare(`SELECT id, path, rel_path, format, title FROM documents WHERE id IN (${docIds.map(() => "?").join(",")})`).all(...docIds)
+    : [];
+  const docMap = new Map(docs.map((d) => [d.id, d]));
+
+  return {
+    ok: true,
+    query: q,
+    results: merged.map((m) => {
+      const doc = docMap.get(m.documentId) || {};
+      return {
+        chunkId: m.id,
+        chunkIndex: m.chunkIndex,
+        content: m.content,
+        score: Number(m.score.toFixed(6)),
+        vectorRank: m.vectorRank || null,
+        vectorScore: m.vectorScore != null ? Number(m.vectorScore.toFixed(4)) : null,
+        ftsRank: m.ftsRank || null,
+        source: {
+          documentId: m.documentId,
+          relPath: doc.rel_path,
+          title: doc.title,
+          format: doc.format,
+        },
+      };
+    }),
+  };
+}
+
+/** Aggregate stats for /knowledge/status and the Agent Console. */
+export function knowledgeStats() {
+  const docs = db.prepare("SELECT COUNT(*) AS n FROM documents").get().n;
+  const chunks = db.prepare("SELECT COUNT(*) AS n FROM doc_chunks").get().n;
+  const embedded = db.prepare("SELECT COUNT(*) AS n FROM doc_chunks WHERE embedding IS NOT NULL").get().n;
+  const lastIngest = db.prepare("SELECT MAX(ingested_at) AS ts FROM documents").get().ts;
+  return { documents: docs, chunks, embedded, lastIngestAt: lastIngest || null };
 }
 
 /** Distinct session ids in the last N days, with per-session turn counts.

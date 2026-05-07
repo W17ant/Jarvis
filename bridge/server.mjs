@@ -64,6 +64,7 @@ import * as Crew from "./crew.mjs";
 import * as CrewHelpers from "./crew-helpers.mjs";
 import * as StudioMap from "./studio-map.mjs";
 import * as IMessageListener from "./imessage-listener.mjs";
+import * as Knowledge from "./knowledge.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1799,6 +1800,29 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "search_knowledge",
+      description: "Search the operator's curated knowledge base — brand briefs, client onboarding docs, past press releases, anything they dropped into docs/knowledge/. Hybrid retrieval: vector cosine similarity + BM25 keyword fusion via Reciprocal Rank Fusion. Returns top-K chunks with source citations (rel path, title, format) so replies can quote the source. Use whenever the operator asks something that might be in their docs — 'what did the client brief say about deliverables', 'what's the FOM brand voice on hashtags', 'how did we phrase the Bentley press release'.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Natural-language query. The operator's exact words usually work — the embedder handles paraphrasing." },
+          topK:  { type: "number", description: "How many chunks to return. Default 8, max 20." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ingest_knowledge",
+      description: "Re-scan the docs/knowledge/ folder and ingest any new or changed files. Normally automatic via the file watcher, but call this when the operator explicitly says 'reindex my docs' or after dropping a batch in. Returns counts: ingested, skipped (unchanged), failed, removed.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "studio_map",
       description: "Quick-orient digest of what's in the kiosk right now: active projects, recent shoot folders, upcoming media days, last conversation. Cached for 60s. Use this BEFORE running heavy workflows so you have grounded context — saves a chain of recall + list_projects + list_shoots calls.",
       parameters: {
@@ -1968,6 +1992,17 @@ Personal.setBroadcaster(broadcastToClients);
  * / etc on top of the chat() call (without it, agents are chat-only). */
 Crew.setBroadcaster(broadcastToClients);
 Crew.setToolDispatch({ tools: TOOLS, executeTool });
+
+/* Knowledge base — boot-time ingest of docs/knowledge/ + folder watcher.
+ * Initial scan picks up any files dropped while the bridge was offline;
+ * the watcher fires on subsequent changes (debounced 500ms per path so
+ * editor-staged saves don't cause repeat re-ingests). */
+Knowledge.setBroadcaster(broadcastToClients);
+Knowledge.ingestAll().then((r) => {
+  if (r.ok) console.log(`[knowledge] initial scan: ${r.ingested} ingested, ${r.skipped} unchanged, ${r.failed} failed, ${r.removed || 0} removed (root: ${Knowledge.knowledgeRoot()})`);
+  else console.warn(`[knowledge] initial scan failed: ${r.error}`);
+}).catch((e) => console.warn(`[knowledge] initial scan threw: ${e.message}`));
+Knowledge.startWatcher();
 
 /* Inbound iMessage listener — disabled by default (operator opts in via
  * data/imessage-config.json). When enabled and an allowlisted sender
@@ -2343,6 +2378,8 @@ async function _executeToolInner(name, args) {
     }
     case "compare_products": return await CrewHelpers.compareProducts(args || {});
     case "studio_map":       return await StudioMap.buildStudioMap(args || {});
+    case "search_knowledge": return await Memory.searchKnowledge(args || {});
+    case "ingest_knowledge": return await Knowledge.ingestAll();
     case "spawn_crew": {
       /* Crew validation lives inside runCrew — the LLM gets a clean error
        * envelope back if the spec is malformed (missing agentId, circular
@@ -3359,6 +3396,17 @@ const httpServer = createServer(async (req, res) => {
       toolCount: TOOLS.length,
       toolRouter: ToolRouter.indexStatus(),
     }));
+    return;
+  }
+
+  /* GET /knowledge/status — counts + last ingest time + listed documents.
+   * Used by the Agent Console section to render the indexed-documents
+   * pane. */
+  if (req.url?.startsWith("/knowledge/status") && req.method === "GET") {
+    const stats = Memory.knowledgeStats();
+    const docs = Memory.listDocuments({ limit: 100 });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, ...stats, root: Knowledge.knowledgeRoot(), documents: docs }));
     return;
   }
 
