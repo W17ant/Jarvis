@@ -8,6 +8,7 @@ import * as TTS from "./tts.js";
 import * as Storage from "./storage.js";
 import * as Modal from "./modal-queue.js";
 import * as History from "./history.js";
+import * as WakeParse from "./wake-parsing.js";
 
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
@@ -35,6 +36,9 @@ async function loadBrandIntoVoice() {
       WAKE_VARIANTS = b.agent.wakeMishears.map(s => String(s).toLowerCase());
     }
     if (b?.agent?.name) AGENT_NAME = String(b.agent.name);
+    /* Push brand state into the wake-parsing module so containsWake /
+     * extractQuery use the right variants + agent name. */
+    WakeParse.setBrand({ agentName: AGENT_NAME, wakeVariants: WAKE_VARIANTS });
     console.log(`[voice] brand loaded: agent="${AGENT_NAME}" wake="${WAKE_PHRASE}" variants=${WAKE_VARIANTS.length}`);
   } catch (e) {
     console.warn("[voice] /brand fetch failed, using Flat-Out defaults:", e.message);
@@ -893,60 +897,11 @@ async function playWavWithAnalyser(wavBuffer) {
   });
 }
 
-/** Strip wake word + leading filler from heard text → real query. */
-function extractQuery(text) {
-  let q = text.toLowerCase();
-  for (const v of WAKE_VARIANTS) q = q.replaceAll(v, " ");
-  q = q.replace(/\s+/g, " ").trim();
-  q = q.replace(/^(hey|hi|ok|please|can you|could you|would you)\s+/i, "");
-  return q;
-}
-
-/* Why: legacy fuzzy patterns tuned for Whisper mishearings of "Flat-Out". Only used
- * when the active brand IS Flat-Out — for other agent names the brand.wakeMishears
- * list is the authoritative match set. Adding new fuzzy regexes per client is a
- * setup-wizard step, not something we infer here. */
-const FLATOUT_FUZZY_PATTERNS = [
-  /\b(hey|ay|hi|yo)[,!.\s]*(flat|flap|flag|flank)[\s-]*(out|ow|hour|owt|art|ott)\b/i,
-  /\b(hey|ay|hi|yo)[,!.\s]+(flat|flap)\b/i,
-  /\bflat[\s-]*out\b/i,
-  /\bflat[\s-]*ow\b/i,
-  /\bflatout\b/i,
-];
-
-function containsWake(text) {
-  const t = (text || "").toLowerCase();
-  if (WAKE_VARIANTS.some(v => t.includes(v))) return true;
-  if (AGENT_NAME.toLowerCase() === "flat-out") {
-    return FLATOUT_FUZZY_PATTERNS.some(re => re.test(t));
-  }
-  return false;
-}
-
-/* Why: video-edit intent is now a proper LLM tool (video_edit_from_shoot), no regex shortcut.
- * The LLM extracts subject + decides when to call it — same path as every other capability. */
-
-/** Send a one-shot bridge request and resolve with the reply (used for subject extraction). */
-function bridgeRequest(type, payload, timeoutMs = 15000) {
-  return Bridge.ask({ type, payload }, timeoutMs);
-}
-
-/** Quick regex pull for "of/from the X" phrasings before falling back to the LLM. */
-function quickExtractSubject(query) {
-  const patterns = [
-    /(?:of|from|for)\s+(?:yesterday'?s?|the|a|an)\s+(.+?)\s+(?:shoot|film|footage|reel)/i,
-    /(?:of|from|for|featuring)\s+(?:the|a|an)?\s*(.+?)\s+(?:for|on)\s+(?:instagram|insta|social|stories|reels|youtube|tiktok)/i,
-    /(?:of|from|for|featuring)\s+(?:the|a|an)?\s*(.+?)$/i,
-  ];
-  for (const re of patterns) {
-    const m = query.match(re);
-    if (m && m[1]) {
-      const subject = m[1].trim().replace(/[?!.,;:]+$/, "");
-      if (subject.length >= 3 && subject.length <= 80) return subject;
-    }
-  }
-  return null;
-}
+/* Wake-word + utterance-classification helpers (extractQuery, containsWake,
+ * quickExtractSubject, isAffirmative, isDismissal) live in ./wake-parsing.js
+ * — see WakeParse.* call sites above. The setBrand() call inside
+ * loadBrandIntoVoice() pushes WAKE_VARIANTS + AGENT_NAME into that module
+ * so it has the right state when the parser functions run. */
 
 /* Why: runVideoTeaser + runVideoEdit removed — both were intent-shortcut paths
  * superseded by LLM-driven tool calls (video_edit_from_shoot, generate_youtube_*).
@@ -971,11 +926,6 @@ function isAssistantBusy() {
  * utterance is affirmative we route the file by kind into the matching tool. If it's
  * anything else (silence, "no", a different topic) we drop the pending state. */
 let pendingInboxFile = null;
-
-function isAffirmative(text) {
-  const t = (text || "").toLowerCase().trim();
-  return /^(yes|yeah|yep|sure|go ahead|please|do it|ok(ay)?|sounds good|let's see|let me see|have a look|look)/.test(t);
-}
 
 /** Build the LLM query for an inbox file. Routes by kind so Qwen calls the right tool. */
 function inboxQueryFor(file) {
@@ -1133,7 +1083,7 @@ async function handleHeard(text, isFinal) {
   if (pendingInboxFile) {
     const file = pendingInboxFile;
     pendingInboxFile = null;  // consume regardless of outcome
-    if (isAffirmative(text)) {
+    if (WakeParse.isAffirmative(text)) {
       const inboxQuery = inboxQueryFor(file);
       setState("thinking");
       replyEl.textContent = "…";
@@ -1154,7 +1104,7 @@ async function handleHeard(text, isFinal) {
      * gets processed as a new query rather than getting stuck on the inbox prompt. */
   }
 
-  const query = extractQuery(text);
+  const query = WakeParse.extractQuery(text);
   if (!query) {
     replyEl.textContent = "Yes?";
     speak("Yes?");
@@ -1379,13 +1329,13 @@ async function cyclePassive() {
   // Forward every transcript to bridge log
   fetch("http://localhost:8766/log", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tag: "passive", msg: heard, data: { wake: containsWake(heard) } }),
+    body: JSON.stringify({ tag: "passive", msg: heard, data: { wake: WakeParse.containsWake(heard) } }),
   }).catch(() => {});
   dbgSet("whisper", heard ? `"${heard}"` : "(empty)");
 
   if (heard) {
     // 1. In conversation mode, check for dismissal first — save conversation summary before exiting
-    if (conversationMode && isDismissal(heard)) {
+    if (conversationMode && WakeParse.isDismissal(heard)) {
       // Ask LLM to save_conversation with a summary of what just happened, then exit.
       try {
         if (conversationHistory.length >= 2) {
@@ -1399,9 +1349,9 @@ async function cyclePassive() {
     }
 
     // 2. Either we heard the wake word OR we're already in conversation — handle the query
-    const wakeHeard = containsWake(heard);
+    const wakeHeard = WakeParse.containsWake(heard);
     if (wakeHeard || conversationMode) {
-      const query = wakeHeard ? extractQuery(heard) : heard;
+      const query = wakeHeard ? WakeParse.extractQuery(heard) : heard;
       /* Speedo wake-flick: brief 0→40 mph pop on wake-word detection, before the
        * listening state engages. Same vibe as the camera's "lock on" — visible
        * acknowledgement that the kiosk caught the wake even before audio confirms. */
@@ -1438,20 +1388,7 @@ let conversationTimeoutId = 0;
 const CONVERSATION_IDLE_MS = 60000;
 const ACK_PHRASES = ["Yes, sir.", "Sir.", "Go ahead.", "I'm here, sir.", "Listening, sir."];
 
-const DISMISS_PATTERNS = [
-  /\b(ok|okay|alright)?\s*[,.]?\s*(that(?:'s|s|\s+is)?|thats|thanks)\s+(is\s+)?all\b/i,
-  /\b(that(?:'s|s)?|thats)\s+(it|enough|fine)\b/i,
-  /\b(thanks?|thank you|cheers)[,.\s]*(that(?:'s|s)?|thats)?\s*(all|enough|it|fine)\b/i,
-  /\bno more questions\b/i,
-  /\bgoodbye\b/i,
-  /\bbye\s*(flat[\s-]*out)?\b/i,
-  /\b(stop|quit|exit)\s+listening\b/i,
-];
-function isDismissal(text) {
-  const t = (text || "").trim();
-  if (!t) return false;
-  return DISMISS_PATTERNS.some((re) => re.test(t));
-}
+/* DISMISS_PATTERNS + isDismissal moved to ./wake-parsing.js. */
 
 function enterConversation() {
   conversationMode = true;
