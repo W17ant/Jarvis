@@ -1072,6 +1072,20 @@ let audioChunks = [];
 let silenceTimer = null;
 let micStreamForRec = null;
 
+/* ---- Speculative mid-utterance transcribe ----
+ * Why: once chunk #6 (~1.5s of audio) lands we kick off a "partial" Whisper
+ * transcribe in parallel with continued recording. If silence-detect fires
+ * within a few chunks of that partial AND the text looks sane, we use it
+ * directly and skip the final transcribe — saving ~450ms (one full MLX
+ * pass) on short queries. Long queries fall back to final-transcribe; the
+ * partial work is wasted but harmless.
+ *
+ * Module-level so transcribeAndHandle can read what wfStartListening's
+ * MediaRecorder closure populated. Reset each new utterance. */
+let inflightPartial = null;          // Promise<string>
+let latestPartialText = "";
+let partialFiredAtChunkCount = 0;
+
 /* ---------- PASSIVE WAKE-WORD MODE (adaptive voice-activity-detection) ----------
  * Adaptive: continually measures ambient noise level, sets START/SUSTAIN thresholds proportional to it.
  * Quiet room → low thresholds, noisy room → higher thresholds. End-of-speech detection works either way. */
@@ -1362,6 +1376,11 @@ async function startListening() {
 
   audioChunks = [];
   let totalBytes = 0;
+  /* Reset speculative-partial state at start of each turn — last turn's
+   * partial text would otherwise leak into this turn's transcribe path. */
+  inflightPartial = null;
+  latestPartialText = "";
+  partialFiredAtChunkCount = 0;
   const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
   mediaRecorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 64000 });
   mediaRecorder.ondataavailable = (e) => {
@@ -1369,6 +1388,28 @@ async function startListening() {
       audioChunks.push(e.data);
       totalBytes += e.data.size;
       dbgSet("chunks", `${audioChunks.length} (${(totalBytes / 1024).toFixed(1)} KB)`);
+      /* Why: kick off a single speculative whisper call once we have ~1.5s
+       * of audio. Runs in parallel with recording — by the time silence-detect
+       * fires for short queries, the partial is already resolved and we skip
+       * the final transcribe. Only fire once; subsequent chunks just keep
+       * growing audioChunks for the fallback path. The 6-chunk threshold
+       * matches MediaRecorder's 250ms timeslice (250 × 6 = 1500ms). */
+      if (audioChunks.length === 6 && !inflightPartial) {
+        partialFiredAtChunkCount = audioChunks.length;
+        const speculativeBlob = new Blob([...audioChunks], { type: e.data.type || "audio/webm" });
+        const t0 = Date.now();
+        inflightPartial = fetch(WHISPER_URL, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: speculativeBlob,
+        }).then(r => (r.ok ? r.json() : null))
+          .then(j => {
+            latestPartialText = (j?.text || "").trim();
+            console.log(`[Flat-Out] partial transcribe (${Date.now() - t0}ms): "${latestPartialText}"`);
+            return latestPartialText;
+          })
+          .catch(e => { console.warn("[Flat-Out] partial transcribe failed:", e.message); return ""; });
+      }
     }
   };
   mediaRecorder.onstop = () => transcribeAndHandle();
@@ -1448,6 +1489,13 @@ async function transcribeAndHandle() {
     setState("idle");
     return;
   }
+  /* Capture the chunk count BEFORE clearing audioChunks so we can decide
+   * whether the speculative partial captured enough of the utterance to
+   * trust. Final chunk count vs the count at partial-fire time tells us
+   * how many additional 250ms slices the operator spoke after the partial
+   * was sent. ≤4 extra chunks = ≤1s extra speech → partial almost certainly
+   * captured the whole thing. */
+  const finalChunkCount = audioChunks.length;
   const blob = new Blob(audioChunks, { type: audioChunks[0].type || "audio/webm" });
   audioChunks = [];
   dbgSet("upload", `${(blob.size / 1024).toFixed(1)} KB ${blob.type}`);
@@ -1468,31 +1516,59 @@ async function transcribeAndHandle() {
   replyEl.textContent = "Transcribing…";
   transcript.hidden = false;
 
-  try {
-    const res = await fetch(WHISPER_URL, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream" },
-      body: blob,
-    });
-    if (!res.ok) throw new Error(`whisper ${res.status}`);
-    const { text } = await res.json();
-    const heard = (text || "").trim();
-    console.log("[Flat-Out] whisper:", heard);
-    dbgSet("whisper", heard ? `"${heard}"` : "(empty)");
-    if (!heard) {
+  /* Speculative-partial fast path — if a mid-utterance partial fired and the
+   * operator stopped within ~1s of it (≤4 more chunks captured = ≤1s of
+   * additional speech), the partial almost certainly captured the full
+   * utterance. Use it and skip the final transcribe entirely. Saves ~450ms
+   * (one MLX pass) on short queries. */
+  const partialPromise = inflightPartial;
+  const firedAt = partialFiredAtChunkCount;
+  const PARTIAL_TAIL_TOLERANCE = 4;       // ≤4 250ms chunks ≈ ≤1s of speech after partial fired
+  const PARTIAL_MIN_TEXT_LEN   = 4;       // partial below this is unreliable, drop to final
+  let heard = "";
+  if (partialPromise && firedAt > 0 && (finalChunkCount - firedAt) <= PARTIAL_TAIL_TOLERANCE) {
+    const partialText = await partialPromise;
+    if (partialText && partialText.length >= PARTIAL_MIN_TEXT_LEN) {
+      heard = partialText;
+      console.log(`[Flat-Out] using speculative partial — skipped final transcribe (chunk delta: ${finalChunkCount - firedAt})`);
+      dbgSet("whisper", `"${heard}" (partial)`);
+    }
+  }
+
+  /* Reset speculative-partial state regardless of which path we took. */
+  inflightPartial = null;
+  latestPartialText = "";
+  partialFiredAtChunkCount = 0;
+
+  if (!heard) {
+    try {
+      const res = await fetch(WHISPER_URL, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: blob,
+      });
+      if (!res.ok) throw new Error(`whisper ${res.status}`);
+      const { text } = await res.json();
+      heard = (text || "").trim();
+      console.log("[Flat-Out] whisper:", heard);
+      dbgSet("whisper", heard ? `"${heard}"` : "(empty)");
+    } catch (e) {
+      console.warn("[Flat-Out] transcribe failed:", e.message);
+      dbgSet("error", `whisper: ${e.message}`);
       setState("idle");
-      replyEl.textContent = "I didn't catch that.";
-      speak("I didn't catch that.");
+      replyEl.textContent = "Whisper isn't reachable. Check the bridge logs.";
+      speak("Whisper isn't reachable.");
       return;
     }
-    handleHeard(heard, true);
-  } catch (e) {
-    console.warn("[Flat-Out] transcribe failed:", e.message);
-    dbgSet("error", `whisper: ${e.message}`);
-    setState("idle");
-    replyEl.textContent = "Whisper isn't reachable. Check the bridge logs.";
-    speak("Whisper isn't reachable.");
   }
+
+  if (!heard) {
+    setState("idle");
+    replyEl.textContent = "I didn't catch that.";
+    speak("I didn't catch that.");
+    return;
+  }
+  handleHeard(heard, true);
 }
 
 
