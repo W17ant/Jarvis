@@ -28,6 +28,27 @@ Not in the original TODO but real opportunities:
 - 🟨 **Cancel-from-HUD button** (~30 min) — there's a `cancel_active_jobs` tool now and a `/cancel` HTTP endpoint, but no visible button. A small X on the active task strip would make it discoverable.
 - 🟨 **First-run wake-word training** (~half day) — current install asks for a wake phrase but doesn't validate the operator's accent against it. A 30-second mic test on first boot could tighten the false-positive rate.
 
+### Borrowable from competitor / adjacent projects
+
+Audit pass over OpenClaw + NextChat + Cherry Studio + AionUi (Open-Assistant is archived — skipped). Items below are things THESE projects do that Jarvis doesn't, plus an honest reading of which are worth stealing for a vertical voice kiosk and which would dissolve the identity.
+
+**Worth doing:**
+
+- 🟧 ⚙️ **Plugin / extension SDK shape** (~3-5 days) — both OpenClaw (`packages/plugin-sdk`) and AionUi (`skills/` directory, three sources: builtin / custom / Extension SDK) ship a contract third parties can extend without forking. Jarvis adds tools by editing `bridge/server.mjs` — fine while there's one builder, doesn't scale to community contributions. A `bridge/skills/<name>/` convention with a stable function signature would let plugins land as drop-ins.
+- 🟧 🚀 **Document RAG / knowledge base** (~3 days, Cherry Studio pattern) — currently `data/memory.db` holds contacts/projects/facts as one-line items. A document-level RAG would let Adam drop a brand brief, client onboarding PDF, or past press release into a "knowledge" folder and have Jarvis cite from it on any query. Uses the existing nomic-embed pipeline; just needs a new `documents` table + chunking + retrieval-into-context wiring.
+- 🟧 📨 **iMessage in / TTS out adapter** (~1 day) — thin AppleScript bridge: incoming iMessage → bridge → reply text → bridge → osascript reply with optional Kokoro audio attachment. Lets Adam interact with Jarvis from his phone without WhatsApp / Telegram bloat. Useful even for a single-operator kiosk because you're not always at the desk.
+- 🟧 ⚙️ **Vitest test infrastructure** (~1 day) — Cherry Studio + AionUi both run vitest + playwright. Jarvis has minimal automated tests; the bridge surface is ~7000 LOC. A test pass with fixture data for the dispatch path, fast-path, tool router, and purchases rails would catch regressions on every commit.
+- 🟨 🚀 **Office document tools** (~2-3 days, AionUi pattern) — AionUi's built-in skills include pptx, docx, xlsx, mermaid. Jarvis has rich PDF generation but no Office formats. `generate_pptx({ template, slides })` for client decks and `generate_xlsx({ data, layout })` for shoot logs would close a real FOM workflow gap.
+- 🟨 🚀 **Mermaid diagram generation** (~half day, AionUi pattern) — render mermaid → SVG/PNG for workflow diagrams, brand-structure maps, shoot timelines. Cheap addition; image generation already in the pipeline.
+- 🟨 🚀 **Multi-agent orchestration** (~3-5 days, AionUi "Cowork" pattern) — let the LLM spin up parallel sub-agents for independent research tasks ("compare these three lenses across WEX / MPB / Park Cameras simultaneously"). Each sub-agent uses request_browse + a focused goal; results merge into a final report. Builds on existing browse + provider infrastructure.
+
+**Considered and skipped:**
+
+- ❌ **Tauri / Electron native packaging** (NextChat / Cherry Studio / AionUi) — Jarvis is intentionally Chrome `--app` mode. Custom packaging adds an installer to maintain across platforms; the kiosk surface stays cleaner with the existing approach. Revisit if cross-platform becomes a goal.
+- ❌ **Multi-channel adapters beyond iMessage** (Telegram / Slack / Discord — OpenClaw pattern) — would dissolve the voice-first identity. iMessage is the one exception because it's local osascript and fits the Mac kiosk model.
+- ❌ **MCP marketplace UI** (Cherry Studio) — niche; Jarvis already exposes MCP at `/mcp`. A marketplace assumes a community that doesn't exist yet.
+- ❌ **Open-Assistant patterns** — archived 2023; the inference / RLHF tooling targets cloud LLM training, irrelevant to a local voice kiosk.
+
 ---
 
 ## Shipped (was previously listed as outstanding)
