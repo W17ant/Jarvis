@@ -18,6 +18,7 @@ import * as DemoRecorder from "./demo-recorder.js";
 import * as Conversation from "./conversation-mode.js";
 import * as TtsPipeline from "./tts-pipeline.js";
 import * as PassiveVad from "./passive-vad.js";
+import * as BridgeEvents from "./bridge-events.js";
 
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
@@ -447,105 +448,24 @@ function setState(state) {
  *
  * Subscriptions register at boot — see bottom of file. */
 
-/* task.* — drives the bottom-strip progress UI + speedo mood. */
-function handleTaskEvent(m) {
-  window.__tasks?.handleEvent(m);
-  const sp = window.__speedo;
-  if (!sp || !m.data?.runId) return;
-  if (m.type === "task.start") {
-    /* Voice always wins over background tasks — only swap to task mood if no
-     * conversational state is currently active. */
-    const speedoEl = document.getElementById("speedo");
-    const inVoice = speedoEl?.classList.contains("is-listening")
-                 || speedoEl?.classList.contains("is-thinking")
-                 || speedoEl?.classList.contains("is-speaking");
-    if (!inVoice) sp.setMood("task");
-  } else if (m.type === "task.progress") {
-    if (m.data.percent != null) sp.setProgress(m.data.percent / 100);
-  } else if (m.type === "task.complete") {
-    sp.flash("redline");
-    sp.setProgress(0);
-    sp.setMood("idle");
-  } else if (m.type === "task.error") {
-    sp.flash("amber");
-    sp.setProgress(0);
-    sp.setMood("idle");
-  }
-}
+/* Bridge-event handlers (task.* / video.edit / pdf / thumbnail / inbox)
+ * moved to ./bridge-events.js. handleEnterSleep stays here because it
+ * directly drives listening / passive / TTS state that voice.js owns. */
 
-function handleVideoEditComplete(m) {
-  if (!m.data?.finalUrl) return;
-  const url = `http://localhost:8766${m.data.finalUrl}`;
-  console.log(`[Flat-Out] video edit complete: ${m.data.subject} (${m.data.durationSec}s build)`);
-  queueModal(() => Modal.showVideo(url, { subject: m.data.subject, runId: m.data.runId }),
-             `Your ${m.data.subject || "shoot"} teaser is ready.`);
-}
-
-function handleVideoEditError(m) {
-  /* Why: legacy events used { error } at the top level; the audit standardised on
-   * { data: { error } }. Read both for compatibility while older code paths exist. */
-  const err = m.data?.error || m.error || "(no detail)";
-  console.warn("[Flat-Out] video edit failed:", err);
-  speak("The edit pipeline ran into a problem. Check the bridge logs.");
-}
-
-function handlePdfComplete(m) {
-  if (!m.data?.url) return;
-  const url = `http://localhost:8766${m.data.url}`;
-  console.log(`[Flat-Out] pdf ready: ${m.data.template} (${m.data.sizeKB}KB)`);
-  queueModal(() => Modal.showPdf(url, { template: m.data.template, title: m.data.title }), null);
-}
-
-function handleThumbnailComplete(m) {
-  if (!m.data?.url) return;
-  /* Why: pop the rendered thumbnail in the same modal pattern as PDFs/videos so the
-   * client demo looks coherent. Generation is fast enough we don't need a progress
-   * spinner — by the time Daniel finishes saying "thumbnail ready" the image is up. */
-  const url = `http://localhost:8766${m.data.url}`;
-  console.log(`[Flat-Out] thumbnail ready: ${m.data.headline} (${m.data.sizeKB}KB)`);
-  queueModal(() => Modal.showThumbnail(url, { headline: m.data.headline, subhead: m.data.subhead }), null);
-}
-
-function handleThumbnailProgress(m) {
-  /* Surface stage transitions as a brief on-state sub-label so screen recordings show progress.
-   * Stages: starting → captioning-folder → picking-hero → picking-engine → rendering → done */
-  const stages = {
-    "starting": "Starting thumbnail…",
-    "captioning-folder": "Reading the shoot…",
-    "picking-hero": "Picking hero shot…",
-    "picking-engine": "Finding the engine shot…",
-    "rendering": "Composing thumbnail…",
-    "done": "Thumbnail ready.",
-  };
-  const label = stages[m.stage];
-  if (label) dbgSet("thumbnail", label);
-}
-
-function handleInboxDropped(m) {
-  if (!m.data?.path) return;
-  /* Why: drop-and-ask UX. The bridge watches inbox/ and broadcasts when a new file
-   * lands. Speak a short prompt offering the relevant action — operator can ignore
-   * (no answer = no action) or say yes to trigger the appropriate tool. */
-  console.log(`[Flat-Out] inbox: ${m.data.name} (${m.data.kind}, ${m.data.sizeKB}KB)`);
-  const verb = m.data.kind === "image" ? "describe it"
-             : m.data.kind === "video" ? "score it for the trailer"
-             : m.data.kind === "pdf"   ? "summarise it"
-             : "have a look";
-  const prompt = `I see ${m.data.name} in the inbox. Want me to ${verb}?`;
-  pendingInboxFile = { path: m.data.path, kind: m.data.kind, name: m.data.name };
-  queueModal(() => {}, prompt);
-}
-
-/** Connect + register all bridge event subscribers. Called once at boot. */
+/** Connect + register all bridge event subscribers. Called once at boot.
+ *  Voice.js wires BridgeEvents handler deps (speak, queueModal, ...)
+ *  in wireUI before any of these can fire. The yt.thumbnail.progress
+ *  subscription was dropped this commit — its only side-effect was
+ *  writing into a debug panel that doesn't exist any more, and the
+ *  lane-grouped task-strip viz handles thumbnail stage updates now. */
 function wireBridgeEvents() {
   Bridge.connect();
-  Bridge.on("task.*",                 handleTaskEvent);
-  Bridge.on("video.edit.complete",    handleVideoEditComplete);
-  Bridge.on("video.edit.error",       handleVideoEditError);
-  Bridge.on("pdf.complete",           handlePdfComplete);
-  Bridge.on("yt.thumbnail.complete",  handleThumbnailComplete);
-  Bridge.on("yt.thumbnail.progress",  handleThumbnailProgress);
-  Bridge.on("inbox.dropped",          handleInboxDropped);
+  Bridge.on("task.*",                 BridgeEvents.handleTaskEvent);
+  Bridge.on("video.edit.complete",    BridgeEvents.handleVideoEditComplete);
+  Bridge.on("video.edit.error",       BridgeEvents.handleVideoEditError);
+  Bridge.on("pdf.complete",           BridgeEvents.handlePdfComplete);
+  Bridge.on("yt.thumbnail.complete",  BridgeEvents.handleThumbnailComplete);
+  Bridge.on("inbox.dropped",          BridgeEvents.handleInboxDropped);
   Bridge.on("state.sleep",            handleEnterSleep);
   TimerHud.register(Bridge);
 }
@@ -1185,6 +1105,15 @@ function wireUI() {
    * UI side-effects (setState/replyEl/transcript), shared waveform state
    * (wf), engagement check (passive || listening drives barge-in), mic
    * RMS reader, voice picker, bridge transport, demo-recorder hooks. */
+  /* Bridge-event handlers need speak() (TTS pipeline), queueModal (still
+   * lives in voice.js), and a writer for the pendingInboxFile state
+   * (voice.js owns it because handleHeard reads it during inbox follow-up). */
+  BridgeEvents.setHandlers({
+    speak,
+    queueModal,
+    setPendingInboxFile: (file) => { pendingInboxFile = file; },
+    modal: Modal,
+  });
   /* Passive-VAD math layer needs the analyser+buffer pair (which voice.js
    * owns via wf.analyser/wf.buffer — gettable each tick because the slots
    * can be nulled by devicechange / sleep) and two boolean state probes. */
