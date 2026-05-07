@@ -70,6 +70,8 @@ export async function recordUsage({
   model,
   tokensIn = 0,
   tokensOut = 0,
+  cachedIn = 0,         // Anthropic: cache_read_input_tokens (re-used cached prefix)
+  cachedWritten = 0,    // Anthropic: cache_creation_input_tokens (first-time prefix store)
   elapsedMs = 0,
   source = "unknown",
   error = null,
@@ -83,6 +85,10 @@ export async function recordUsage({
     model: String(model || "unknown"),
     tokensIn: Number(tokensIn) || 0,
     tokensOut: Number(tokensOut) || 0,
+    /* cachedIn > 0 means Anthropic prompt-cache hit on this request.
+     * Operator can spot it in the audit log to confirm caching is working. */
+    cachedIn: Number(cachedIn) || 0,
+    cachedWritten: Number(cachedWritten) || 0,
     costUSD,
     elapsedMs: Number(elapsedMs) || 0,
     source: String(source || "unknown"),

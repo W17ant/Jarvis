@@ -155,10 +155,28 @@ async function anthropicChat({ model, messages, tools, maxTokens, signal }) {
   if (!process.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not set");
   const systemMsg = messages.find((m) => m.role === "system");
   const convo = messages.filter((m) => m.role !== "system").map(adaptMessageForAnthropic);
+
+  /* Anthropic prompt caching — wrap the system prompt as a content block
+   * marked cache_control: ephemeral. Anthropic stores the cached prefix
+   * for ~5 minutes; subsequent requests with the same prefix hit the
+   * cache for ~90% input-token cost reduction + measurable TTFT win.
+   *
+   * Why system but not tools: a single cache breakpoint on system covers
+   * the largest stable chunk (1k+ tokens of operator persona, scope rules,
+   * confirmation contract, memory hints). Tools are also stable but
+   * cache_control would need to be added to the LAST tool definition,
+   * which couples this code to TOOLS array ordering. System-only is the
+   * 80/20 win — tools-caching is a follow-up if we need more.
+   *
+   * Disable via OPT_OUT_PROMPT_CACHE=1 if a particular run needs no
+   * cache (e.g. when system content is being rapidly iterated). */
+  const useCache = process.env.OPT_OUT_PROMPT_CACHE !== "1" && systemMsg?.content;
   const body = {
     model,
     max_tokens: maxTokens,
-    system: systemMsg?.content || undefined,
+    system: useCache
+      ? [{ type: "text", text: systemMsg.content, cache_control: { type: "ephemeral" } }]
+      : (systemMsg?.content || undefined),
     messages: convo,
   };
   if (tools?.length) body.tools = tools.map(toolToAnthropic);
@@ -168,6 +186,10 @@ async function anthropicChat({ model, messages, tools, maxTokens, signal }) {
     headers: {
       "x-api-key": process.env.ANTHROPIC_API_KEY,
       "anthropic-version": "2023-06-01",
+      /* prompt-caching-2024-07-31 became GA but the beta header is still
+       * accepted and explicit about the feature being in use. Keeping it
+       * makes the request self-documenting. */
+      "anthropic-beta": "prompt-caching-2024-07-31",
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
@@ -180,11 +202,19 @@ async function anthropicChat({ model, messages, tools, maxTokens, signal }) {
     throw new Error(`Anthropic ${r.status}: ${txt.slice(0, 400)}`);
   }
   const j = await r.json();
+  /* Anthropic returns cache_creation_input_tokens (when system was first
+   * cached) and cache_read_input_tokens (when system was reused). Sum
+   * them into tokensIn for accurate cost accounting; also log the cached
+   * count separately so the operator can see the cache working. */
+  const cachedIn = (j.usage?.cache_read_input_tokens || 0);
+  const writtenIn = (j.usage?.cache_creation_input_tokens || 0);
   logUsage({
     provider: "anthropic",
     model: j.model || model,
-    tokensIn: j.usage?.input_tokens || 0,
+    tokensIn: (j.usage?.input_tokens || 0) + cachedIn + writtenIn,
     tokensOut: j.usage?.output_tokens || 0,
+    cachedIn,
+    cachedWritten: writtenIn,
     elapsedMs: Date.now() - t0,
     source: "providers.chat",
   });
