@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
-import { buildProductionTeaser } from "./edit.mjs";
+import { buildProductionTeaser, TEASER_STAGES } from "./edit.mjs";
 import * as Premiere from "./premiere.mjs";
 import { createPdf, listTemplates as listPdfTemplates } from "./pdf.mjs";
 import { getUpcomingEvents, addCalendarEvent } from "./calendar.mjs";
@@ -2972,6 +2972,9 @@ async function _executeToolInner(name, args) {
         kind: "video.edit",
         label: `Teaser · ${subject || "latest shoot"}${customText ? ` · "${customText}"` : ""}`,
         etaSec: 150,
+        /* Stage manifest — HUD renders horizontal pipeline pills,
+         * lights up each one as buildProductionTeaser's onStage fires. */
+        stages: TEASER_STAGES,
       });
       currentVideoRun = { startedAt: Date.now(), done: false, subject, runId };
       /* onStage callback pumps lane-grouped progress into the task strip — the

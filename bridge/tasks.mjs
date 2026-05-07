@@ -65,15 +65,22 @@ export function newRunId(prefix = "t") {
 /**
  * Begin a task. Returns the runId so the caller can use it on progress/complete/error.
  * @param {object} opts
- * @param {string} opts.kind   Tool category — "video.edit" | "yt.thumbnail" | "pdf" | "watermark" | "outreach" | etc.
- * @param {string} opts.label  Short human-readable label for the strip (e.g. "the press car teaser · 30s · 9:16").
- * @param {number} [opts.etaSec]  Optional ETA in seconds for progress display.
- * @param {string} [opts.runId]   Optional pre-generated runId (re-use across modules that already have one).
+ * @param {string} opts.kind     Tool category — "video.edit" | "yt.thumbnail" | "pdf" | "watermark" | "outreach" | etc.
+ * @param {string} opts.label    Short human-readable label for the strip (e.g. "the press car teaser · 30s · 9:16").
+ * @param {number} [opts.etaSec] Optional ETA in seconds for progress display.
+ * @param {string} [opts.runId]  Optional pre-generated runId (re-use across modules that already have one).
+ * @param {string[]} [opts.stages] Stage manifest — short names in pipeline
+ *   order. When provided, the HUD renders horizontal pills in the task
+ *   strip and lights up each one as progressTask emits matching `stage`
+ *   strings. Without a manifest, the HUD falls back to a single sub-line.
+ *   Stage matching is case-insensitive substring — emitted "encoding
+ *   segments + overlays" matches manifest entry "encoding".
  */
-export function startTask({ kind, label, etaSec, runId } = {}) {
+export function startTask({ kind, label, etaSec, runId, stages } = {}) {
   if (!kind) throw new Error("startTask: kind required");
   const id = runId || newRunId(kind.replace(/[^a-z0-9]/gi, "_").slice(0, 8));
   const t = { runId: id, kind, label: label || kind, etaSec, startedAt: Date.now() };
+  if (Array.isArray(stages) && stages.length) t.stages = stages.map(String);
   tasks.set(id, t);
   persistSnapshot();
   emit("task.start", { ...t });

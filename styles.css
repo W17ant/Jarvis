@@ -775,6 +775,59 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .tasks__row.is-error .tasks__stage { color: #f39c12; }
 /* Slightly more vertical room when a stage is rendered. */
 .tasks__row--with-stage { padding: 6px 0; }
+.tasks__row--with-lanes { padding: 6px 0; }
+
+/* Lane-grouped pipeline pills — one per stage in the task's manifest.
+ * Past stages tick green, current pulses red, future stages dim grey.
+ * Visible during long renders so the operator (and clients during demos)
+ * see the pipeline move through scanning → planning → encoding → final
+ * rather than just a single percent + ETA. */
+.tasks__lanes {
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+.tasks__lane {
+  font-family: var(--font-display);
+  font-size: 8.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--text-dim), transparent 50%);
+  color: color-mix(in srgb, var(--text-dim), transparent 30%);
+  background: transparent;
+  white-space: nowrap;
+  /* Subtle transition so a stage advancing is visible rather than abrupt. */
+  transition: background 0.25s, color 0.25s, border-color 0.25s, box-shadow 0.25s;
+}
+.tasks__lane.is-done {
+  /* Subtle green tick — operator sees what's already done. */
+  color: color-mix(in srgb, #5fc26b, white 15%);
+  border-color: color-mix(in srgb, #5fc26b, transparent 60%);
+}
+.tasks__lane.is-done::before {
+  content: "✓ ";
+  letter-spacing: 0;
+}
+.tasks__lane.is-active {
+  /* Brand-red active stage with a glow — matches the progress-bar fill
+   * so the eye groups them. Pulses subtly so the row reads as "alive". */
+  color: #fff;
+  background: var(--fom-red);
+  border-color: var(--fom-red);
+  box-shadow: 0 0 8px var(--fom-red-glow);
+  animation: tasks-lane-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tasks-lane-pulse {
+  0%, 100% { box-shadow: 0 0 8px var(--fom-red-glow); }
+  50%      { box-shadow: 0 0 14px var(--fom-red-glow); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tasks__lane.is-active { animation: none; }
+  .tasks__lane { transition: none; }
+}
 
 .tasks__meta {
   grid-column: 3; grid-row: 1;

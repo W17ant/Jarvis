@@ -646,6 +646,19 @@ export async function findShootFolderForSubject(subject) {
   return await pickLatestShootFolder();
 }
 
+/** Stage manifest for the teaser pipeline. Used by the HUD task strip's
+ *  lane-grouped progress viz — declared up-front so the operator can see
+ *  every step of the pipeline as horizontal pills, with the active stage
+ *  highlighted. Order matters; substring matching (case-insensitive) maps
+ *  emitted stage names from `stage()` calls below to entries here. */
+export const TEASER_STAGES = [
+  "scanning",
+  "planning",
+  "intro + outro",
+  "encoding",
+  "finalising",
+];
+
 /** Build a teaser from real footage. Subject from folder name if not given.
  *  customText → closing tail-card. music → 'epic'/'driving'/'cinematic'/'action' OR a track filename. */
 export async function buildProductionTeaser({ shootFolder, subject, customText, music, aspect = { w: 1080, h: 1920 }, onStage } = {}) {

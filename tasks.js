@@ -119,6 +119,7 @@ function buildRow(t) {
   if (t.status === "error") li.classList.add("is-error");
   if (t.status === "cancelling") li.classList.add("is-cancelling");
   if (t.stage) li.classList.add("tasks__row--with-stage");
+  if (Array.isArray(t.stages) && t.stages.length) li.classList.add("tasks__row--with-lanes");
 
   const badge = document.createElement("span");
   badge.className = "tasks__kind";
@@ -131,10 +132,41 @@ function buildRow(t) {
   label.className = "tasks__label";
   label.textContent = t.label || t.kind;
   labelWrap.appendChild(label);
-  /* Stage line — rendered when the bridge sends `stage` in task.progress.
-   * Reads as the lane-currently-active in the multi-stage video pipeline:
-   * "scanning shoot folder", "encoding segments", "concatenating final". */
-  if (t.stage) {
+  /* Two presentations of pipeline progress, in priority order:
+   *
+   * 1. Lane-grouped pipeline pills (preferred) — when task.start carried
+   *    a `stages` manifest. Renders one pill per stage, lights up the
+   *    matching one when task.progress emits `stage`. Operator (and
+   *    clients during demos) see the whole pipeline + where it is.
+   *    Substring match is case-insensitive and intentionally loose so
+   *    the bridge can emit "encoding segments + overlays" against a
+   *    manifest entry of "encoding".
+   *
+   * 2. Single stage sub-line (fallback) — when the bridge emits a
+   *    stage but didn't declare a manifest. Same UX as before this
+   *    feature shipped. */
+  if (Array.isArray(t.stages) && t.stages.length) {
+    const lanes = document.createElement("div");
+    lanes.className = "tasks__lanes";
+    const activeLower = (t.stage || "").toLowerCase();
+    let activeIdx = -1;
+    /* First pass — find the active stage so we can paint past stages
+     * complete + future ones dim. */
+    if (activeLower) {
+      activeIdx = t.stages.findIndex((s) =>
+        activeLower.includes(s.toLowerCase()) || s.toLowerCase().includes(activeLower)
+      );
+    }
+    for (let i = 0; i < t.stages.length; i++) {
+      const pill = document.createElement("span");
+      pill.className = "tasks__lane";
+      if (activeIdx >= 0 && i < activeIdx) pill.classList.add("is-done");
+      else if (i === activeIdx) pill.classList.add("is-active");
+      pill.textContent = t.stages[i];
+      lanes.appendChild(pill);
+    }
+    labelWrap.appendChild(lanes);
+  } else if (t.stage) {
     const stage = document.createElement("span");
     stage.className = "tasks__stage";
     stage.textContent = t.stage;
@@ -217,6 +249,10 @@ export function handleEvent(msg) {
         kind: d.kind || "task",
         label: d.label || d.kind || "Working…",
         etaSec: d.etaSec,
+        /* Stage manifest from the bridge — drives lane-grouped pipeline
+         * pills in buildRow. Optional; tasks without a manifest fall back
+         * to a single stage sub-line as before. */
+        stages: Array.isArray(d.stages) ? d.stages.slice() : null,
         startedAt: msg.ts || Date.now(),
         status: "running",
       });
@@ -261,7 +297,10 @@ export function handleEvent(msg) {
 /** Test harness — drive a fake task lifecycle from the dev console for layout iteration. */
 export function _devSimulate() {
   const runId = `dev_${Date.now()}`;
-  handleEvent({ type: "task.start", ts: Date.now(), data: { runId, kind: "video.edit", label: "the press car teaser · 30s · 9:16", etaSec: 12 } });
+  /* Stage manifest matches bridge/edit.mjs's TEASER_STAGES so the dev
+   * sim exercises the same lane-pill rendering path real renders use. */
+  const stages = ["scanning", "planning", "intro + outro", "encoding", "finalising"];
+  handleEvent({ type: "task.start", ts: Date.now(), data: { runId, kind: "video.edit", label: "the press car teaser · 30s · 9:16", etaSec: 12, stages } });
   let p = 0;
   const tick = setInterval(() => {
     p += 12;
@@ -269,7 +308,14 @@ export function _devSimulate() {
       clearInterval(tick);
       handleEvent({ type: "task.complete", ts: Date.now(), data: { runId } });
     } else {
-      handleEvent({ type: "task.progress", ts: Date.now(), data: { runId, percent: p, etaSec: 12 - (p / 100) * 12 } });
+      /* Walk through the stages in proportion to percent so the active
+       * pill advances through the manifest as the bar fills. */
+      const stageIdx = Math.min(stages.length - 1, Math.floor((p / 100) * stages.length));
+      handleEvent({
+        type: "task.progress",
+        ts: Date.now(),
+        data: { runId, percent: p, etaSec: 12 - (p / 100) * 12, stage: stages[stageIdx] },
+      });
     }
   }, 1000);
 }
