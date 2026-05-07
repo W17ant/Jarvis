@@ -37,6 +37,53 @@ async function logUsage(entry) {
   } catch { /* logging never breaks the chat path */ }
 }
 
+/* ---------- GLOBAL OLLAMA CONCURRENCY GUARD ----------
+ *
+ * Apple Silicon's Metal context can't safely serve >1 ollama generation
+ * concurrently — the GPU thrashes and on the M5 Max it's been observed
+ * to crash. We force ollama calls to serialise here so every code path
+ * (voice loop, crew agents, browse, transcribe, anything else) shares
+ * the same single-slot semaphore. Cloud providers stay unbounded by
+ * this layer; their rate limits are enforced by the API.
+ *
+ * The semaphore lives in this module rather than per-caller so
+ * crew.mjs no longer needs its own copy. Crew spec validation still
+ * refuses parallel-mode all-ollama crews because they'd serialise
+ * here anyway — that refusal is for clarity, not safety. */
+const _ollamaQueue = { inFlight: 0, waiting: [] };
+const OLLAMA_MAX_INFLIGHT = 1;
+
+export async function withOllamaSlot(fn) {
+  const release = await acquireOllamaSlot();
+  try { return await fn(); }
+  finally { release(); }
+}
+
+/** Explicit acquire/release pair for the streaming path — fetch() returns
+ *  when headers arrive but the GPU is still busy generating. The streaming
+ *  consumer must hold the slot until the body is fully read, then call
+ *  the returned release(). For non-streaming callers, withOllamaSlot above
+ *  handles the bookkeeping automatically. */
+export async function acquireOllamaSlot() {
+  if (_ollamaQueue.inFlight >= OLLAMA_MAX_INFLIGHT) {
+    await new Promise((resolve) => _ollamaQueue.waiting.push(resolve));
+  }
+  _ollamaQueue.inFlight += 1;
+  let released = false;
+  return function release() {
+    if (released) return;
+    released = true;
+    _ollamaQueue.inFlight -= 1;
+    const next = _ollamaQueue.waiting.shift();
+    if (next) next();
+  };
+}
+
+/** Diagnostic snapshot for /health and /crew/concurrency. */
+export function ollamaConcurrencyStatus() {
+  return { inFlight: _ollamaQueue.inFlight, queued: _ollamaQueue.waiting.length, max: OLLAMA_MAX_INFLIGHT };
+}
+
 /** Default model per provider — overridable via env. Picked for Nov 2026 leaderboard:
  *  Claude Sonnet 4.6 is fast + has vision + tool use; GPT-4o is the OpenAI peer. */
 function defaultsFor(provider) {
@@ -239,7 +286,8 @@ function adaptMessageForOpenAI(msg) {
  * shape, which matches what we already feed Anthropic post-translation. */
 async function ollamaChat({ model, messages, tools, signal }) {
   const t0 = Date.now();
-  const r = await fetch(`${OLLAMA_URL}/api/chat`, {
+  /* Serialise behind the global ollama semaphore — see top of file. */
+  const r = await withOllamaSlot(() => fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -250,7 +298,7 @@ async function ollamaChat({ model, messages, tools, signal }) {
       keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s",
     }),
     signal,
-  });
+  }));
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
     logUsage({ provider: "ollama", model, elapsedMs: Date.now() - t0, source: "providers.chat", error: `${r.status}: ${txt.slice(0, 120)}` });

@@ -42,7 +42,7 @@
  *    crew via this same flag.
  */
 
-import { chat, pickProvider } from "./llm/providers.mjs";
+import { chat, pickProvider, ollamaConcurrencyStatus } from "./llm/providers.mjs";
 import * as UsageLog from "./usage-log.mjs";
 
 /* ---------- ABORT FLAGS ----------
@@ -209,24 +209,17 @@ function buildAgentMessages(agentSpec, taskSpec, upstreamResults) {
 }
 
 /* ---------- PROVIDER CONCURRENCY GUARD ----------
- * Single-slot semaphore for ollama. Cloud providers run unbounded by this
- * module (rate limits are enforced upstream by the API). */
-const _ollamaInFlight = { count: 0, queue: [] };
-const OLLAMA_MAX = 1;
-
+ * The ollama semaphore now lives in bridge/llm/providers.mjs so EVERY
+ * code path (voice loop, browse, transcribe, crew) shares the same
+ * single-slot queue. We removed the duplicate copy that used to live
+ * here. Cloud providers stay unbounded by this layer; rate limits are
+ * enforced by the API. The withProviderSlot helper is kept as a
+ * pass-through so existing call sites don't need to change — it just
+ * delegates to providers.mjs's slot transparently. */
 async function withProviderSlot(provider, fn) {
-  if (provider !== "ollama") return await fn();
-  /* Ollama path — wait for an in-flight slot before running. */
-  if (_ollamaInFlight.count >= OLLAMA_MAX) {
-    await new Promise((resolve) => _ollamaInFlight.queue.push(resolve));
-  }
-  _ollamaInFlight.count += 1;
-  try { return await fn(); }
-  finally {
-    _ollamaInFlight.count -= 1;
-    const next = _ollamaInFlight.queue.shift();
-    if (next) next();
-  }
+  /* Cloud providers are pass-through — providers.mjs handles ollama
+   * serialisation inside chat() itself. */
+  return await fn();
 }
 
 /* ---------- AGENT EXECUTION ----------
@@ -449,9 +442,8 @@ export async function runCrew(spec) {
 /* ---------- DIAGNOSTIC ---------- */
 
 /** Snapshot of the in-flight ollama queue state — useful for /health
- *  and the Agent Console. */
+ *  and the Agent Console. Reads from providers.mjs which is the single
+ *  source of truth now. */
 export function concurrencyStatus() {
-  return {
-    ollama: { inFlight: _ollamaInFlight.count, queued: _ollamaInFlight.queue.length, max: OLLAMA_MAX },
-  };
+  return { ollama: ollamaConcurrencyStatus() };
 }

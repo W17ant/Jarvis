@@ -2926,7 +2926,10 @@ When given [Context], use those facts verbatim. If asked to do something you don
      * hardware OLLAMA_FAST_MODEL is unset so both branches return main. */
     const modelForHop = hop === 0 ? ModelRouter.pick(query) : ModelRouter.pickForToolHop();
     const hopT0 = Date.now();
-    const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+    /* Serialise behind the global ollama semaphore — same one crew agents
+     * + browse + transcribe share. Stops a concurrent voice turn + crew
+     * agent from racing on the GPU. */
+    const res = await LlmProviders.withOllamaSlot(() => fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       /* keep_alive: capable hardware (ultra / m5-max) gets long values via the
@@ -2934,7 +2937,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
        * turns. Lower-tier installs stick to "30s" so the model can free memory
        * for other work. */
       body: JSON.stringify({ model: modelForHop, messages, stream: false, tools: toolsForLLM, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
-    });
+    }));
     if (!res.ok) throw new Error(`Ollama ${res.status}: ${await res.text()}`);
     const data = await res.json();
     /* Per-hop usage row — Ollama returns token counts in the response. */
@@ -3128,11 +3131,19 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
     const modelForHop = hop === 0 ? ModelRouter.pick(query) : ModelRouter.pickForToolHop();
     const hopT0 = Date.now();
     console.log(`[stream] hop ${hop} → ${modelForHop}`);
-    const res = await fetch(`${OLLAMA_URL}/api/chat`, {
+    /* Streaming holds the ollama slot until the body is fully consumed —
+     * fetch() returns at headers but the GPU is still generating until
+     * the terminal frame. We acquire explicitly here and release at the
+     * bottom of the hop in a finally block so any error path also frees
+     * the slot. */
+    const slotRelease = await LlmProviders.acquireOllamaSlot();
+    let res;
+    try { res = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: modelForHop, messages, stream: true, tools: toolsForLLM, keep_alive: process.env.OLLAMA_KEEP_ALIVE || "30s" }),
-    });
+    }); }
+    catch (e) { slotRelease(); throw e; }
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
       console.warn(`[stream] hop ${hop} ollama ${res.status}: ${txt.slice(0, 200)}`);
@@ -3181,6 +3192,10 @@ YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use tho
         }
       }
     }
+    /* Body fully consumed — GPU is free for the next caller. Release the
+     * ollama semaphore now even though we're about to dispatch tools (which
+     * doesn't touch ollama). */
+    slotRelease();
 
     const calls = Array.isArray(finalMsg?.tool_calls) ? finalMsg.tool_calls : [];
     console.log(`[stream] hop ${hop} done in ${Date.now() - hopT0}ms, ${calls.length} tool calls, content len=${sb.emitted.length}`);
