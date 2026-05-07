@@ -59,6 +59,7 @@ import * as VisualStyle from "./visual-style.mjs";
 import * as Transcribe from "./transcribe.mjs";
 import * as UsageLog from "./usage-log.mjs";
 import * as EodDigest from "./eod-digest.mjs";
+import * as FastPath from "./fast-path.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -2637,6 +2638,26 @@ async function _executeToolInner(name, args) {
 }
 
 async function askLLM(query, history = [], { sessionId = null } = {}) {
+  /* Fast-path: pattern-match common queries (time / timer / sleep / open
+   * map / greetings) and bypass Ollama entirely. ~500ms total round-trip
+   * vs ~2s through the LLM. The handler may also return a tool to dispatch
+   * (set_timer for "set a 5 minute timer", enter_sleep_mode for "shut down")
+   * which we run after broadcasting the spoken reply. */
+  const fp = FastPath.tryFastPath(query);
+  if (fp?.reply) {
+    if (sessionId) { try { Memory.appendTurn({ sessionId, role: "user", content: query }); } catch {} }
+    if (fp.toolCall) {
+      try { await executeTool(fp.toolCall.name, fp.toolCall.args || {}); }
+      catch (e) { console.warn(`[fast-path] tool ${fp.toolCall.name} failed: ${e.message}`); }
+    }
+    if (sessionId) {
+      try { Memory.appendTurn({ sessionId, role: "assistant", content: fp.reply, tools: fp.toolCall ? [fp.toolCall.name] : [] }); }
+      catch {}
+    }
+    console.log(`[fast-path] "${query.slice(0, 40)}" → bypassed LLM (${fp.toolCall?.name || "no tool"})`);
+    return fp.reply;
+  }
+
   const brand = loadBrand();
   const agencyName = brand.agency.name || CONFIG.agency.name;
   const agentName = brand.agent.name || "Flat-Out";
@@ -2866,6 +2887,27 @@ When given [Context], use those facts verbatim. If asked to do something you don
  *  to history without missing anything that was streamed).
  */
 async function askLLMStream({ query, history = [], onSentence, sessionId = null }) {
+  /* Fast-path: pattern-match common queries and emit a synthetic single-
+   * sentence stream. Same shape as a real LLM stream from the HUD's
+   * point of view — onSentence fires once with the canned reply, the
+   * function returns the same string. End-to-end latency for these
+   * queries: STT + Kokoro only, ~500ms total vs ~2s through the LLM. */
+  const fp = FastPath.tryFastPath(query);
+  if (fp?.reply) {
+    if (sessionId) { try { Memory.appendTurn({ sessionId, role: "user", content: query }); } catch {} }
+    if (fp.toolCall) {
+      try { await executeTool(fp.toolCall.name, fp.toolCall.args || {}); }
+      catch (e) { console.warn(`[fast-path stream] tool ${fp.toolCall.name} failed: ${e.message}`); }
+    }
+    try { onSentence?.(fp.reply); } catch {}
+    if (sessionId) {
+      try { Memory.appendTurn({ sessionId, role: "assistant", content: fp.reply, tools: fp.toolCall ? [fp.toolCall.name] : [] }); }
+      catch {}
+    }
+    console.log(`[fast-path stream] "${query.slice(0, 40)}" → bypassed LLM (${fp.toolCall?.name || "no tool"})`);
+    return fp.reply;
+  }
+
   /* Why log: when the kiosk goes silent mid-turn, the bridge log was empty —
    * no entry for the inbound query, no entry for hop boundaries. Every later
    * "is it stuck?" debug starts blind. One concise line per hop + the first
