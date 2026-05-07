@@ -17,6 +17,7 @@ import * as WhisperStt from "./whisper-stt.js";
 import * as DemoRecorder from "./demo-recorder.js";
 import * as Conversation from "./conversation-mode.js";
 import * as TtsPipeline from "./tts-pipeline.js";
+import * as PassiveVad from "./passive-vad.js";
 
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
@@ -887,36 +888,11 @@ let micStreamForRec = null;
  * Quiet room → low thresholds, noisy room → higher thresholds. End-of-speech detection works either way. */
 let passive = false;
 let passiveRecorder = null;
-const VAD_SILENCE_MS   = 1100;    // sustained silence ends the utterance
-const VAD_MAX_REC_MS   = 15000;
-const VAD_TICK_MS      = 60;
-const VAD_FLOOR_MIN    = 0.005;   // hard minimums so a perfectly silent room doesn't trigger on micro-noise
-const VAD_START_MIN    = 0.014;
-const VAD_SUSTAIN_MIN  = 0.009;
-const VAD_START_RATIO  = 2.8;     // start threshold = max(MIN, ambient × this)
-const VAD_SUSTAIN_RATIO = 1.8;
-const VAD_AMBIENT_WIN  = 60;      // ~60 × VAD_TICK_MS = 3.6s rolling window
 
-/** Rolling ambient noise estimator. We push every sample taken during "not recording" periods. */
-const ambientWindow = [];
-function pushAmbient(rms) {
-  ambientWindow.push(rms);
-  if (ambientWindow.length > VAD_AMBIENT_WIN) ambientWindow.shift();
-}
-function getAmbient() {
-  if (ambientWindow.length < 10) return VAD_FLOOR_MIN;
-  // Why: 60th percentile is robust to brief voice spikes that haven't been filtered out
-  const sorted = [...ambientWindow].sort((a, b) => a - b);
-  return Math.max(VAD_FLOOR_MIN, sorted[Math.floor(sorted.length * 0.6)]);
-}
-function vadThresholds() {
-  const a = getAmbient();
-  return {
-    start:   Math.max(VAD_START_MIN,   a * VAD_START_RATIO),
-    sustain: Math.max(VAD_SUSTAIN_MIN, a * VAD_SUSTAIN_RATIO),
-    ambient: a,
-  };
-}
+/* VAD primitives (currentRms, pushAmbient, vadThresholds, waitForVoiceStart,
+ * waitForVoiceEnd) live in ./passive-vad.js. The cyclePassive controller
+ * stays here because it touches handleHeard / askLLM / conversationHistory. */
+const { currentRms, vadThresholds, waitForVoiceStart, waitForVoiceEnd } = PassiveVad;
 
 async function startPassive() {
   if (passive) return;
@@ -943,75 +919,6 @@ function stopPassive() {
   passiveRecorder = null;
   setState("idle");
   wakeBtn.querySelector(".wake__inner").textContent = "TAP / SAY \"HEY FLAT-OUT\"";
-}
-
-/** Read live RMS from the wf analyser. Returns 0..1. */
-function currentRms() {
-  if (!wf.analyser || !wf.buffer) return 0;
-  wf.analyser.getByteTimeDomainData(wf.buffer);
-  let sumSq = 0;
-  for (let i = 0; i < wf.buffer.length; i++) {
-    const v = (wf.buffer[i] - 128) / 128;
-    sumSq += v * v;
-  }
-  return Math.sqrt(sumSq / wf.buffer.length);
-}
-
-/** Wait until RMS rises above the adaptive start threshold. While waiting, every sample feeds
- *  the rolling ambient estimate (since by definition no voice is present yet).
- *
- *  Why the speaking-guard: the kiosk has no echo cancellation, so when Daniel's voice plays
- *  back through speakers the mic picks it up and VAD treats it as a fresh utterance. That
- *  led to spurious passive recordings that competed for the AudioContext mid-speech, which
- *  the operator perceived as Daniel's replies "cutting off". We just hold here until the
- *  speaking flag clears, then resume normal listening. */
-function waitForVoiceStart() {
-  return new Promise((resolve) => {
-    const tick = () => {
-      if (!passive) return resolve(false);
-      /* Hold while Daniel is speaking — don't record his own voice. */
-      if (wf.mode === "speaking" || wf.mode === "speaking-real") {
-        setTimeout(tick, 200);
-        return;
-      }
-      const rms = currentRms();
-      const { start } = vadThresholds();
-      if (rms > start) return resolve(true);
-      pushAmbient(rms);   // nothing-but-ambient samples train the noise floor
-      setTimeout(tick, VAD_TICK_MS);
-    };
-    tick();
-  });
-}
-
-/** Wait until silence ends the utterance, with adaptive threshold:
- *  - Short utterances (< 1.5s of voice): assume bare wake word, trigger after 600ms silence (snappy ack)
- *  - Longer queries: require full 1100ms (tolerates natural mid-sentence pauses) */
-const VAD_SHORT_VOICE_MS  = 1500;   // boundary between "wake word alone" vs "wake + question"
-const VAD_SHORT_SILENCE_MS = 600;   // snappy trigger when voice was short
-
-function waitForVoiceEnd() {
-  return new Promise((resolve) => {
-    const startedAt = Date.now();
-    let lastVoiceAt = Date.now();
-    let voiceMs = 0;
-    const tick = () => {
-      if (!passive) return resolve("aborted");
-      const elapsed = Date.now() - startedAt;
-      if (elapsed > VAD_MAX_REC_MS) return resolve("max");
-      const rms = currentRms();
-      const { sustain } = vadThresholds();
-      if (rms > sustain) {
-        lastVoiceAt = Date.now();
-        voiceMs += VAD_TICK_MS;
-      }
-      // Short voice → snappy silence trigger; longer voice → patient silence trigger
-      const silenceThreshold = voiceMs < VAD_SHORT_VOICE_MS ? VAD_SHORT_SILENCE_MS : VAD_SILENCE_MS;
-      if (Date.now() - lastVoiceAt > silenceThreshold) return resolve(voiceMs < VAD_SHORT_VOICE_MS ? "short-silence" : "silence");
-      setTimeout(tick, VAD_TICK_MS);
-    };
-    tick();
-  });
 }
 
 /** Stream-driven cycle: wait for voice → record full utterance → transcribe → check wake. */
@@ -1278,6 +1185,14 @@ function wireUI() {
    * UI side-effects (setState/replyEl/transcript), shared waveform state
    * (wf), engagement check (passive || listening drives barge-in), mic
    * RMS reader, voice picker, bridge transport, demo-recorder hooks. */
+  /* Passive-VAD math layer needs the analyser+buffer pair (which voice.js
+   * owns via wf.analyser/wf.buffer — gettable each tick because the slots
+   * can be nulled by devicechange / sleep) and two boolean state probes. */
+  PassiveVad.setHandlers({
+    getAnalyserBuf: () => (wf.analyser && wf.buffer ? { analyser: wf.analyser, buffer: wf.buffer } : null),
+    isPassive: () => passive,
+    isSpeaking: () => wf.mode === "speaking" || wf.mode === "speaking-real",
+  });
   TtsPipeline.setHandlers({
     setState,
     replyEl,
