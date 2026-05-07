@@ -3549,10 +3549,20 @@ const httpServer = createServer(async (req, res) => {
    * Used by the Agent Console section to render the indexed-documents
    * pane. */
   if (req.url?.startsWith("/knowledge/status") && req.method === "GET") {
+    /* Field names: stats.documents is the COUNT, the array of doc rows
+     * goes under .docs to avoid the collision. */
     const stats = Memory.knowledgeStats();
     const docs = Memory.listDocuments({ limit: 100 });
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify({ ok: true, ...stats, root: Knowledge.knowledgeRoot(), documents: docs }));
+    res.end(JSON.stringify({
+      ok: true,
+      documentCount: stats.documents,
+      chunks: stats.chunks,
+      embedded: stats.embedded,
+      lastIngestAt: stats.lastIngestAt,
+      root: Knowledge.knowledgeRoot(),
+      docs,
+    }));
     return;
   }
 

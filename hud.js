@@ -992,7 +992,19 @@ function ensureAgentModal() {
   usageNoteEl.style.fontStyle = "italic";
   frame.appendChild(usageNoteEl);
 
-  /* Section 5: purchase audit */
+  /* Section 5: knowledge base */
+  frame.appendChild(el("h3", { text: "Knowledge base" }));
+  const knowledgeHeadlineEl = el("div", { className: "am-summary", text: "Loading…" });
+  frame.appendChild(knowledgeHeadlineEl);
+  const knowledgeListHost = el("div", { className: "am-journal" });
+  frame.appendChild(knowledgeListHost);
+
+  /* Section 6: iMessage activity */
+  frame.appendChild(el("h3", { text: "iMessage adapter" }));
+  const imessageStatusEl = el("div", { className: "am-summary", text: "Loading…" });
+  frame.appendChild(imessageStatusEl);
+
+  /* Section 7: purchase audit */
   frame.appendChild(el("h3", { text: "Purchase audit log" }));
   const journalHost = el("div", { className: "am-journal" });
   const summaryEl = el("div", { className: "am-summary", text: "Loading…" });
@@ -1000,7 +1012,7 @@ function ensureAgentModal() {
   frame.appendChild(summaryEl);
 
   root.appendChild(frame);
-  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl, routerStatusEl, picksHost, usageHeadlineEl, usageRollupHost, usageNoteEl };
+  root._refs = { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, cancelBtn, saveBtn, journalHost, summaryEl, routerStatusEl, picksHost, usageHeadlineEl, usageRollupHost, usageNoteEl, knowledgeHeadlineEl, knowledgeListHost, imessageStatusEl };
   document.body.appendChild(root);
   _agentModalEl = root;
 
@@ -1093,6 +1105,59 @@ function renderUsageSection(headlineEl, rollupHost, noteEl, payload) {
   noteEl.textContent = payload?.pricingNote || "";
 }
 
+/** Render the knowledge-base section: doc count + chunk count + last
+ *  ingest, plus a top-N list of recent docs with their format chip.
+ *  The endpoint splits the count under `documentCount` and the array
+ *  under `docs` so the field names don't collide. */
+function renderKnowledgeSection(headlineEl, listHost, payload) {
+  if (!payload || !payload.ok) {
+    headlineEl.textContent = "Bridge offline.";
+    return;
+  }
+  const docCount = payload.documentCount || 0;
+  const chunks = payload.chunks || 0;
+  const embedded = payload.embedded || 0;
+  const last = payload.lastIngestAt;
+  const lastLabel = last ? new Date(last).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "(never)";
+  headlineEl.textContent = `${docCount} documents · ${chunks} chunks · ${embedded} embedded · last: ${lastLabel}`;
+  while (listHost.firstChild) listHost.removeChild(listHost.firstChild);
+  const items = Array.isArray(payload.docs) ? payload.docs : [];
+  if (!items.length) {
+    listHost.appendChild(el("div", { className: "am-journal-empty", text: "Drop files into docs/knowledge/ to start indexing." }));
+    return;
+  }
+  for (const doc of items.slice(0, 8)) {
+    const row = el("div", { className: "am-journal-row" });
+    const ts = new Date(doc.ingested_at);
+    const tsLabel = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
+    row.appendChild(el("span", { text: tsLabel }));
+    const fmt = el("span", { className: "verb ok", text: (doc.format || "?").toUpperCase() });
+    row.appendChild(fmt);
+    row.appendChild(el("span", { text: `${doc.title || doc.rel_path} (${doc.chunk_count || 0} chunks)` }));
+    row.appendChild(el("span", { className: "amt", text: `${Math.round((doc.bytes || 0) / 1024)}KB` }));
+    listHost.appendChild(row);
+  }
+}
+
+/** Render the iMessage adapter status — enabled flag, allowlist size,
+ *  trigger phrase, chat.db reachability (Full Disk Access proxy). */
+function renderImessageSection(statusEl, payload) {
+  if (!payload || !payload.ok) {
+    statusEl.textContent = "Bridge offline.";
+    return;
+  }
+  if (!payload.running) {
+    statusEl.textContent = "Listener not running.";
+    return;
+  }
+  if (!payload.enabled) {
+    statusEl.textContent = `Disabled — edit data/imessage-config.json to enable. Trigger: "${payload.trigger}". Sender allowlist: ${payload.allowedSenderCount}.`;
+    return;
+  }
+  const dbStatus = payload.chatDbReachable ? "chat.db reachable" : "chat.db UNREACHABLE — grant Full Disk Access in System Settings";
+  statusEl.textContent = `Enabled · ${payload.allowedSenderCount} allowed sender(s) · trigger "${payload.trigger}" · poll every ${payload.pollIntervalMs}ms · ${dbStatus}`;
+}
+
 /** Render the journal rows. Pulls from /purchases/audit. Renders newest first. */
 function renderPurchaseJournal(host, summaryEl, journal, limits) {
   while (host.firstChild) host.removeChild(host.firstChild);
@@ -1127,25 +1192,35 @@ function renderPurchaseJournal(host, summaryEl, journal, limits) {
 
 async function openAgentModal() {
   const root = ensureAgentModal();
-  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl, routerStatusEl, picksHost, usageHeadlineEl, usageRollupHost, usageNoteEl } = root._refs;
+  const { keyAnthropic, keyOpenai, routeDefault, routeVision, routeHighstakes, status, journalHost, summaryEl, routerStatusEl, picksHost, usageHeadlineEl, usageRollupHost, usageNoteEl, knowledgeHeadlineEl, knowledgeListHost, imessageStatusEl } = root._refs;
   status.textContent = ""; status.className = "am-status";
   keyAnthropic.value = ""; keyOpenai.value = "";
   root.hidden = false;
   /* Render the in-memory ring buffer immediately so the panel isn't blank
    * while the network fetches resolve. */
   renderToolPicks(picksHost);
-  /* Fetch current state in parallel — keys, audit, health, usage. Bridge
-   * offline → leave placeholders + an empty journal. */
+  /* Fetch current state in parallel — keys, audit, health, usage,
+   * knowledge, iMessage. Bridge offline → leave placeholders. */
   try {
-    const [keysRes, auditRes, healthRes, usageRes] = await Promise.all([
+    const [keysRes, auditRes, healthRes, usageRes, knowledgeRes, imessageRes] = await Promise.all([
       fetch("http://localhost:8766/api-keys", { cache: "no-store" }),
       fetch("http://localhost:8766/purchases/audit?limit=50", { cache: "no-store" }),
       fetch("http://localhost:8766/health", { cache: "no-store" }),
       fetch("http://localhost:8766/usage?limit=30", { cache: "no-store" }),
+      fetch("http://localhost:8766/knowledge/status", { cache: "no-store" }),
+      fetch("http://localhost:8766/imessage/status", { cache: "no-store" }),
     ]);
     if (usageRes.ok) {
       const u = await usageRes.json();
       renderUsageSection(usageHeadlineEl, usageRollupHost, usageNoteEl, u);
+    }
+    if (knowledgeRes.ok) {
+      const k = await knowledgeRes.json();
+      renderKnowledgeSection(knowledgeHeadlineEl, knowledgeListHost, k);
+    }
+    if (imessageRes.ok) {
+      const im = await imessageRes.json();
+      renderImessageSection(imessageStatusEl, im);
     }
     if (healthRes.ok) {
       const h = await healthRes.json();
