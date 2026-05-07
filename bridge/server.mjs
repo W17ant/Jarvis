@@ -2717,16 +2717,41 @@ async function _executeToolInner(name, args) {
     case "mark_lead_contacted":                return Leads.markLeadContacted(args || {});
     case "generate_youtube_thumbnail": {
       /* Why: thumbnail generation is fast (~5-10s) but picking the engine shot needs VL.
-       * Broadcast stage events so the screen-recorded demo shows progress ticking. */
-      const broadcast = (stage, info = {}) => broadcastToClients({ type: "yt.thumbnail.progress", stage, ...info });
-      const r = await Youtube.generateYoutubeThumbnail(args || {}, broadcast);
-      if (r.ok) {
-        broadcastToClients({
-          type: "yt.thumbnail.complete",
-          data: { url: r.url, headline: r.headline, subhead: r.subhead, sizeKB: r.sizeKB },
-        });
+       * Broadcast stage events so the screen-recorded demo shows progress ticking.
+       * Now also drives the Tasks lifecycle with a stage manifest so the HUD's
+       * task strip shows lane-grouped pipeline pills, same UX as the teaser. */
+      const thumbSubject = args?.subject || args?.folder || "thumbnail";
+      const thumbRunId = Tasks.startTask({
+        kind: "yt.thumbnail",
+        label: `Thumbnail · ${thumbSubject}${args?.headline ? ` · "${args.headline}"` : ""}`,
+        etaSec: 20,
+        stages: Youtube.YT_THUMBNAIL_STAGES,
+      });
+      /* Wrapped broadcast: keeps the legacy yt.thumbnail.progress event
+       * firing (handleThumbnailProgress in voice.js still listens) AND
+       * routes the same stage name through Tasks.progressTask so the
+       * lane viz updates. Loose substring matching in tasks.js maps
+       * 'captioning-folder' → 'reading shoot' etc. */
+      const broadcast = (stage, info = {}) => {
+        broadcastToClients({ type: "yt.thumbnail.progress", stage, ...info });
+        Tasks.progressTask(thumbRunId, { stage });
+      };
+      try {
+        const r = await Youtube.generateYoutubeThumbnail(args || {}, broadcast);
+        if (r.ok) {
+          Tasks.completeTask(thumbRunId);
+          broadcastToClients({
+            type: "yt.thumbnail.complete",
+            data: { url: r.url, headline: r.headline, subhead: r.subhead, sizeKB: r.sizeKB },
+          });
+        } else {
+          Tasks.errorTask(thumbRunId, r.error || "thumbnail build failed");
+        }
+        return r;
+      } catch (e) {
+        Tasks.errorTask(thumbRunId, e);
+        throw e;
       }
-      return r;
     }
     case "generate_youtube_short": {
       /* Reuses the existing teaser pipeline — emits video.edit.progress events that the
@@ -2765,16 +2790,24 @@ async function _executeToolInner(name, args) {
       /* Combined thumbnail + short — preferred when the operator asks for "a thumbnail
        * and a short" in one breath, which the 14b model wasn't reliably chaining as
        * two separate tool calls. */
-      const broadcast = (stage, info = {}) => broadcastToClients({ type: "yt.thumbnail.progress", stage, ...info });
       if (currentVideoRun && !currentVideoRun.done) {
         return { ok: false, status: "busy", note: "Another video edit is already running." };
       }
       const promoSubject = args?.subject || args?.folder || "latest shoot";
+      /* Promo = thumbnail (4 stages) + short (5 stages from TEASER_STAGES).
+       * Concatenate manifests so the lane viz shows the whole 9-stage
+       * pipeline. Active stage advances through both halves naturally as
+       * each broadcast fires. */
       const promoRunId = Tasks.startTask({
         kind: "yt.promo",
         label: `YT Promo · ${promoSubject}${args?.headline ? ` · "${args.headline}"` : ""}`,
         etaSec: 180,
+        stages: [...Youtube.YT_THUMBNAIL_STAGES, ...TEASER_STAGES],
       });
+      const broadcast = (stage, info = {}) => {
+        broadcastToClients({ type: "yt.thumbnail.progress", stage, ...info });
+        Tasks.progressTask(promoRunId, { stage });
+      };
       currentVideoRun = { startedAt: Date.now(), done: false, subject: args?.subject || args?.folder, runId: promoRunId };
       const r = await Youtube.generateYoutubePromo(args || {}, broadcast);
       if (r.ok && r.thumbnail?.url) {

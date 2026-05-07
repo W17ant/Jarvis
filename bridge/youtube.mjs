@@ -297,6 +297,26 @@ function escapeHtml(s) {
  * Uses the existing semantic search over cached frame captions; falls back to
  * any image in the folder if find_frame returns nothing (e.g. captions not yet cached).
  */
+/** Stage manifest for the YouTube thumbnail pipeline. Used by the HUD's
+ *  task strip lane viz. Names chosen to substring-match the broadcast
+ *  emissions in pickThumbnailShots + generateYoutubeThumbnail so
+ *  tasks.js's loose matcher lights up the right pill:
+ *
+ *    broadcast emits         →   manifest entry
+ *    "captioning-folder"     →   "captioning"
+ *    "picking-hero"          →   "hero"
+ *    "picking-engine"        →   "engine"
+ *    "rendering"             →   "rendering"
+ *
+ *  The 'starting' / 'done' broadcasts are not manifest entries —
+ *  task.start + task.complete already cover those transitions. */
+export const YT_THUMBNAIL_STAGES = [
+  "captioning",
+  "hero",
+  "engine",
+  "rendering",
+];
+
 async function pickThumbnailShots(folderAbs, broadcast) {
   const folderName = path.basename(folderAbs);
 
