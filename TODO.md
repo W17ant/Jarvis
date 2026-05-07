@@ -8,18 +8,25 @@ Living todo list. Honest reckoning: a lot of this list was stale by the time any
 
 ## Genuinely outstanding
 
-These are NOT shipped and need real work:
+These are NOT shipped and need real work. Everything else in the file is shipped (some sections below are kept for reference but most marked outstanding turned out to be already coded — see the Shipped section).
 
-- 🟥 ⚙️ **voice.js extraction** (~2 days) — file is 2900+ LOC and growing every patch. Refactor into bridge-client / tts / state / modal-queue / drawer modules. Not user-visible; pure structural debt. Risky to do mid-sprint.
+- 🟥 ⚙️ **voice.js extraction** (~2 days) — file is 3000+ LOC and growing every patch. Refactor into bridge-client / tts / state / modal-queue / drawer modules. Not user-visible; pure structural debt. Risky to do mid-sprint.
 - 🟧 🚀 **Multi-machine memory sync** (~3-5 days) — periodic backup of `data/memory.db` to NAS or shared encrypted folder. Operator A's contacts visible on operator B's kiosk. Agency-wide knowledge not personal. Needs conflict-resolution design first.
 - 🟧 🚀 **Live shoot mode (phone-as-mic)** (~1 week) — the one transformative piece of the original Phase 5 plan still missing. Phone walks the studio, real-time captions per shot, "flag this as hero" mid-frame, contact sheet ready by lunch.
-- 🟧 ⚙️ **Multi-operator profile picker** (~2-3 days) — namespace prep already exists; modal lock-screen picker on boot doesn't.
-- 🟧 **HUD command palette (Cmd+K)** (~1.5 days) — keyboard fallback for everything voice does. The `/actions` manifest endpoint already serves the data; just needs the palette UI.
-- 🟨 ⚙️ **Containerised render env** (~3-5 days) — Docker per video job with ffmpeg + ImageMagick + exiftool pre-baked. Concurrent renders stop fighting over `output/`. Already partially scaffolded behind `RENDER_USE_DOCKER=1` env var.
+- 🟨 ⚙️ **Containerised render env polish** (~3-5 days) — Docker per video job with ffmpeg + ImageMagick + exiftool pre-baked. Scaffold ships behind `RENDER_USE_DOCKER=1`; reliable parity with host pipeline isn't done.
 - 🟨 **Lane-grouped progress viz** (~1-2 days) — video pipeline stages as parallel lanes in the task strip. Bonus for client demos: they watch the work happen.
-- 🟨 **Per-profile theming persisted** (~1 day) — each operator's brand colour persists per session.
 - 🟩 **Tablet/iPad responsive variant** (~2-3 days) — operator's iPad mirrors HUD when away from desk.
 - 🟩 **Layout customisation** (~3 days) — drag panels to reposition, save per-profile.
+
+### Things I'd file under "could meaningfully sharpen"
+
+Not in the original TODO but real opportunities:
+
+- 🟧 **MLX-accelerated Whisper** (~half day) — currently `faster-whisper` runs CPU int8. MLX-whisper runs on Apple GPU, 2-3× faster STT. Drops voice-loop floor from ~1.5s to ~700ms.
+- 🟧 **Streaming Whisper (partial transcripts)** (~1 day) — start the LLM call as soon as a confident partial transcript exists, not at end-of-utterance. Saves ~300-500ms.
+- 🟨 **Fast-path expansion** (~ongoing) — current `bridge/fast-path.mjs` covers ~10 patterns. As Adam uses the kiosk, common queries that fall through to the LLM should migrate to fast-path. A `fast-path candidates` log entry could surface these automatically.
+- 🟨 **Cancel-from-HUD button** (~30 min) — there's a `cancel_active_jobs` tool now and a `/cancel` HTTP endpoint, but no visible button. A small X on the active task strip would make it discoverable.
+- 🟨 **First-run wake-word training** (~half day) — current install asks for a wake phrase but doesn't validate the operator's accent against it. A 30-second mic test on first boot could tighten the false-positive rate.
 
 ---
 
@@ -47,6 +54,11 @@ The TODO had marked these critical / high / medium. They're all in the code now:
 - ✅ Containerised render env scaffold (`RENDER_USE_DOCKER=1`)
 - ✅ Cost / usage telemetry (`bridge/usage-log.mjs` + Agent Console)
 - ✅ Cancel active jobs (`cancel_active_jobs` tool, Vision + Browse cooperative abort)
+- ✅ Multi-operator profile picker — boot lock-screen (`hud.js` `maybeShowProfileLockScreen`)
+- ✅ HUD command palette — Cmd+K, free-text + tool-browse modes
+- ✅ First-run onboarding tips — pinned bottom-left for 60s, per-profile flag
+- ✅ Per-profile theming — already persisted in profiles.js Storage namespacing
+- ✅ Fast-path handler — `bridge/fast-path.mjs` skips the LLM on time / timer / sleep / map / greetings, ~500ms end-to-end vs ~2s
 
 ---
 
