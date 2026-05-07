@@ -16,6 +16,7 @@ import * as TimerHud from "./timer-hud.js";
 import * as WhisperStt from "./whisper-stt.js";
 import * as DemoRecorder from "./demo-recorder.js";
 import * as Conversation from "./conversation-mode.js";
+import * as TtsPipeline from "./tts-pipeline.js";
 
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
@@ -621,262 +622,13 @@ function offlineFallback() {
 /** Voice id resolver — single source of truth for which Kokoro voice to use. */
 function getKokoroVoice() { return Storage.get("voice", "bm_daniel"); }
 
-/** Speak using local Kokoro TTS (free, Apache 2.0). Falls back to system speechSynthesis
- *  if unreachable. Plays Kokoro WAVs via Web Audio so we can tap the buffer into the
- *  existing speaking analyser for the real-time waveform. */
-async function speak(text) {
-  setState("speaking");
-  const spoken = TTS.sanitiseForTTS(text);
-
-  /* First try Kokoro — local, free, brand-trained voice. */
-  try {
-    const wav = await TTS.synthesise(spoken, getKokoroVoice());
-    await playWavWithAnalyser(wav);
-    setState("idle");
-    setTimeout(() => { transcript.hidden = true; }, 1800);
-    return;
-  } catch (e) {
-    console.warn("[Flat-Out] Kokoro unreachable, falling back to system TTS:", e.message);
-  }
-
-  /* Fallback path — Web Speech API. Lower fidelity but keeps the voice loop alive
-   * if the Python TTS service is down. */
-  await TTS.fallbackSystemTTS(spoken);
-  setState("idle");
-  setTimeout(() => { transcript.hidden = true; }, 1800);
-}
-
-/* ---------- STREAMING ASK + SPEAK ----------
- * Why: legacy path (askLLM + speak) blocks on full reply before any audio plays. With
- * sentence-level streaming we start synthesising as soon as the first sentence is ready,
- * so a 5-sentence reply starts speaking after ~1s instead of ~5s. The TTS module owns
- * the queue + cancellation; voice.js just feeds sentences in and wires the waveform.
- *
- * Returns the final assembled text (same as askLLM) so callers can persist to history. */
-
-/* Module-level handle on the in-flight speech session. Lets barge-in code abort cleanly
- * without traversing closures — call cancelCurrentSpeech() from anywhere. */
-let currentSpeechSession = null;
-
-function cancelCurrentSpeech() {
-  if (!currentSpeechSession) return;
-  currentSpeechSession.cancelled = true;
-  /* Why: an unfired filler timer would otherwise enqueue a phantom sentence
-   * AFTER barge-in / cancel — operator interrupts with "stop" and then hears
-   * "Let me check…" 200ms later. Defensive: also harmless if filler already
-   * fired. */
-  if (currentSpeechSession.cancelPendingFiller) currentSpeechSession.cancelPendingFiller();
-  TTS.cancelTTS();
-  /* Resolve the in-flight finished promise so the caller's await speakStream() unblocks
-   * and the state transition to idle happens immediately. */
-  if (currentSpeechSession.resolveEarly) currentSpeechSession.resolveEarly(currentSpeechSession.accumulated);
-}
-
-async function speakStream(query, history) {
-  /* Stack turns: if a previous speakStream is still in flight, this call waits for
-   * it before starting. Means a second query while the first is still speaking
-   * queues naturally — no overlap. acquireTurn() returns a release() the caller
-   * must call when fully done (TTS drained). */
-  const turn = await TTS.acquireTurn();
-
-  setState("speaking");
-  /* Wire the streaming TTS queue's analyser into the waveform's "speaking-real" path
-   * so the bottom strip pulses with the real audio amplitude — same UX as the legacy
-   * playWavWithAnalyser approach. */
-  const { analyser, buffer } = TTS.getSpeakingAnalyser();
-  wf.speakingAnalyser = analyser;
-  wf.speakingBuffer = buffer;
-  wf.mode = "speaking-real";
-  /* If demo recording is active, route Kokoro audio into the demo mix so
-   * client demos capture both sides of the conversation. */
-  const _recDest = DemoRecorder.getRecDestination();
-  if (_recDest) { try { TTS.setRecordingDestination(_recDest); } catch {} }
-
-  /* Filler phrase — randomised acknowledgement that buys time while the LLM thinks.
-   *
-   * Why deferred: with MLX Whisper at ~450ms STT and qwen2.5 streaming first
-   * sentence in ~600-800ms, fast queries used to play "Let me check…" right
-   * before a one-sentence answer — the filler doubled the perceived reply
-   * length. We now schedule the filler on a 600ms fuse and cancel it the
-   * moment the LLM emits its first sentence. Slow queries (diary / shoot /
-   * vision tasks) still hear filler because they take >600ms; fast queries
-   * skip it entirely.
-   *
-   * Pick the longer filler pool when the query contains slow-tool keywords
-   * (diary, shoot, render, etc) — gives the operator more substantial audio
-   * to listen to while the LLM + AppleScript / vision / ffmpeg work runs. */
-  const filler = TTS.pickFiller({ long: TTS.looksSlow(query) });
-  const FILLER_DELAY_MS = 600;
-  let fillerEnqueued = false;
-  let fillerTimer = setTimeout(() => {
-    fillerEnqueued = true;
-    TTS.enqueueSentence(filler, getKokoroVoice());
-  }, FILLER_DELAY_MS);
-  /* Helper for the streamSentence handler to abort the unfired filler when
-   * the real reply beats the fuse. Idempotent. */
-  const cancelPendingFiller = () => {
-    if (fillerTimer) { clearTimeout(fillerTimer); fillerTimer = null; }
-  };
-
-  const session = { runId: null, cancelled: false, accumulated: "", resolveEarly: null, cancelPendingFiller };
-  currentSpeechSession = session;
-
-  /* Start the barge-in monitor — fires cancelCurrentSpeech() if the operator's voice
-   * crosses BARGE_IN_RMS for more than BARGE_IN_DURATION_MS while audio is playing. */
-  startBargeInMonitor();
-
-  /* Subscribe to streaming events. We track the runId from the streamStart frame so a
-   * stale stream's late sentences (after barge-in) don't bleed into the next utterance. */
-  const finished = new Promise((resolve, reject) => {
-    session.resolveEarly = resolve;
-
-    const unsubStart = Bridge.on("llm.streamStart", (msg) => {
-      if (msg.runId && !session.runId) session.runId = msg.runId;
-    });
-    const unsubSentence = Bridge.on("llm.sentence", (msg) => {
-      if (session.cancelled) return;
-      if (session.runId && msg.runId !== session.runId) return;
-      const sentence = msg.data?.text || msg.text;
-      if (!sentence) return;
-      /* Real reply beat the filler fuse — kill the pending filler so the
-       * operator doesn't hear "Let me check…" right before a fast answer. */
-      cancelPendingFiller();
-      TTS.enqueueSentence(sentence, getKokoroVoice());
-      /* Stream the same text into the on-screen transcript so the operator sees + hears
-       * in lockstep. Append rather than replace so the full reply scrolls in. */
-      const cur = replyEl.textContent === "…" ? "" : replyEl.textContent;
-      replyEl.textContent = cur ? `${cur} ${sentence}` : sentence;
-      session.accumulated = (session.accumulated ? session.accumulated + " " : "") + sentence;
-    });
-    const unsubDone = Bridge.on("llm.streamDone", (msg) => {
-      if (session.runId && msg.runId !== session.runId) return;
-      if (session.cancelled) return;
-      const finalText = msg.data?.text || msg.text || session.accumulated;
-      session.accumulated = finalText;
-      /* Resolve once the TTS queue actually finishes playing, not when the LLM finishes
-       * generating — otherwise we transition out of "speaking" while audio is still rolling. */
-      if (TTS.isSpeaking()) {
-        TTS.onIdle(() => resolve(finalText));
-      } else {
-        resolve(finalText);
-      }
-    });
-    const unsubError = Bridge.on("llm.streamError", (msg) => {
-      if (session.runId && msg.runId !== session.runId) return;
-      reject(new Error(msg.data?.error || msg.error || "stream error"));
-    });
-
-    /* Stash the unsubs on the session so the outer try/finally can tear them down. */
-    session.unsubs = [unsubStart, unsubSentence, unsubDone, unsubError];
-  });
-
-  try {
-    /* Fire the streaming request. The reply payload arrives via the bridge's id-correlated
-     * reply, but we don't need to await it — events drive everything. */
-    Bridge.ask({ type: "llm.askStream", payload: { query, history, sessionId: getSessionId() } }).catch((e) => {
-      console.warn("[Flat-Out] askStream failed:", e.message);
-      /* Resolve early with whatever we accumulated so the speak() pipeline closes cleanly. */
-      if (session.resolveEarly) session.resolveEarly(session.accumulated || "");
-    });
-    const text = await finished;
-    setState("idle");
-    setTimeout(() => { transcript.hidden = true; }, 1800);
-    return text;
-  } finally {
-    stopBargeInMonitor();
-    if (session.unsubs) for (const u of session.unsubs) { try { u(); } catch {} }
-    if (currentSpeechSession === session) currentSpeechSession = null;
-    if (!TTS.isSpeaking()) {
-      wf.speakingAnalyser = null;
-      wf.speakingBuffer = null;
-    }
-    /* Release the turn so the next queued speakStream() can start. Always runs,
-     * even on error / cancellation, so a failed turn doesn't deadlock the queue. */
-    turn.release();
-  }
-}
-
-/* ---------- BARGE-IN ----------
- * Why: a 5-sentence reply that the operator already understood after the first sentence
- * shouldn't keep playing. While speaking, sample the mic at 50ms intervals; if RMS
- * exceeds an aggressive threshold for ~250ms continuously (real speech, not just one
- * loud spike) cancel TTS so the operator can re-engage immediately. The speaker-bleed
- * problem (no echo cancellation on the kiosk) is mitigated by the threshold sitting
- * well above the typical Daniel-through-speakers RMS — only an actual nearby voice
- * crosses it sustainably. */
-const BARGE_IN_RMS = 0.18;        // empirically: speaker-bleed peaks ~0.08, voice 0.2-0.5
-const BARGE_IN_DURATION_MS = 250; // sustained for this long before we cancel
-const BARGE_IN_TICK_MS = 50;
-
-let bargeInTimer = null;
-let bargeInVoiceStart = 0;
-function startBargeInMonitor() {
-  if (bargeInTimer) return;
-  bargeInVoiceStart = 0;
-  bargeInTimer = setInterval(() => {
-    /* Only active while real audio is playing through the speaking analyser. Idle and
-     * synthetic-speaking modes don't need barge-in (synthetic = system TTS fallback,
-     * which is non-cancellable from JS anyway). */
-    if (wf.mode !== "speaking-real") {
-      stopBargeInMonitor();
-      return;
-    }
-    if (!wf.analyser || !wf.buffer) return;          /* mic analyser not yet open */
-    if (!passive && !listening) return;              /* operator hasn't engaged the kiosk */
-    const rms = currentRms();
-    if (rms > BARGE_IN_RMS) {
-      if (!bargeInVoiceStart) bargeInVoiceStart = Date.now();
-      else if (Date.now() - bargeInVoiceStart >= BARGE_IN_DURATION_MS) {
-        console.log(`[barge-in] sustained mic activity (rms=${rms.toFixed(3)}) — cancelling speech`);
-        cancelCurrentSpeech();
-        stopBargeInMonitor();
-      }
-    } else {
-      bargeInVoiceStart = 0;
-    }
-  }, BARGE_IN_TICK_MS);
-}
-
-function stopBargeInMonitor() {
-  if (bargeInTimer) clearInterval(bargeInTimer);
-  bargeInTimer = null;
-  bargeInVoiceStart = 0;
-}
-
-/** Decode a WAV ArrayBuffer, route it through the waveform analyser, and play to speakers.
- *  Resolves when playback ends so the caller can flip state. */
-async function playWavWithAnalyser(wavBuffer) {
-  if (!wf.audioCtx) wf.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (wf.audioCtx.state === "suspended") await wf.audioCtx.resume();
-
-  const audioBuffer = await wf.audioCtx.decodeAudioData(wavBuffer.slice(0));
-  const source = wf.audioCtx.createBufferSource();
-  source.buffer = audioBuffer;
-
-  // Create a dedicated speaking analyser so the listening one (mic) keeps its config.
-  const analyser = wf.audioCtx.createAnalyser();
-  analyser.fftSize = 1024;
-  const speakBuf = new Uint8Array(analyser.fftSize);
-
-  source.connect(analyser);
-  analyser.connect(wf.audioCtx.destination);
-  // Tap into the demo-recording mix if it's been set up (recorder is active)
-  DemoRecorder.tapTtsToRec(analyser);
-
-  // Swap waveform mode to read from this analyser instead of synthetic
-  wf.speakingAnalyser = analyser;
-  wf.speakingBuffer = speakBuf;
-  wf.mode = "speaking-real";
-
-  return new Promise((resolve) => {
-    source.onended = () => {
-      wf.speakingAnalyser = null;
-      wf.speakingBuffer = null;
-      resolve();
-    };
-    source.start(0);
-  });
-}
+/* Local aliases for the TTS pipeline so existing call sites stay valid.
+ * The TtsPipeline module owns speak/speakStream/cancelCurrentSpeech +
+ * the barge-in monitor + currentSpeechSession state. Wired in wireUI()
+ * via TtsPipeline.setHandlers(). */
+const speak = (text) => TtsPipeline.speak(text);
+const speakStream = (q, h) => TtsPipeline.speakStream(q, h);
+const cancelCurrentSpeech = () => TtsPipeline.cancelCurrentSpeech();
 
 /* Wake-word + utterance-classification helpers (extractQuery, containsWake,
  * quickExtractSubject, isAffirmative, isDismissal) live in ./wake-parsing.js
@@ -1520,6 +1272,25 @@ function wireUI() {
     },
     speak,
     clearHistory,
+  });
+  /* TTS pipeline owns the speaking-analyser, barge-in monitor, and the
+   * streaming-LLM-to-Kokoro plumbing. Wire all the cross-module deps:
+   * UI side-effects (setState/replyEl/transcript), shared waveform state
+   * (wf), engagement check (passive || listening drives barge-in), mic
+   * RMS reader, voice picker, bridge transport, demo-recorder hooks. */
+  TtsPipeline.setHandlers({
+    setState,
+    replyEl,
+    transcript,
+    wf,
+    isEngaged: () => passive || listening,
+    currentRms,
+    getKokoroVoice,
+    bridgeOn: (type, fn) => Bridge.on(type, fn),
+    bridgeAsk: (payload) => Bridge.ask(payload),
+    getSessionId,
+    getRecDestination: () => DemoRecorder.getRecDestination(),
+    tapTtsToRec: (analyser) => DemoRecorder.tapTtsToRec(analyser),
   });
   SetupModal.init({ autoPickMic: MicTest.autoPickMic, getPreferredDeviceId, setPreferredDevice, wf });
   SetupModal.maybeShowSetup();        // first-run setup modal (no-op after first completion)
