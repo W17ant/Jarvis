@@ -208,7 +208,7 @@ if [[ ! -x "$HERE/.venv/bin/python" ]]; then
 fi
 ok "venv at .venv ($("$HERE/.venv/bin/python" --version))"
 
-step "Python deps (Kokoro TTS + faster-whisper STT)"
+step "Python deps (Kokoro TTS + Whisper STT)"
 # --no-cache-dir avoids "Cache entry deserialization failed" warnings spammed
 # during pip install when the per-user cache has stale entries from a previous
 # Python version. Adds ~2s but keeps the output clean for non-technical users.
@@ -216,6 +216,18 @@ step "Python deps (Kokoro TTS + faster-whisper STT)"
 "$HERE/.venv/bin/pip" install --quiet --no-cache-dir \
   "kokoro-onnx>=0.4" "onnxruntime" "soundfile" "numpy" \
   "faster-whisper" "ctranslate2" 2>&1 | grep -v "Cache entry" || true
+
+# Why MLX Whisper: Apple-Silicon-only STT backend that runs on the GPU instead
+# of CPU int8. 2-3× faster than faster-whisper on M-series. The whisper_server
+# tries MLX first then falls back to faster-whisper, so installing both gives
+# us GPU on arm64 and CPU on Intel/Linux fallback paths. Skip on non-arm64
+# since mlx is a no-op there.
+if [[ "$(uname -m)" == "arm64" ]]; then
+  ok "Apple Silicon detected — installing mlx-whisper for GPU STT"
+  "$HERE/.venv/bin/pip" install --upgrade "mlx-whisper" 2>&1 | grep -v "Cache entry" || true
+else
+  ok "Non-arm64 host — skipping mlx-whisper (faster-whisper handles STT)"
+fi
 ok "python deps installed"
 
 # Verify the imports actually work — pip success doesn't guarantee runtime.

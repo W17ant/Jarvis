@@ -112,6 +112,11 @@ if [[ -x .venv/bin/pip ]]; then
   if [[ $CHECK_ONLY -eq 0 ]]; then
     .venv/bin/pip install --quiet --upgrade pip
     .venv/bin/pip install --quiet kokoro-onnx onnxruntime soundfile numpy faster-whisper ctranslate2
+    # Apple Silicon gets mlx-whisper for GPU STT (~2-3× faster than faster-whisper).
+    # Non-arm64 sticks to faster-whisper above. uname -m gates match install.sh.
+    if [[ "$(uname -m)" == "arm64" ]]; then
+      .venv/bin/pip install --quiet --upgrade mlx-whisper || warn "mlx-whisper install failed — STT will fall back to faster-whisper"
+    fi
     ok "python deps in sync"
   else
     ok "would refresh .venv"
