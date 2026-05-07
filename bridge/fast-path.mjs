@@ -112,6 +112,26 @@ const HANDLERS = [
     }),
   },
 
+  /* ---------- "What can you do?" — capability tour ----------
+   *  Adam (and visitors / clients) keep asking this in the kiosk's first
+   *  five minutes. Currently it goes through the LLM, which paraphrases
+   *  inconsistently and sometimes drifts into the refusal-shaped phrasing
+   *  we hit earlier ("I'm only here for automotive Flat-Out tasks"). A
+   *  canned, friendly tour that points at the cheat-sheet hotkey for the
+   *  full list is faster (~500ms) and on-brand.
+   *
+   *  Match the bare meta-question only — "what can you do for the
+   *  Bentley shoot" needs the LLM. We require the question to BE the
+   *  whole utterance (or end with the meta-shape) so contextual variants
+   *  fall through. */
+  {
+    test: /^(?:(?:so\s+)?what\s+can\s+you\s+(?:do|help\s+with)|what\s+(?:do|are)\s+(?:you|your)\s+(?:able\s+to\s+do|capabilities|skills)|what\s+tools\s+(?:do\s+you\s+have|are\s+available)|what\s+are\s+you\s+(?:capable\s+of|good\s+at)|tell\s+me\s+what\s+you\s+can\s+do|show\s+me\s+(?:what\s+you\s+can\s+do|your\s+(?:tools|capabilities|skills))|list\s+your\s+(?:tools|capabilities|skills))[?.!]*$/i,
+    handle: () => ({
+      match: true,
+      reply: "Quite a lot, sir. I help with shoot work — culling, captioning, editing, and rendering. Plus calendar, mail, contacts, web research, and a hundred other tools across Mac apps. Press command and question-mark for the full cheat sheet, or just ask me to do the thing.",
+    }),
+  },
+
   /* ---------- Open URL — Google Maps -----------
    *  Accepts a wide variety of operator phrasings + tolerates trailing
    *  context ("to scout a shoot", "for tomorrow's location"). The original

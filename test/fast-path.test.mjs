@@ -182,6 +182,52 @@ describe("fast-path: sleep / wake-down", () => {
   }
 });
 
+describe("fast-path: 'what can you do' capability tour", () => {
+  /* Bare meta-questions about capabilities must hit the canned tour reply
+   * (no LLM, no refusal risk). Variants matter — Adam, visitors, and
+   * clients all phrase this differently. */
+  const positives = [
+    "what can you do",
+    "what can you do?",
+    "what can you help with",
+    "what are you capable of",
+    "what are your capabilities",
+    "what tools do you have",
+    "what tools are available",
+    "tell me what you can do",
+    "show me what you can do",
+    "show me your capabilities",
+    "list your tools",
+    "list your skills",
+    "so what can you do",
+  ];
+  for (const q of positives) {
+    it(`hits the capability tour for "${q}"`, () => {
+      const r = tryFastPath(q);
+      expect(r).not.toBeNull();
+      expect(r.reply).toBeTruthy();
+      expect(r.toolCall).toBeFalsy();
+      /* Reply should be the capability tour, not a no-op ack like "Right." */
+      expect(r.reply.length).toBeGreaterThan(40);
+    });
+  }
+
+  /* Contextual queries about capabilities for a specific topic MUST reach
+   * the LLM — Adam asking "what can you do for the Bentley shoot" needs
+   * the actual model context, not the canned tour. */
+  const negatives = [
+    "what can you do for the Bentley shoot",
+    "what can you do with this image",
+    "what can you do about the late delivery",
+    "tell me what you can do to help me edit",
+  ];
+  for (const q of negatives) {
+    it(`falls through "${q}" to the LLM`, () => {
+      expect(tryFastPath(q)).toBeNull();
+    });
+  }
+});
+
 describe("fast-path: greetings + acknowledgements", () => {
   const greetings = ["hi", "hello", "hey", "good morning", "morning"];
   for (const q of greetings) {
