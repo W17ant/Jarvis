@@ -61,6 +61,7 @@ import * as Transcribe from "./transcribe.mjs";
 import * as UsageLog from "./usage-log.mjs";
 import * as EodDigest from "./eod-digest.mjs";
 import * as FastPath from "./fast-path.mjs";
+import * as FastPathCandidates from "./fast-path-candidates.mjs";
 import * as Crew from "./crew.mjs";
 import * as CrewHelpers from "./crew-helpers.mjs";
 import * as StudioMap from "./studio-map.mjs";
@@ -3000,6 +3001,7 @@ async function _executeToolInner(name, args) {
 }
 
 async function askLLM(query, history = [], { sessionId = null } = {}) {
+  const _askT0 = Date.now();
   /* Fast-path: pattern-match common queries (time / timer / sleep / open
    * map / greetings) and bypass Ollama entirely. ~500ms total round-trip
    * vs ~2s through the LLM. The handler may also return a tool to dispatch
@@ -3017,6 +3019,9 @@ async function askLLM(query, history = [], { sessionId = null } = {}) {
       catch {}
     }
     console.log(`[fast-path] "${query.slice(0, 40)}" → bypassed LLM (${fp.toolCall?.name || "no tool"})`);
+    /* Record the hit for the candidates dashboard (so hit-rate is computable
+     * alongside the fall-through patterns). Fire-and-forget. */
+    FastPathCandidates.record({ query, elapsedMs: Date.now() - _askT0, source: "askLLM", hit: true }).catch(() => {});
     return fp.reply;
   }
 
@@ -3230,6 +3235,9 @@ When given [Context], use those facts verbatim. If asked to do something you don
         try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
         catch (e) { console.warn(`[bridge] turn persist (assistant) failed: ${e.message}`); }
       }
+      /* Record fall-through with total elapsed — this is the data point
+       * that turns into "queries you should fast-path next" later. */
+      FastPathCandidates.record({ query, elapsedMs: Date.now() - _askT0, source: "askLLM", hit: false }).catch(() => {});
       return finalReply;
     }
 
@@ -3251,6 +3259,9 @@ When given [Context], use those facts verbatim. If asked to do something you don
       });
     }
   }
+  /* Hop loop hit max without a clean answer — still log as fall-through
+   * so dashboards see the slow path. */
+  FastPathCandidates.record({ query, elapsedMs: Date.now() - _askT0, source: "askLLM", hit: false }).catch(() => {});
   return "I tried a few searches but couldn't pull a clean answer together — try asking more specifically.";
 }
 
@@ -3274,6 +3285,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
  *  to history without missing anything that was streamed).
  */
 async function askLLMStream({ query, history = [], onSentence, sessionId = null }) {
+  const _askStreamT0 = Date.now();
   /* Fast-path: pattern-match common queries and emit a synthetic single-
    * sentence stream. Same shape as a real LLM stream from the HUD's
    * point of view — onSentence fires once with the canned reply, the
@@ -3292,6 +3304,7 @@ async function askLLMStream({ query, history = [], onSentence, sessionId = null 
       catch {}
     }
     console.log(`[fast-path stream] "${query.slice(0, 40)}" → bypassed LLM (${fp.toolCall?.name || "no tool"})`);
+    FastPathCandidates.record({ query, elapsedMs: Date.now() - _askStreamT0, source: "askLLMStream", hit: true }).catch(() => {});
     return fp.reply;
   }
 
@@ -3490,6 +3503,7 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
         try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
         catch (e) { console.warn(`[bridge] turn persist (assistant, stream) failed: ${e.message}`); }
       }
+      FastPathCandidates.record({ query, elapsedMs: Date.now() - _askStreamT0, source: "askLLMStream", hit: false }).catch(() => {});
       return finalReply;
     }
 
@@ -3523,6 +3537,7 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
     try { Memory.appendTurn({ sessionId, role: "assistant", content: finalReply, tools: toolsThisQuery }); }
     catch (e) { console.warn(`[bridge] turn persist (assistant, stream end) failed: ${e.message}`); }
   }
+  FastPathCandidates.record({ query, elapsedMs: Date.now() - _askStreamT0, source: "askLLMStream", hit: false }).catch(() => {});
   return finalReply || "I tried a few searches but couldn't pull a clean answer together — try asking more specifically.";
 }
 
@@ -3647,6 +3662,23 @@ const httpServer = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const limit = Number(url.searchParams.get("limit")) || 30;
     const summary = await UsageLog.getUsageSummary({ recentLimit: limit });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, ...summary }));
+    return;
+  }
+
+  /* GET /fast-path-candidates — aggregated patterns the operator asked
+   * that fell through to the LLM. Used to triage which queries to migrate
+   * to fast-path next. Optional query params:
+   *    since     ISO date — only entries after this
+   *    minCount  minimum occurrences for a pattern to surface (default 2)
+   *    limit     max patterns returned (default 25) */
+  if (req.url?.startsWith("/fast-path-candidates") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    const since = url.searchParams.get("since") || null;
+    const minCount = Number(url.searchParams.get("minCount")) || 2;
+    const limit = Number(url.searchParams.get("limit")) || 25;
+    const summary = await FastPathCandidates.summarise({ since, minCount, limit });
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify({ ok: true, ...summary }));
     return;
