@@ -1,3 +1,4 @@
+// @ts-check
 /** fast-path.mjs - Skip-the-LLM handler for instant-answer queries.
  *
  *  The voice loop floor on local hardware is roughly:

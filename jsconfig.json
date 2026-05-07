@@ -1,0 +1,30 @@
+{
+  "_comment": "JSDoc-driven type checking. checkJs:false means files are only checked when they have a // @ts-check directive at the top — opt-in per file so we can roll this out gradually without breaking the rest of the codebase.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": [
+    "*.js",
+    "*.mjs",
+    "bridge/**/*.mjs",
+    "test/**/*.mjs"
+  ],
+  "exclude": [
+    "node_modules",
+    "data",
+    "output",
+    "shoots"
+  ]
+}

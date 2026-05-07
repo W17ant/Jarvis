@@ -1,3 +1,4 @@
+// @ts-check
 /** fast-path-candidates.mjs - Log queries that fell through to the LLM.
  *
  *  Self-improving infrastructure. Every askLLM / askLLMStream invocation
@@ -41,7 +42,8 @@ const RECENT_MAX = 500;
  *
  *  Async + best-effort: errors are swallowed so a logging hiccup never
  *  breaks the chat path. */
-export async function record({ query, elapsedMs = 0, source = "unknown", hit = false } = {}) {
+/** @param {{ query: string, elapsedMs?: number, source?: string, hit?: boolean }} entry */
+export async function record({ query, elapsedMs = 0, source = "unknown", hit = false }) {
   if (!query) return;
   const entry = {
     ts: Date.now(),

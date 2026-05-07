@@ -1,3 +1,4 @@
+// @ts-check
 /** imessage-listener.mjs - Inbound iMessage poller.
  *
  *  Watches the operator's local Messages chat.db (~/Library/Messages/chat.db)
@@ -172,6 +173,12 @@ function senderIsAllowed(sender, allowed) {
 /** One poll tick. Reads config (so live edits take effect without a
  *  restart), checks new messages, fires the callback for each that
  *  passes the allowlist + trigger checks, advances the watermark. */
+/* Throttle the noisy 'Full Disk Access required?' warnings — the poll
+ * fires every few seconds, but the operator only needs to see this once
+ * a minute. Module-scope rather than the previous function-attached
+ * static so it types cleanly. */
+let _lastErrorLog = 0;
+
 async function pollOnce() {
   const config = await loadConfig();
   if (!config.enabled || !config.allowedSenders.length) return;
@@ -187,9 +194,9 @@ async function pollOnce() {
     } catch (e) {
       /* First-poll permission errors are common (Full Disk Access). Log
        * once a minute, not every poll, to avoid spamming. */
-      if (Date.now() - (pollOnce._lastErrorLog || 0) > 60_000) {
+      if (Date.now() - (_lastErrorLog || 0) > 60_000) {
         console.warn(`[imessage] cannot read chat.db (Full Disk Access required?): ${e.message}`);
-        pollOnce._lastErrorLog = Date.now();
+        _lastErrorLog = Date.now();
       }
       return;
     }
@@ -198,9 +205,9 @@ async function pollOnce() {
   let rows;
   try { rows = await fetchNewMessages(state.lastRowId); }
   catch (e) {
-    if (Date.now() - (pollOnce._lastErrorLog || 0) > 60_000) {
+    if (Date.now() - (_lastErrorLog || 0) > 60_000) {
       console.warn(`[imessage] poll error: ${e.message}`);
-      pollOnce._lastErrorLog = Date.now();
+      _lastErrorLog = Date.now();
     }
     return;
   }

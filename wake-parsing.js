@@ -1,3 +1,4 @@
+// @ts-check
 /** wake-parsing.js - Wake-word detection + utterance classification.
  *
  *  Pulled out of the voice.js monolith. All-pure logic — no DOM, no
@@ -25,7 +26,12 @@ let _agentName = "Flat-Out";
 
 /** Update brand state. Called once after loadBrandIntoVoice() reads
  *  config/brand.json. Subsequent calls update in place — useful when
- *  the operator switches profiles mid-session. */
+ *  the operator switches profiles mid-session.
+ *
+ *  @param {object} [opts]
+ *  @param {string} [opts.agentName]
+ *  @param {string[]} [opts.wakeVariants]
+ */
 export function setBrand({ agentName, wakeVariants } = {}) {
   if (typeof agentName === "string") _agentName = agentName;
   if (Array.isArray(wakeVariants) && wakeVariants.length) {

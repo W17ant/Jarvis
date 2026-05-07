@@ -1,3 +1,4 @@
+// @ts-check
 /** passive-vad.js - VAD primitives for the passive wake-word loop.
  *
  *  Pure-math layer: read the mic analyser, maintain a rolling ambient
@@ -51,6 +52,11 @@ let _getAnalyserBuf = () => null;
 let _isPassive = () => false;
 let _isSpeaking = () => false;
 
+/** @param {object} [deps]
+ *  @param {() => ({ analyser: AnalyserNode, buffer: Uint8Array } | null)} [deps.getAnalyserBuf]
+ *  @param {() => boolean} [deps.isPassive]
+ *  @param {() => boolean} [deps.isSpeaking]
+ */
 export function setHandlers({ getAnalyserBuf, isPassive, isSpeaking } = {}) {
   if (typeof getAnalyserBuf === "function") _getAnalyserBuf = getAnalyserBuf;
   if (typeof isPassive === "function") _isPassive = isPassive;

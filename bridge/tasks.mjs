@@ -1,3 +1,4 @@
+// @ts-check
 /** tasks.mjs - Long-running task lifecycle + broadcast helpers.
  *
  *  Why: pre-existing bridge events (video.edit.complete, yt.thumbnail.progress, etc)
@@ -76,7 +77,8 @@ export function newRunId(prefix = "t") {
  *   Stage matching is case-insensitive substring — emitted "encoding
  *   segments + overlays" matches manifest entry "encoding".
  */
-export function startTask({ kind, label, etaSec, runId, stages } = {}) {
+/** @param {{ kind: string, label?: string, etaSec?: number, runId?: string, stages?: string[] }} opts */
+export function startTask({ kind, label, etaSec, runId, stages } = /** @type {any} */ ({})) {
   if (!kind) throw new Error("startTask: kind required");
   const id = runId || newRunId(kind.replace(/[^a-z0-9]/gi, "_").slice(0, 8));
   const t = { runId: id, kind, label: label || kind, etaSec, startedAt: Date.now() };
@@ -90,6 +92,9 @@ export function startTask({ kind, label, etaSec, runId, stages } = {}) {
 /** Update a task's progress. Pass null/undefined for fields you don't have.
  *  `stage` is a short human-readable lane label ("encoding", "compositing", etc)
  *  rendered as a sub-line under the task label in the HUD's task strip. */
+/** @param {string} runId
+ *  @param {{ percent?: number, label?: string, etaSec?: number, stage?: string }} [update]
+ */
 export function progressTask(runId, { percent, label, etaSec, stage } = {}) {
   const t = tasks.get(runId);
   if (!t) return false;

@@ -1,3 +1,4 @@
+// @ts-check
 /** lightroom-catalog.mjs - Read-only access to a Lightroom Classic catalogue.
  *
  *  `.lrcat` files are SQLite databases. Reading them while Lightroom is
@@ -92,7 +93,7 @@ function openRead(catPath) {
  *  @param {string} [args.keyword]   Substring match on a keyword (case-insensitive).
  *  @param {string} [args.format]    File format filter ("RAW", "JPEG", etc).
  *  @param {number} [args.limit]     Max rows (default 50, cap 500).
- *  @returns {{ ok, count, photos: Array, catalog }}
+ *  @returns {Promise<{ ok: boolean, count?: number, photos?: any[], catalog?: string, catalogPath?: string, error?: string }>}
  */
 export async function findLrPhoto(args = {}) {
   const cat = findCatalogPath();
@@ -102,8 +103,8 @@ export async function findLrPhoto(args = {}) {
       error: "no Lightroom catalogue found. Set LIGHTROOM_CATALOG=<path>.lrcat in .env, or place your catalogue at ~/Pictures/Lightroom/.",
     };
   }
-  const limit = Math.min(Math.max(parseInt(args.limit, 10) || 50, 1), 500);
-  const minRating = args.rating != null ? Math.max(0, Math.min(5, parseInt(args.rating, 10))) : null;
+  const limit = Math.min(Math.max(parseInt(String(args.limit), 10) || 50, 1), 500);
+  const minRating = args.rating != null ? Math.max(0, Math.min(5, parseInt(String(args.rating), 10))) : null;
 
   let db;
   try { db = openRead(cat); }
@@ -117,7 +118,7 @@ export async function findLrPhoto(args = {}) {
     const params = [];
 
     if (minRating != null) { clauses.push("img.rating >= ?"); params.push(minRating); }
-    if (args.pick != null) { clauses.push("img.pick = ?");    params.push(parseInt(args.pick, 10)); }
+    if (args.pick != null) { clauses.push("img.pick = ?");    params.push(parseInt(String(args.pick), 10)); }
     if (args.after)        { clauses.push("img.captureTime >= ?"); params.push(String(args.after)); }
     if (args.before)       { clauses.push("img.captureTime <= ?"); params.push(String(args.before)); }
     if (args.format)       { clauses.push("img.fileFormat = ?"); params.push(String(args.format).toUpperCase()); }
@@ -154,7 +155,11 @@ export async function findLrPhoto(args = {}) {
     `;
     params.push(limit);
 
-    const rows = db.prepare(sql).all(...params);
+    /* better-sqlite3 v12 returns `unknown[]` from .all() so we cast to the
+     * concrete row shape — values come from a SQL we control, not user data. */
+    const rows = /** @type {Array<{ rootPath?: string, folderPath?: string, filename?: string, captureTime?: string, rating?: number, pick?: number, fileFormat?: string }>} */ (
+      db.prepare(sql).all(...params)
+    );
     const photos = rows.map((r) => ({
       path: path.join(r.rootPath || "", r.folderPath || "", r.filename || ""),
       captureTime: r.captureTime,
@@ -182,7 +187,7 @@ export async function lightroomCatalogStatus() {
   if (!cat) return { ok: false, found: false, hint: "set LIGHTROOM_CATALOG in .env, or use the standard ~/Pictures/Lightroom/ location" };
   try {
     const db = openRead(cat);
-    const stats = db.prepare("SELECT COUNT(*) AS n FROM Adobe_images").get();
+    const stats = /** @type {{ n: number }} */ (db.prepare("SELECT COUNT(*) AS n FROM Adobe_images").get());
     db.close();
     return {
       ok: true,

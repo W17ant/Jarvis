@@ -20,7 +20,8 @@
     "kokoro": "python3 bridge/kokoro_server.py",
     "serve": "python3 -m http.server 8765",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p jsconfig.json"
   },
   "dependencies": {
     "@sparticuz/chromium-min": "^148.0.0",
@@ -35,6 +36,10 @@
   "devDependencies": {
     "@bybas/weather-icons": "^2.0.0",
     "@phosphor-icons/core": "^2.1.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.6.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.5"
   },
   "models": [

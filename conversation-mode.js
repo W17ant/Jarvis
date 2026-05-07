@@ -1,3 +1,4 @@
+// @ts-check
 /** conversation-mode.js - Multi-turn dialogue state.
  *
  *  After the first wake, the operator stays in "conversation mode" — every
@@ -21,11 +22,17 @@
  *                            with no follow-up query)
  */
 
-let _wakeBtnLabel = () => {};   // (text) => void  — sets the wake button text
-let _speak = async () => {};     // (text) => Promise<void>
+/** @type {(text: string) => void} */
+let _wakeBtnLabel = () => {};
+/** @type {(text: string) => Promise<void>} */
+let _speak = async () => {};
+/** @type {() => void} */
 let _clearHistory = () => {};
 
 let conversationMode = false;
+/* setTimeout return type — number in browsers, NodeJS.Timeout in node.
+ * This module runs in the HUD (browser), so use ReturnType for portability. */
+/** @type {ReturnType<typeof setTimeout> | 0} */
 let conversationTimeoutId = 0;
 const CONVERSATION_IDLE_MS = 60000;
 const ACK_PHRASES = ["Yes, sir.", "Sir.", "Go ahead.", "I'm here, sir.", "Listening, sir."];
@@ -33,7 +40,12 @@ const ACK_PHRASES = ["Yes, sir.", "Sir.", "Go ahead.", "I'm here, sir.", "Listen
 const LABEL_CONVERSATION = "CONVERSATION — TAP TO STOP";
 const LABEL_WAKE_LISTENING = "WAKE LISTENING — TAP TO STOP";
 
-/** One-shot wiring from voice.js. Idempotent. */
+/** One-shot wiring from voice.js. Idempotent.
+ *  @param {object} [deps]
+ *  @param {(text: string) => void} [deps.wakeBtnLabel]
+ *  @param {(text: string) => Promise<void>} [deps.speak]
+ *  @param {() => void} [deps.clearHistory]
+ */
 export function setHandlers({ wakeBtnLabel, speak, clearHistory } = {}) {
   if (typeof wakeBtnLabel === "function") _wakeBtnLabel = wakeBtnLabel;
   if (typeof speak === "function") _speak = speak;

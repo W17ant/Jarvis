@@ -1,3 +1,4 @@
+// @ts-check
 /** usage-log.mjs - Append-only LLM usage / cost ledger.
  *
  *  Every chat call lands one row here: timestamp, provider, model, token
@@ -65,6 +66,7 @@ function estimateCostUSD(provider, model, tokensIn, tokensOut) {
 /** Append one usage record. Tolerant of partial / weird inputs — anything
  *  missing becomes null/0 in the output rather than failing. Never throws;
  *  a logging hiccup must not break the chat path. */
+/** @param {{ provider: string, model: string, tokensIn?: number, tokensOut?: number, cachedIn?: number, cachedWritten?: number, elapsedMs?: number, source?: string, error?: string | null }} entry */
 export async function recordUsage({
   provider,
   model,
@@ -75,7 +77,7 @@ export async function recordUsage({
   elapsedMs = 0,
   source = "unknown",
   error = null,
-} = {}) {
+}) {
   const ts = Date.now();
   const costUSD = estimateCostUSD(provider, model, tokensIn, tokensOut);
   const entry = {

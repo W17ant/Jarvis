@@ -1,3 +1,4 @@
+// @ts-check
 /** timer-hud.js - Live timer badges in the top-left corner.
  *
  *  The bridge fires three timer-related events that this module listens to:
@@ -87,6 +88,7 @@ async function handleTimerFire(msg) {
   }
   /* Audible: short Web Audio beep + Kokoro speak the label. */
   try {
+    /* @ts-ignore — webkitAudioContext fallback for older Safari */
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -103,6 +105,7 @@ async function handleTimerFire(msg) {
     });
     if (r.ok) {
       const wav = await r.arrayBuffer();
+      /* @ts-ignore — webkitAudioContext fallback for older Safari */
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const buf = await ctx.decodeAudioData(wav);
       const src = ctx.createBufferSource(); src.buffer = buf;
