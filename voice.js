@@ -303,6 +303,51 @@ function audioConstraints() {
   return id ? { ...base, deviceId: { exact: id } } : base;
 }
 
+/* ---- Self-heal on device change ----
+ * Why: macOS routes audio to whatever Input device is currently selected in
+ * System Settings. If the operator switches input (Continuity Camera mic →
+ * Mac mic, or vice-versa) AFTER the HUD has cached a MediaStream, voice.js
+ * keeps using the old stream object — which is now silent at the OS level
+ * because audio is routed elsewhere. Symptom: HUD shows it can hear you
+ * (the analyser's still wired to the new source) but commands aren't
+ * acted on (MediaRecorder still references the old, silent stream).
+ *
+ * Fix: navigator.mediaDevices fires `devicechange` on add/remove/switch.
+ * We drop the cached stream + analyser so the next wfStartListening
+ * acquires fresh from the now-current default input. Adam reported this
+ * exact failure after switching off Continuity Camera in macOS settings. */
+function wireDeviceChange() {
+  if (!navigator.mediaDevices?.addEventListener) return;
+  navigator.mediaDevices.addEventListener("devicechange", () => {
+    /* Refresh the device picker label so the dropdown reflects the new
+     * default input — useful even if no stream is currently cached. */
+    refreshDevicePicker().catch(() => {});
+    if (wf.micStream) {
+      console.log("[Flat-Out] devicechange — dropping cached mic stream");
+      try { wf.micStream.getTracks().forEach((t) => t.stop()); } catch {}
+      wf.micStream = null;
+      /* Analyser was wired to the OLD stream's MediaStreamSource — must
+       * also be cleared so wfStartListening rebuilds it against the new
+       * stream. Otherwise the analyser keeps pulling from a silent source
+       * and the waveform would render flat after a device swap. */
+      wf.analyser = null;
+      wf.buffer = null;
+      dbgSet("device", "(reacquiring on next wake)");
+    }
+    /* If passive listening was running, restart it on the new mic. The
+     * passive loop reads wf.micStream lazily, so we just need to re-trigger
+     * it. Without this, the operator stays in passive mode but the mic is
+     * the now-stale (null) stream and wake words go unheard. */
+    if (passive) {
+      console.log("[Flat-Out] devicechange — restarting passive on new mic");
+      stopPassive();
+      /* Tiny delay so the OS has time to publish the new default input
+       * before we call enumerateDevices/getUserMedia. */
+      setTimeout(() => { startPassive().catch(() => {}); }, 250);
+    }
+  });
+}
+
 /** Hook a mic stream to the analyser. Call when listening starts. Also populates the debug panel. */
 async function wfStartListening() {
   try {
@@ -1567,6 +1612,7 @@ function wireUI() {
 
   wfInit();   // start the state-aware waveform on boot
   refreshDevicePicker();   // populate the input dropdown + auto-select non-built-in
+  wireDeviceChange();      // self-heal cached mic stream when macOS routes audio elsewhere
   /* Wire deps into the mic-test + setup-modal modules before maybeShowSetup
    * runs. Idempotent — re-init on profile switch picks up the new wf
    * instance if the operator switches mid-session. */
