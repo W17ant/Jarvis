@@ -66,6 +66,7 @@ import * as StudioMap from "./studio-map.mjs";
 import * as IMessageListener from "./imessage-listener.mjs";
 import * as Knowledge from "./knowledge.mjs";
 import * as CodeAgent from "./code-agent.mjs";
+import * as Office from "./office.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 
 const execp = promisify(exec);
@@ -1801,6 +1802,73 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "generate_pptx",
+      description: "Build a PowerPoint deck with the agency's brand styling. Use for: client pitch decks, shoot recap presentations, project updates. Slide types: cover (auto-generated as slide 1), section (divider), content (title + body or bullets), image (full-bleed photo), two-column (split text). Output lands in output/pptx/.",
+      parameters: {
+        type: "object",
+        properties: {
+          title:    { type: "string", description: "Deck title — also the cover slide headline." },
+          subtitle: { type: "string", description: "Optional cover subtitle (e.g. client name, project tag)." },
+          slides:   { type: "array", description: "Ordered list of slides. Each: { type, title?, body?, bullets?, left?, right?, imagePath? }",
+            items: { type: "object", properties: {
+              type:      { type: "string", enum: ["cover", "section", "content", "image", "two-column"] },
+              title:     { type: "string" },
+              subtitle:  { type: "string" },
+              body:      { type: "string" },
+              bullets:   { type: "array", items: { type: "string" } },
+              left:      { type: "string" },
+              right:     { type: "string" },
+              imagePath: { type: "string", description: "Absolute or project-relative path to a JPG/PNG. The file must exist when this tool runs." },
+            } } },
+        },
+        required: ["title", "slides"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_docx",
+      description: "Generate a Word document with the agency's brand styling. Use for: shoot briefs, client reports, scripts, meeting summaries. Each section becomes an H1 + body paragraphs. Title appears as a centred heading at the top, agency footer line at the bottom. Output lands in output/docx/.",
+      parameters: {
+        type: "object",
+        properties: {
+          title:    { type: "string" },
+          subtitle: { type: "string" },
+          sections: { type: "array", description: "Ordered list of sections.",
+            items: { type: "object", properties: {
+              heading:    { type: "string" },
+              paragraphs: { type: "array", items: { type: "string" } },
+              body:       { type: "string", description: "Alternative to paragraphs[] when there's just one block." },
+            } } },
+        },
+        required: ["title", "sections"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_xlsx",
+      description: "Generate an Excel workbook with brand-styled headers. Use for: shoot logs, contact lists, project trackers, schedules. Each sheet gets a frozen header row (brand-coloured fill) plus banded body rows for readability. Rows can be arrays of values in header order OR objects keyed by header. Output lands in output/xlsx/.",
+      parameters: {
+        type: "object",
+        properties: {
+          title:  { type: "string" },
+          sheets: { type: "array",
+            items: { type: "object", properties: {
+              name:    { type: "string", description: "Sheet tab name (max 31 chars, no /\\?*[]: chars)." },
+              headers: { type: "array", items: { type: "string" } },
+              rows:    { type: "array", description: "Array of arrays OR array of objects keyed by header." },
+            } } },
+        },
+        required: ["title", "sheets"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "code_agent_run",
       description: "Run LLM-authored async JavaScript in a sandboxed worker. Use when no pre-built tool combination expresses the workflow you need — e.g. 'for each shoot folder modified today, generate a contact sheet then watermark the cheapest result'. Inside the sandbox: `await tools.<name>(args)` calls any allowedTools. Standard JS builtins (Math, JSON, Date, Promise, Array, etc) plus console.log are available. NO fs, network, process, or require — those are reachable only via tools the operator explicitly allowed. ALWAYS confirmation-gated: the operator hears a one-line summary and says 'yes' before any code runs. Returns the script's return value plus captured stdout/stderr.",
       parameters: {
@@ -2211,6 +2279,10 @@ const PLAN_PROPOSED_TOOLS = new Set([
   /* Code agent: highest-trust action available — operator wants to see
    * the purpose + line count + tool subset before they say yes. */
   "code_agent_run",
+  /* Office docs — non-trivial action with a saved file output. Plan
+   * surfaces the title + slide/section/sheet count so the operator
+   * knows what's about to land in output/. */
+  "generate_pptx", "generate_docx", "generate_xlsx",
   /* Personal-assistant tools that touch the operator's wider digital life —
    * iMessage and music are visible to other people / out of the HUD. Plan-stage
    * the intent so the operator can interrupt before send/play. */
@@ -2268,6 +2340,12 @@ function summariseToolCall(name, args) {
       const lines = String(a.code || "").split("\n").length;
       return `Run code-agent: ${(a.purpose || "(no purpose)").slice(0, 50)} · ${lines} lines`;
     }
+    case "generate_pptx":
+      return `Build PPTX deck "${(a.title || "?").slice(0, 50)}" — ${Array.isArray(a.slides) ? a.slides.length : 0} slides`;
+    case "generate_docx":
+      return `Build DOCX "${(a.title || "?").slice(0, 50)}" — ${Array.isArray(a.sections) ? a.sections.length : 0} sections`;
+    case "generate_xlsx":
+      return `Build XLSX "${(a.title || "?").slice(0, 50)}" — ${Array.isArray(a.sheets) ? a.sheets.length : 0} sheets`;
     case "request_browse":
       return `Drive browser to: ${(a.goal || "(no goal)").slice(0, 80)}`;
     case "open_url":
@@ -2421,6 +2499,21 @@ async function _executeToolInner(name, args) {
     case "search_knowledge": return await Memory.searchKnowledge(args || {});
     case "ingest_knowledge": return await Knowledge.ingestAll();
     case "code_agent_run":   return await CodeAgent.runCode(args || {});
+    case "generate_pptx": {
+      const r = await Office.generatePptx(args || {});
+      if (r.ok) broadcastToClients({ type: "office.complete", data: { kind: "pptx", title: args.title, path: r.path, sizeKB: r.sizeKB, slides: r.slideCount } });
+      return r;
+    }
+    case "generate_docx": {
+      const r = await Office.generateDocx(args || {});
+      if (r.ok) broadcastToClients({ type: "office.complete", data: { kind: "docx", title: args.title, path: r.path, sizeKB: r.sizeKB, sections: r.sectionCount } });
+      return r;
+    }
+    case "generate_xlsx": {
+      const r = await Office.generateXlsx(args || {});
+      if (r.ok) broadcastToClients({ type: "office.complete", data: { kind: "xlsx", title: args.title, path: r.path, sizeKB: r.sizeKB, sheets: r.sheetCount } });
+      return r;
+    }
     case "spawn_crew": {
       /* Crew validation lives inside runCrew — the LLM gets a clean error
        * envelope back if the spec is malformed (missing agentId, circular
