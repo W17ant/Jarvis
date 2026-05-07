@@ -22,9 +22,15 @@
  */
 
 const HANDLERS = [
-  /* ---------- Time + date ---------- */
+  /* ---------- Time + date ----------
+   *  Apostrophe optional (Whisper drops it on fast speech: "whats the time").
+   *  Tolerates a few common trailing fillers (right now / now / currently /
+   *  please) before the end-of-string anchor — Adam often says "what time
+   *  is it right now" which used to fall through. Trailing fillers list is
+   *  whitelisted on purpose: anything else ("what time is it tomorrow")
+   *  reaches the LLM where context-aware reasoning belongs. */
   {
-    test: /^(?:(?:what(?:'s| is)?\s+(?:the\s+)?(?:current\s+)?time(?:\s+is\s+it)?)|(?:tell\s+me\s+(?:the\s+)?time)|(?:the\s+time))\.?\??$/i,
+    test: /^(?:(?:what(?:'s|s| is)?\s+(?:the\s+)?(?:current\s+)?time(?:\s+is\s+it)?)|(?:tell\s+me\s+(?:the\s+)?time)|(?:the\s+time))(?:\s+(?:right\s+now|now|currently|please))?\.?\??$/i,
     handle: () => {
       const now = new Date();
       const hh = now.getHours();
@@ -50,12 +56,33 @@ const HANDLERS = [
   },
 
   /* ---------- Timer (set / cancel) ----------
-   *  Pattern catches "set a 20 minute timer for the chicken" — number,
-   *  unit, optional "for <label>". Dispatches set_timer directly.
-   *  Seconds are rounded up to whole minutes since set_timer's smallest
-   *  meaningful unit is 1 minute and the LLM never differentiates. */
+   *  Three accepted shapes:
+   *    "set a 20 minute timer for the chicken"   — NUMBER then UNIT (original)
+   *    "set timer for 10 minutes"                — TIMER then NUMBER
+   *    "set a timer for 5 minutes for the rice"  — TIMER + NUMBER + label
+   *  Dispatches set_timer directly. Seconds are rounded up to whole minutes
+   *  since set_timer's smallest meaningful unit is 1 minute and the LLM
+   *  never differentiates. */
   {
     test: /^set\s+(?:a\s+|an\s+)?(\d+)\s*-?\s*(minute|min|hour|hr|second|sec)s?\s*(?:timer)?(?:\s+(?:for|on|to)\s+(.+?))?\.?$/i,
+    handle: (q, m) => {
+      const n = parseInt(m[1], 10);
+      const unit = m[2].toLowerCase();
+      let minutes = n;
+      if (unit.startsWith("hour") || unit.startsWith("hr")) minutes = n * 60;
+      else if (unit.startsWith("sec")) minutes = Math.max(1, Math.ceil(n / 60));
+      const label = (m[3] || `${n} ${unit} timer`).trim();
+      return {
+        match: true,
+        reply: `${minutes} minute timer set${m[3] ? ` for ${m[3]}` : ""}.`,
+        toolCall: { name: "set_timer", args: { minutes, label } },
+      };
+    },
+  },
+  /* "set [a] timer for N units [for label]" — second timer shape with the
+   * "timer" word BEFORE the number. Same dispatch contract as above. */
+  {
+    test: /^set\s+(?:a\s+|an\s+)?timer\s+(?:for\s+)?(\d+)\s*-?\s*(minute|min|hour|hr|second|sec)s?(?:\s+(?:for|on|to)\s+(.+?))?\.?$/i,
     handle: (q, m) => {
       const n = parseInt(m[1], 10);
       const unit = m[2].toLowerCase();
@@ -73,9 +100,11 @@ const HANDLERS = [
 
   /* ---------- Sleep / shutdown ----------
    *  These have to bypass the LLM because the operator's tone is usually
-   *  short and abrupt — perfect to mishear. Pattern-match locks them in. */
+   *  short and abrupt — perfect to mishear. Pattern-match locks them in.
+   *  Apostrophe optional in "that's" (Whisper drops it on fast speech).
+   *  Adds "sleep mode" + "go quiet" + "shush" alternates Adam's been using. */
   {
-    test: /^(?:shut\s*down|go\s*to\s*sleep|sleep\s*now|stop\s*listening|that(?:'s|\s+is)\s+(?:all|enough)|goodnight|good\s*night)\.?$/i,
+    test: /^(?:shut\s*down|go\s*to\s*sleep|sleep\s*(?:now|mode)|go\s*quiet|shush|stop\s*listening|that(?:'s|s|\s+is)\s+(?:all|enough)|goodnight|good\s*night)\.?$/i,
     handle: () => ({
       match: true,
       reply: "Night.",

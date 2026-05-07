@@ -81,14 +81,18 @@ describe("fast-path: map of <place>", () => {
 });
 
 describe("fast-path: time / date queries", () => {
-  /* Phrasings the current time-pattern catches. Anchored with $ so trailing
-   * context ("right now", "please") falls through to the LLM. */
+  /* Phrasings the current time-pattern catches. Apostrophe optional
+   * (Whisper drops it). Trailing "right now" / "now" / "please" tolerated. */
   const positives = [
     "what time is it",
     "what's the time",
     "what's the time?",
     "the time",
     "tell me the time",
+    "whats the time",                  // apostrophe-less form (Whisper)
+    "what time is it right now",       // trailing filler
+    "what's the time please",
+    "what time is it now",
   ];
   for (const q of positives) {
     it(`answers "${q}" without a tool call`, () => {
@@ -100,18 +104,14 @@ describe("fast-path: time / date queries", () => {
     });
   }
 
-  /* Known gaps — phrasings that fall through to the LLM today. Pinning them
-   * so a future regex tweak that catches them gets cheered, not feared. If
-   * any of these starts matching, this test will fail and the maintainer
-   * just needs to flip them up to `positives` above. */
-  const knownFallthroughs = [
-    "whats the time",                   // missing apostrophe in "what's"
-    "what time is it right now",        // trailing "right now" breaks the $ anchor
+  /* Negatives — context-dependent phrasings that SHOULD reach the LLM. */
+  const negatives = [
+    "what time is it tomorrow",        // tomorrow needs LLM date reasoning
+    "what's the time in tokyo",        // foreign tz reasoning
   ];
-  for (const q of knownFallthroughs) {
-    it(`(known gap) "${q}" currently falls through`, () => {
-      const r = tryFastPath(q);
-      expect(r).toBeNull();
+  for (const q of negatives) {
+    it(`falls through "${q}" to the LLM`, () => {
+      expect(tryFastPath(q)).toBeNull();
     });
   }
 });
@@ -137,43 +137,47 @@ describe("fast-path: timer commands", () => {
     expect(r.toolCall.args.minutes).toBe(60);
   });
 
-  /* Known gap — "set timer for 10 minutes" has the unit AFTER "timer",
-   * which the current regex doesn't accept. Reaches the LLM today. */
-  it('(known gap) "set timer for 10 minutes" currently falls through', () => {
+  /* Second timer shape: "timer" word BEFORE the number. */
+  it('matches "set timer for 10 minutes"', () => {
     const r = tryFastPath("set timer for 10 minutes");
-    expect(r).toBeNull();
+    expect(r).not.toBeNull();
+    expect(r.toolCall?.name).toBe("set_timer");
+    expect(r.toolCall.args.minutes).toBe(10);
+  });
+  it('matches "set a timer for 5 minutes for the rice"', () => {
+    const r = tryFastPath("set a timer for 5 minutes for the rice");
+    expect(r).not.toBeNull();
+    expect(r.toolCall?.name).toBe("set_timer");
+    expect(r.toolCall.args.minutes).toBe(5);
+    expect(r.toolCall.args.label).toContain("rice");
   });
 });
 
 describe("fast-path: sleep / wake-down", () => {
-  /* Phrasings the current sleep pattern catches. */
+  /* Phrasings the sleep pattern catches. Apostrophe optional in "that's"
+   * (Whisper drops it on fast speech). "sleep mode" + "go quiet" + "shush"
+   * added as natural alternates. */
   const positives = [
     "go to sleep",
     "shut down",
     "sleep now",
+    "sleep mode",
+    "go quiet",
+    "shush",
     "stop listening",
     "goodnight",
     "good night",
     "that's all",
     "that's enough",
+    "thats all",            // apostrophe-less (Whisper)
+    "thats enough",
+    "that is all",
   ];
   for (const q of positives) {
     it(`matches "${q}" → enter_sleep_mode`, () => {
       const r = tryFastPath(q);
       expect(r).not.toBeNull();
       expect(r.toolCall?.name).toBe("enter_sleep_mode");
-    });
-  }
-
-  /* Known gaps — phrasings that fall through to the LLM today. Each is a
-   * one-line regex addition if the operator hits one repeatedly. */
-  const knownFallthroughs = [
-    "sleep mode",          // bare "sleep mode" not in the alternation
-    "thats all",           // apostrophe required by the regex
-  ];
-  for (const q of knownFallthroughs) {
-    it(`(known gap) "${q}" currently falls through`, () => {
-      expect(tryFastPath(q)).toBeNull();
     });
   }
 });
