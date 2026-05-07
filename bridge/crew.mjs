@@ -75,6 +75,26 @@ function emit(type, data) {
   if (_broadcaster) try { _broadcaster({ type, data }); } catch {}
 }
 
+/* ---------- TOOL DISPATCH HOOK ----------
+ * Crew agents need to actually invoke tools (request_browse, web_search,
+ * recall, etc) — without that they're just synthesising text. We get the
+ * full TOOLS array + the executeTool function from server.mjs at boot
+ * time, kept in module scope so we don't have a circular import. */
+let _toolsRef = null;
+let _executeToolRef = null;
+export function setToolDispatch({ tools, executeTool }) {
+  _toolsRef = Array.isArray(tools) ? tools : null;
+  _executeToolRef = typeof executeTool === "function" ? executeTool : null;
+}
+
+/** Filter the global TOOLS array down to an agent's allowedTools subset.
+ *  Empty/undefined allowedTools → no tools (chat-only agent). */
+function toolsForAgent(allowedToolNames) {
+  if (!Array.isArray(allowedToolNames) || allowedToolNames.length === 0 || !_toolsRef) return [];
+  const names = new Set(allowedToolNames);
+  return _toolsRef.filter((t) => names.has((t.function || t).name));
+}
+
 /* ---------- VALIDATION HELPERS ---------- */
 
 function newCrewId() {
@@ -157,13 +177,20 @@ function resolveProvider(agentSpec) {
  * is the task description plus a context block built from upstream task
  * results when dependsOn is set. */
 function buildAgentMessages(agentSpec, taskSpec, upstreamResults) {
-  const sys = agentSpec.systemPromptOverride || [
-    `You are an agent in a multi-agent crew.`,
-    `Role: ${agentSpec.role}`,
-    `Goal: ${agentSpec.goal}`,
-    `You have access to a subset of the kiosk's tools. Use them to accomplish your assigned task and return a concise answer the parent crew can use.`,
-    taskSpec.expectedOutput ? `Expected output: ${taskSpec.expectedOutput}` : "",
-  ].filter(Boolean).join("\n\n");
+  /* System prompt shape matters for Qwen 2.5 tool-calling. Terse "Role:"/"Goal:"
+   * prefixes confuse it into emitting tool calls as <tool_call>...</tool_call>
+   * tags in the text content rather than via the structured tool_calls field.
+   * Conversational phrasing ("You are X. Use the tools...") matches the
+   * training distribution and produces clean structured tool_calls. */
+  const expectedLine = taskSpec.expectedOutput
+    ? ` Expected output: ${taskSpec.expectedOutput}.`
+    : "";
+  const sys = agentSpec.systemPromptOverride || (
+    `You are a ${agentSpec.role} working as part of a multi-agent team. Your goal: ${agentSpec.goal}.` +
+    ` Use the tools provided to accomplish your task, then return a concise answer the rest of the team can use.` +
+    expectedLine +
+    ` Don't pad — your output gets passed verbatim to the next agent.`
+  );
 
   const upstream = (taskSpec.dependsOn || [])
     .map((depId) => upstreamResults.get(depId))
@@ -204,13 +231,22 @@ async function withProviderSlot(provider, fn) {
 
 /* ---------- AGENT EXECUTION ----------
  * Run a single agent on a single task. Returns { ok, taskId, agentId,
- * agentRole, output, elapsedMs, costUSD, error? }. Tags every chat() call
- * inside this run with the crewId so usage-log can group by crew later. */
+ * agentRole, output, elapsedMs, costUSD, toolCalls[], error? }.
+ *
+ * Implements a small tool-dispatch loop bounded by agentSpec.maxSteps
+ * (default 3): the agent's chat() may emit tool_calls, we execute each,
+ * append results back as tool messages, and re-enter chat() for the
+ * next hop. Identical pattern to askLLM's loop in server.mjs but scoped
+ * to the agent's allowedTools subset rather than the full TOOLS array.
+ *
+ * Cost + token totals are summed across all hops in this run. Every hop
+ * is tagged "crew:<crewId>:<taskId>:hop<N>" in usage-log.mjs so per-hop
+ * spend stays inspectable when a crew goes long. */
 async function runAgentTask({ crewId, agentSpec, taskSpec, upstreamResults }) {
   const t0 = Date.now();
   const provider = resolveProvider(agentSpec);
   if (isAborted(crewId)) {
-    return { ok: false, taskId: taskSpec.id, agentId: agentSpec.id, agentRole: agentSpec.role, error: "aborted before start", elapsedMs: 0, costUSD: 0 };
+    return { ok: false, taskId: taskSpec.id, agentId: agentSpec.id, agentRole: agentSpec.role, error: "aborted before start", elapsedMs: 0, costUSD: 0, toolCalls: [] };
   }
   emit("crew.agent.started", {
     crewId, taskId: taskSpec.id, agentId: agentSpec.id, role: agentSpec.role,
@@ -218,39 +254,84 @@ async function runAgentTask({ crewId, agentSpec, taskSpec, upstreamResults }) {
   });
 
   const messages = buildAgentMessages(agentSpec, taskSpec, upstreamResults);
-  /* Patch the chat() source tag so usage rows for this agent are
-   * attributable to the crew. providers.mjs's logUsage call uses a fixed
-   * "providers.chat" source — we reach in by wrapping chat() with our own
-   * usage hook and skipping the default. */
+  const tools = toolsForAgent(agentSpec.allowedTools);
+  const maxSteps = Math.max(1, Math.min(8, Number(agentSpec.maxSteps) || 3));
+
   let output = "";
-  let costUSD = 0;
-  let tokensIn = 0;
-  let tokensOut = 0;
+  let totalCostUSD = 0;
+  let totalTokensIn = 0;
+  let totalTokensOut = 0;
+  const toolCallsFired = [];
+
   try {
-    const result = await withProviderSlot(provider, () => chat({
-      provider,
-      model: agentSpec.model,
-      messages,
-      maxTokens: 1500,
-    }));
-    output = (result.text || "").trim();
-    tokensIn = result.usage?.input_tokens || result.usage?.prompt_tokens || result.usage?.prompt_eval_count || 0;
-    tokensOut = result.usage?.output_tokens || result.usage?.completion_tokens || result.usage?.eval_count || 0;
-    /* Re-record with the crew tag so /usage can attribute by crew. The
-     * providers.chat row still landed (best-effort logger) but we add
-     * a crew-scoped row here for analytics. Slight double-count is
-     * acceptable for the v1; future cleanup: pass a source override
-     * through chat(). */
-    const row = await UsageLog.recordUsage({
-      provider, model: result.model || agentSpec.model || "unknown",
-      tokensIn, tokensOut, elapsedMs: Date.now() - t0,
-      source: `crew:${crewId}:${taskSpec.id}`,
-    });
-    costUSD = row.costUSD || 0;
+    for (let hop = 0; hop < maxSteps; hop++) {
+      if (isAborted(crewId)) {
+        return { ok: false, taskId: taskSpec.id, agentId: agentSpec.id, agentRole: agentSpec.role, error: `aborted at hop ${hop}`, elapsedMs: Date.now() - t0, costUSD: totalCostUSD, toolCalls: toolCallsFired };
+      }
+      const hopT0 = Date.now();
+      const result = await withProviderSlot(provider, () => chat({
+        provider,
+        model: agentSpec.model,
+        messages,
+        tools: tools.length ? tools : undefined,
+        maxTokens: 1500,
+      }));
+      const tIn  = result.usage?.input_tokens  || result.usage?.prompt_tokens     || result.usage?.prompt_eval_count || 0;
+      const tOut = result.usage?.output_tokens || result.usage?.completion_tokens || result.usage?.eval_count        || 0;
+      totalTokensIn  += tIn;
+      totalTokensOut += tOut;
+      const row = await UsageLog.recordUsage({
+        provider,
+        model: result.model || agentSpec.model || "unknown",
+        tokensIn: tIn, tokensOut: tOut,
+        elapsedMs: Date.now() - hopT0,
+        source: `crew:${crewId}:${taskSpec.id}:hop${hop}`,
+      });
+      totalCostUSD += row.costUSD || 0;
+
+      const calls = Array.isArray(result.toolCalls) ? result.toolCalls : [];
+      if (calls.length === 0 || !_executeToolRef) {
+        /* No tools to dispatch (or no executor wired) — terminal frame. */
+        output = (result.text || "").trim();
+        break;
+      }
+
+      /* Append the assistant's tool-call message + each tool's result,
+       * then loop. arguments stays as a raw object — Ollama expects that
+       * shape on echo-back; stringifying it produces a 400 "can't find
+       * closing }" error from the chat completion endpoint. */
+      messages.push({
+        role: "assistant",
+        content: result.text || "",
+        tool_calls: calls.map((c) => ({
+          id: c.id,
+          function: { name: c.name, arguments: c.args },
+        })),
+      });
+      for (const c of calls) {
+        toolCallsFired.push(c.name);
+        emit("crew.agent.tool", { crewId, taskId: taskSpec.id, agentId: agentSpec.id, tool: c.name });
+        let toolResult;
+        try { toolResult = await _executeToolRef(c.name, c.args || {}); }
+        catch (e) { toolResult = { error: String(e.message || e) }; }
+        messages.push({
+          role: "tool",
+          content: JSON.stringify(toolResult).slice(0, 8000),
+          tool_name: c.name,
+        });
+      }
+      /* If this was the last allowed hop, the next iteration won't run —
+       * we'd lose the assistant's follow-up. Soft-stop: keep result.text
+       * as the output if we're at the cap. */
+      if (hop === maxSteps - 1) {
+        output = (result.text || `(reached ${maxSteps}-hop cap)`).trim();
+      }
+    }
   } catch (e) {
     emit("crew.agent.failed", { crewId, taskId: taskSpec.id, agentId: agentSpec.id, error: e.message });
-    return { ok: false, taskId: taskSpec.id, agentId: agentSpec.id, agentRole: agentSpec.role, error: e.message, elapsedMs: Date.now() - t0, costUSD: 0 };
+    return { ok: false, taskId: taskSpec.id, agentId: agentSpec.id, agentRole: agentSpec.role, error: e.message, elapsedMs: Date.now() - t0, costUSD: totalCostUSD, toolCalls: toolCallsFired };
   }
+
   const finalResult = {
     ok: true,
     taskId: taskSpec.id,
@@ -259,7 +340,10 @@ async function runAgentTask({ crewId, agentSpec, taskSpec, upstreamResults }) {
     provider,
     output,
     elapsedMs: Date.now() - t0,
-    tokensIn, tokensOut, costUSD,
+    tokensIn: totalTokensIn,
+    tokensOut: totalTokensOut,
+    costUSD: Number(totalCostUSD.toFixed(6)),
+    toolCalls: toolCallsFired,
   };
   emit("crew.agent.complete", { crewId, ...finalResult, output: output.slice(0, 500) });
   return finalResult;
