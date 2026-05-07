@@ -57,7 +57,12 @@ export function extractQuery(text) {
   let q = String(text || "").toLowerCase();
   for (const v of _wakeVariants) q = q.replaceAll(v, " ");
   q = q.replace(/\s+/g, " ").trim();
-  q = q.replace(/^(hey|hi|ok|please|can you|could you|would you)\s+/i, "");
+  /* Why the trailing alternation: when input is "hey flat-out" alone, after
+   * stripping the wake variant we have just "hey" — no whitespace tail. The
+   * original regex required \s+ after, so "hey" survived as a dangling
+   * pseudo-query. Now matches \s+ OR end-of-string so bare wake phrases
+   * extract to "" cleanly. */
+  q = q.replace(/^(hey|hi|ok|please|can you|could you|would you)(\s+|$)/i, "");
   return q;
 }
 
