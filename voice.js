@@ -1110,7 +1110,16 @@ async function handleHeard(text, isFinal) {
 /* ---------- LOCAL WHISPER STT (replaces Chrome's cloud SpeechRecognition) ----------
  * Press-and-release model: tap wake button to start, MediaRecorder captures mic into a webm/opus blob,
  * tap again (or auto-stop on 1.2s silence) → WhisperStt.transcribeAndHandle() runs.
- * The chunks + speculative-partial state live in ./whisper-stt.js now. */
+ * The chunks + speculative-partial state live in ./whisper-stt.js now.
+ *
+ * Why this URL still lives here even though whisper-stt.js owns its own copy:
+ * the passive-mode cycle (cyclePassive) sends rolling 1-2s wake-detect clips
+ * directly to /transcribe — it doesn't go through WhisperStt because passive
+ * mode has its own VAD-based recording loop. Without this const passive's
+ * fetch would throw ReferenceError, the silent catch would swallow it, and
+ * every wake-detect attempt would see an empty transcript (which is exactly
+ * the bug Adam hit after the whisper-stt extraction landed). */
+const WHISPER_URL = "http://localhost:8768/transcribe";
 let listening = false;
 let mediaRecorder = null;
 let silenceTimer = null;
