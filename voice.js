@@ -10,6 +10,7 @@ import * as Modal from "./modal-queue.js";
 import * as History from "./history.js";
 import * as WakeParse from "./wake-parsing.js";
 import * as SettingsModal from "./settings-modal.js";
+import * as SetupModal from "./setup-modal.js";
 
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
@@ -1710,165 +1711,11 @@ async function runMicTest() {
   btn.disabled = false; btn.textContent = "TEST MIC (3s)";
 }
 
-/* ---------- FIRST-RUN SETUP MODAL ----------
- * Shown on the very first launch (or after localStorage is cleared).
- * Walks the operator through: location confirm, voice pick, mic pick, agency name. */
-/* Why: short logical names — Storage namespaces them under the active profile. */
-const SETUP_DONE_KEY = "setupDone";
-const VOICE_KEY = "voice";
-const AGENCY_KEY = "agency";
-const TIER_KEY = "tier";
+/* First-run setup modal + the saved-preference accessors moved to
+ * ./setup-modal.js. window.getTierPreset is re-exposed below for HUD
+ * code that reads the throttle preset off the global. */
+window.getTierPreset = SetupModal.getTierPreset;
 
-function loadSavedVoice() { return Storage.get(VOICE_KEY, "bm_daniel"); }
-function getSavedAgency() { return Storage.get(AGENCY_KEY, "Flat-Out Media"); }
-function getSavedTier()   { return Storage.get(TIER_KEY, "standard"); }
-
-/** Performance tier presets — readonly, consumed by HUD throttles. */
-const TIER_PRESETS = {
-  lite:     { faceFps: 0,  waveFps: 30, animateArcs: false, dropShadows: false, camRes: 240 },
-  standard: { faceFps: 8,  waveFps: 60, animateArcs: true,  dropShadows: false, camRes: 360 },
-  pro:      { faceFps: 12, waveFps: 60, animateArcs: true,  dropShadows: true,  camRes: 480 },
-  max:      { faceFps: 24, waveFps: 60, animateArcs: true,  dropShadows: true,  camRes: 720 },
-};
-function getTierPreset() { return TIER_PRESETS[getSavedTier()] || TIER_PRESETS.standard; }
-window.getTierPreset = getTierPreset;
-
-async function maybeShowSetup() {
-  if (Storage.get(SETUP_DONE_KEY) === "true") return;
-  const modal = document.getElementById("setupModal");
-  if (!modal) return;
-  modal.hidden = false;
-
-  // Pull detected location from bridge
-  let cfg = {};
-  try {
-    const r = await fetch("http://localhost:8766/config");
-    cfg = await r.json();
-  } catch {}
-  const op = cfg.operator || {};
-
-  const cityEl = document.getElementById("setupCity");
-  const coordsEl = document.getElementById("setupCoords");
-  const voiceEl = document.getElementById("setupVoice");
-  const agencyEl = document.getElementById("setupAgency");
-
-  cityEl.value = op.city || "";
-  if (op.latitude && op.longitude) {
-    coordsEl.textContent = `lat ${op.latitude.toFixed(4)}, lon ${op.longitude.toFixed(4)} • ${op.timezone || "Europe/London"}`;
-  }
-  voiceEl.value = loadSavedVoice();
-  agencyEl.value = getSavedAgency();
-
-  // Performance tier — pre-pick from detected hardware, show chip + RAM
-  const tierEl = document.getElementById("setupTier");
-  const hwInfoEl = document.getElementById("setupHwInfo");
-  const detectedTier = cfg.hardware?.tier || "standard";
-  tierEl.value = Storage.get(TIER_KEY) || detectedTier;
-  if (cfg.hardware) {
-    hwInfoEl.textContent = `Detected: ${cfg.hardware.chip}, ${cfg.hardware.memoryGB}GB → ${detectedTier}`;
-  }
-
-  // Populate mic picker (clones the debug-panel logic but for the modal)
-  await populateSetupMicPicker();
-
-  document.getElementById("setupRedetect").addEventListener("click", async () => {
-    cityEl.value = "Detecting…";
-    try {
-      const r = await fetch("http://localhost:8766/config");
-      const c = await r.json();
-      cityEl.value = c.operator?.city || "";
-      if (c.operator?.latitude) coordsEl.textContent = `lat ${c.operator.latitude.toFixed(4)}, lon ${c.operator.longitude.toFixed(4)}`;
-    } catch { cityEl.value = ""; }
-  });
-
-  document.getElementById("setupVoiceTest").addEventListener("click", async () => {
-    const v = voiceEl.value;
-    try {
-      const res = await fetch("http://localhost:8767/tts", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: `Voice check. ${v.startsWith("bm_") ? "Sir." : "Ready."}`, voice: v }),
-      });
-      if (!res.ok) return;
-      const wav = await res.arrayBuffer();
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const buf = await ctx.decodeAudioData(wav);
-      const src = ctx.createBufferSource(); src.buffer = buf;
-      src.connect(ctx.destination); src.start(0);
-    } catch (e) { console.warn("voice test failed:", e); }
-  });
-
-  document.getElementById("setupMicAuto").addEventListener("click", async () => { await autoPickMic(); await populateSetupMicPicker(); });
-
-  document.getElementById("setupSubmit").addEventListener("click", async () => {
-    Storage.set(VOICE_KEY, voiceEl.value);
-    Storage.set(AGENCY_KEY, agencyEl.value || "Flat-Out Media");
-    Storage.set(TIER_KEY, tierEl.value);
-
-    /* If the operator typed a city different from the detected one, geocode it via Open-Meteo
-     * (free, no key) and POST as override. Bridge persists to config.json + locks against IP redetect. */
-    const enteredCity = (cityEl.value || "").trim();
-    const detectedCity = (op.city || "").trim();
-    if (enteredCity && enteredCity.toLowerCase() !== detectedCity.toLowerCase()) {
-      try {
-        const g = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(enteredCity)}&count=1&language=en`);
-        const j = await g.json();
-        const r = j.results && j.results[0];
-        const payload = {
-          city: enteredCity,
-          country: r?.country || op.country,
-          latitude: r?.latitude ?? op.latitude,
-          longitude: r?.longitude ?? op.longitude,
-          timezone: r?.timezone || op.timezone,
-          agency: agencyEl.value || "Flat-Out Media",
-        };
-        await fetch("http://localhost:8766/config/override", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      } catch (e) { console.warn("[Flat-Out] location override failed:", e.message); }
-    } else if (agencyEl.value && agencyEl.value !== "Flat-Out Media") {
-      // Agency name change only
-      await fetch("http://localhost:8766/config/override", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agency: agencyEl.value }),
-      }).catch(() => {});
-    }
-
-    Storage.set(SETUP_DONE_KEY, "true");
-    modal.hidden = true;
-  });
-
-  document.getElementById("setupSkip").addEventListener("click", () => {
-    Storage.set(SETUP_DONE_KEY, "true");
-    modal.hidden = true;
-  });
-}
-
-async function populateSetupMicPicker() {
-  const sel = document.getElementById("setupMic");
-  if (!sel) return;
-  try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach(t => t.stop()); } catch {}
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const inputs = devices.filter(d => d.kind === "audioinput");
-  const saved = getPreferredDeviceId();
-  sel.replaceChildren();
-  for (const d of inputs) {
-    const opt = document.createElement("option");
-    opt.value = d.deviceId;
-    opt.textContent = d.label || `(unlabeled mic)`;
-    if (d.deviceId === saved) opt.selected = true;
-    sel.appendChild(opt);
-  }
-  if (!sel.dataset.wired) {
-    sel.dataset.wired = "1";
-    sel.addEventListener("change", () => {
-      const label = sel.selectedOptions[0]?.textContent || "";
-      setPreferredDevice(sel.value, label);
-      if (wf.micStream) wf.micStream.getTracks().forEach(t => t.stop());
-      wf.micStream = null; wf.analyser = null;
-    });
-  }
-}
 
 /* ---------- DEMO RECORDER ----------
  * Press R (no modifiers) to toggle. Captures screen video via getDisplayMedia + mic + Kokoro TTS audio,
@@ -1974,7 +1821,7 @@ function showRecIndicator(on) {
 /* ---------- WIRE UP UI ---------- */
 function wireUI() {
   // Apply the saved performance tier as a body class so CSS rules can adapt
-  document.body.classList.add(`tier-${getSavedTier()}`);
+  document.body.classList.add(`tier-${SetupModal.getSavedTier()}`);
 
   /* Connect to bridge + register all typed event subscribers. Idempotent —
    * Bridge.connect() reuses an existing socket if one is open. */
@@ -1994,7 +1841,11 @@ function wireUI() {
 
   wfInit();   // start the state-aware waveform on boot
   refreshDevicePicker();   // populate the input dropdown + auto-select non-built-in
-  maybeShowSetup();        // first-run setup modal (no-op after first completion)
+  /* Wire deps into the setup-modal module before maybeShowSetup runs.
+   * Idempotent — re-init on profile switch picks up the new wf instance
+   * if the operator switches mid-session. */
+  SetupModal.init({ autoPickMic, getPreferredDeviceId, setPreferredDevice, wf });
+  SetupModal.maybeShowSetup();        // first-run setup modal (no-op after first completion)
 
   // R toggles demo recording (no modifiers — Cmd/Ctrl-R reloads, leave that alone)
   document.addEventListener("keydown", (e) => {
