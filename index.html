@@ -676,7 +676,8 @@
           <label><img src="assets/icons/map-pin-line.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Location</label>
           <div class="settings-modal__row settings-modal__row--searchable">
             <input id="settingsCity" type="text" placeholder="Search place — e.g. Leicester, Goodwood, Bedford" autocomplete="off" />
-            <button id="settingsLocate" type="button" title="Re-detect via IP">↻</button>
+            <button id="settingsLocateBrowser" type="button" title="Use browser geolocation (Wi-Fi / GPS — accurate)">📍</button>
+            <button id="settingsLocate" type="button" title="Re-detect via IP (fallback — less accurate)">↻</button>
             <!-- Typeahead suggestions render here as the operator types. Disambiguates
                  "Manchester UK" vs "Manchester NH" before save instead of guessing. -->
             <div class="settings-modal__suggest" id="settingsSuggest" hidden></div>

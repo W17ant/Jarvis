@@ -815,6 +815,91 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
     }
   }
 
+  /** Use the browser's geolocation API (Wi-Fi triangulation + GPS where available)
+   *  for precise location — far better than the bridge's IP geolocation, which
+   *  routinely returns the operator's ISP city rather than where they actually
+   *  are. Workflow:
+   *    1. navigator.geolocation.getCurrentPosition() — browser prompts on first
+   *       use, remembered after.
+   *    2. Reverse-geocode the lat/lon via Open-Meteo's /v1/reverse (no API key,
+   *       same service the typeahead uses for forward geocode).
+   *    3. POST the result to /config/override so the bridge persists it +
+   *       skips IP redetect on next boot.
+   *
+   *  localhost is a "secure context" in Chrome so geolocation works without
+   *  HTTPS — but the operator still has to grant permission in the browser
+   *  prompt. If the prompt has been previously denied, the catch path tells
+   *  them to flip it in chrome://settings/content/location. */
+  async function locateViaBrowser() {
+    const btn = document.getElementById("settingsLocateBrowser");
+    if (!btn) return;
+    btn.disabled = true;
+    setStatus("requesting browser location…", "");
+    if (!navigator.geolocation) {
+      setStatus("browser geolocation not available", "error");
+      btn.disabled = false;
+      return;
+    }
+    /* Wrap the callback API in a Promise. 10s timeout because GPS lock on a
+     * laptop can take a few seconds even indoors via Wi-Fi triangulation. */
+    let pos;
+    try {
+      pos = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          reject,
+          { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+        );
+      });
+    } catch (e) {
+      const msg = e.code === 1 ? "permission denied — allow location in chrome://settings/content/location"
+                : e.code === 2 ? "position unavailable — Wi-Fi off?"
+                : e.code === 3 ? "timed out — try again"
+                : `geolocation: ${e.message}`;
+      setStatus(msg, "error");
+      btn.disabled = false;
+      return;
+    }
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    /* Reverse-geocode lat/lon → city name via Open-Meteo. Same service the
+     * forward-typeahead uses; their /v1/reverse endpoint accepts coords and
+     * returns the nearest named place + country + timezone. */
+    let geo = null;
+    try {
+      const r = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat}&longitude=${lon}&count=1&language=en`);
+      const j = await r.json();
+      geo = (j.results || [])[0] || null;
+    } catch { /* network blip — fall through to lat/lon-only persist */ }
+
+    const payload = {
+      city:      geo?.name || `${lat.toFixed(3)},${lon.toFixed(3)}`,
+      country:   geo?.country || "",
+      latitude:  lat,
+      longitude: lon,
+      timezone:  geo?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
+    /* Persist immediately so the override survives next boot regardless of
+     * whether the operator clicks Save (matches the redetect button's
+     * "fire-and-persist" semantics — no surprise abandonment). */
+    try {
+      await fetch("http://localhost:8766/config/override", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      setStatus(`override save failed — ${e.message}`, "error");
+      btn.disabled = false;
+      return;
+    }
+    cityInput.value = `${payload.city}${payload.country ? ", " + payload.country : ""}`;
+    coordsLabel.textContent = `lat ${lat.toFixed(4)}, lon ${lon.toFixed(4)} · ${payload.timezone}`;
+    detectedLocation = payload;
+    setStatus(`✓ ${payload.city} (browser, ±${Math.round(pos.coords.accuracy)}m)`, "ok");
+    btn.disabled = false;
+  }
+
   /** Re-detect operator location via the bridge's /config/redetect endpoint. Updates
    *  the city input + coords readout in place — operator can still edit before save. */
   async function redetectLocation() {
@@ -1059,6 +1144,10 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   previewBtn.addEventListener("click", previewVoice);
   if (wakeTestBtn) wakeTestBtn.addEventListener("click", runWakeTest);
   locateBtn.addEventListener("click", redetectLocation);
+  /* Browser-geolocation button — uses Wi-Fi/GPS for an accurate fix vs
+   * the IP fallback. Optional, hidden if the button isn't in the DOM. */
+  const locateBrowserBtn = document.getElementById("settingsLocateBrowser");
+  if (locateBrowserBtn) locateBrowserBtn.addEventListener("click", locateViaBrowser);
 
   /* API-key show/hide toggles. Each toggle button has data-target=<input id>;
    * we just flip the input's type between password and text. Single delegated

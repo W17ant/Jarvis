@@ -3508,8 +3508,21 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
             console.log(`[stream] first sentence at ${Date.now() - t0}ms`);
           }
         }
+        /* Capture tool_calls eagerly. Why: Ollama's streaming protocol for
+         * qwen2.5 emits tool_calls in a NON-DONE frame, then the done:true
+         * frame's message is empty (role + content only, no tool_calls).
+         * Reading finalMsg only on done would silently drop every tool
+         * call — exact bug Adam hit on "open amazon for AA batteries"
+         * etc, where the model emitted open_url calls that never reached
+         * dispatch. Capture eagerly + don't overwrite with the empty
+         * done frame. */
+        if (Array.isArray(evt.message?.tool_calls) && evt.message.tool_calls.length) {
+          finalMsg = evt.message;
+        }
         if (evt.done) {
-          finalMsg = evt.message || finalMsg;
+          /* Only fall through to the done-frame message if no earlier
+           * frame carried tool_calls. Preserves the captured tool_calls. */
+          if (!finalMsg) finalMsg = evt.message || finalMsg;
           /* Ollama emits prompt_eval_count + eval_count on the terminal
            * (done) frame. Log the hop's usage here, mirroring the askLLM
            * non-streaming path so /usage covers both. */
