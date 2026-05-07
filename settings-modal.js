@@ -24,6 +24,7 @@
 
 import * as Storage from "./storage.js";
 import * as WakeParse from "./wake-parsing.js";
+import * as MicTest from "./mic-test.js";
 
 const VOICE_KEY = "voice";
 
@@ -1143,6 +1144,13 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   saveBtn.addEventListener("click", save);
   previewBtn.addEventListener("click", previewVoice);
   if (wakeTestBtn) wakeTestBtn.addEventListener("click", runWakeTest);
+  /* Auto-pick mic — calls MicTest.autoPickMic with this button as the
+   * status-driver so the operator sees TESTING 1/N… rolling. Wired here
+   * (not in voice.js) because settings-modal owns the button DOM. */
+  const micAutoPickBtn = document.getElementById("settingsMicAutoPick");
+  if (micAutoPickBtn) {
+    micAutoPickBtn.addEventListener("click", () => MicTest.autoPickMic(micAutoPickBtn));
+  }
   locateBtn.addEventListener("click", redetectLocation);
   /* Browser-geolocation button — uses Wi-Fi/GPS for an accurate fix vs
    * the IP fallback. Optional, hidden if the button isn't in the DOM. */

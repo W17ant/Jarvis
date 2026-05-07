@@ -324,31 +324,40 @@ function audioConstraints() {
 function wireDeviceChange() {
   if (!navigator.mediaDevices?.addEventListener) return;
   navigator.mediaDevices.addEventListener("devicechange", () => {
-    /* Refresh the device picker label so the dropdown reflects the new
-     * default input — useful even if no stream is currently cached. */
+    /* Refresh the picker label so the dropdown reflects the new device
+     * list — useful even if our currently-cached stream is fine. */
     refreshDevicePicker().catch(() => {});
-    if (wf.micStream) {
-      console.log("[Flat-Out] devicechange — dropping cached mic stream");
+    /* Only drop the cached stream if its tracks are ACTUALLY dead. The
+     * devicechange event fires for many reasons that don't kill our
+     * stream — Chrome firing it after labels become available post-
+     * permission grant, Bluetooth devices going to sleep, USB devices
+     * being added (without removing ours), getUserMedia itself
+     * triggering a relabel cycle in some Chrome builds.
+     *
+     * Earlier draft of this handler dropped the stream unconditionally
+     * — Adam reported settings-mic working but passive failing because
+     * the passive cycle's own getUserMedia was triggering a relabel
+     * devicechange that killed the stream it had just acquired. */
+    const track = wf.micStream?.getAudioTracks?.()[0];
+    if (track && track.readyState === "ended") {
+      console.log("[Flat-Out] devicechange — track ended, dropping stream");
       try { wf.micStream.getTracks().forEach((t) => t.stop()); } catch {}
       wf.micStream = null;
       /* Analyser was wired to the OLD stream's MediaStreamSource — must
        * also be cleared so wfStartListening rebuilds it against the new
-       * stream. Otherwise the analyser keeps pulling from a silent source
-       * and the waveform would render flat after a device swap. */
+       * stream. Otherwise the analyser keeps pulling from a silent
+       * source and the waveform would render flat. */
       wf.analyser = null;
       wf.buffer = null;
       dbgSet("device", "(reacquiring on next wake)");
-    }
-    /* If passive listening was running, restart it on the new mic. The
-     * passive loop reads wf.micStream lazily, so we just need to re-trigger
-     * it. Without this, the operator stays in passive mode but the mic is
-     * the now-stale (null) stream and wake words go unheard. */
-    if (passive) {
-      console.log("[Flat-Out] devicechange — restarting passive on new mic");
-      stopPassive();
-      /* Tiny delay so the OS has time to publish the new default input
-       * before we call enumerateDevices/getUserMedia. */
-      setTimeout(() => { startPassive().catch(() => {}); }, 250);
+      /* Restart passive only when we genuinely had to drop the stream.
+       * Otherwise leave the running cycle alone — it's still listening
+       * to a healthy track. */
+      if (passive) {
+        console.log("[Flat-Out] devicechange — restarting passive on new mic");
+        stopPassive();
+        setTimeout(() => { startPassive().catch(() => {}); }, 250);
+      }
     }
   });
 }

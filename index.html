@@ -495,9 +495,10 @@
           <label><img src="assets/icons/microphone.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Wake word check</label>
           <div class="settings-modal__row">
             <button id="settingsWakeTest" type="button">TEST WAKE WORD (3s)</button>
+            <button id="settingsMicAutoPick" type="button" title="Iterate every mic, pick the loudest above noise floor">AUTO-PICK WORKING MIC</button>
             <span id="settingsWakeStatus" class="settings-modal__wake-status">—</span>
           </div>
-          <small>Tap, say your wake phrase ("Hey Flat-Out") clearly. Confirms Whisper hears it through your accent. If it fails repeatedly, try a different mic from the setup wizard.</small>
+          <small>Test fires a clean 3-second recording and confirms Whisper hears your wake phrase. Auto-pick probes every audio input and selects the loudest one — handy when Continuity Camera or AirPods leave the kiosk on a silent device.</small>
         </div>
 
         <div class="settings-modal__field">

@@ -49,10 +49,18 @@ export function init({
 /** Iterate every audioinput device, sample 600ms of raw PCM from each, pick the one with the
  *  highest peak above noise floor. Saves that deviceId to localStorage. Bypasses Chrome's
  *  reluctance to expose device labels — works directly on deviceIds. */
-export async function autoPickMic() {
-  const btn = document.getElementById("dbgAutoPickBtn");
-  if (!btn) return;
-  btn.disabled = true; btn.textContent = "TESTING DEVICES…";
+/** @param {HTMLButtonElement | null} [buttonEl] Optional button to drive
+ *  status text / disabled state. Falls back to the legacy `dbgAutoPickBtn`
+ *  for the first-run setup-modal call site. Settings-modal passes its own. */
+export async function autoPickMic(buttonEl) {
+  const btn = buttonEl || document.getElementById("dbgAutoPickBtn");
+  /* Allow headless invocation — useful for fast-path / programmatic calls
+   * where there's no UI to drive. Old early-return on missing-btn would
+   * silently no-op, which masked Adam's "auto-pick does nothing"
+   * observation when the debug panel got removed. */
+  const setBtnText = (txt) => { if (btn) btn.textContent = txt; };
+  const setBtnDisabled = (d) => { if (btn) btn.disabled = d; };
+  setBtnDisabled(true); setBtnText("TESTING DEVICES…");
   _dbgSet("error", "—");
 
   // Make sure we have permission first so enumerateDevices returns ALL devices
@@ -63,7 +71,7 @@ export async function autoPickMic() {
 
   if (inputs.length === 0) {
     _dbgSet("error", "no audio inputs found");
-    btn.disabled = false; btn.textContent = "AUTO-PICK WORKING MIC";
+    setBtnDisabled(false); setBtnText("AUTO-PICK WORKING MIC");
     return;
   }
 
@@ -79,7 +87,7 @@ export async function autoPickMic() {
     const d = inputs[i];
     const idTail = d.deviceId ? d.deviceId.slice(0, 8) : "default";
     const label = d.label || `(unlabeled ${idTail})`;
-    btn.textContent = `TESTING ${i + 1}/${inputs.length}…`;
+    setBtnText(`TESTING ${i + 1}/${inputs.length}…`);
     _dbgSet("device", `probing: ${label}`);
 
     let stream;
@@ -130,7 +138,7 @@ export async function autoPickMic() {
     _dbgSet("error", `all silent: ${summary}`);
   }
 
-  btn.disabled = false; btn.textContent = "AUTO-PICK WORKING MIC";
+  setBtnDisabled(false); setBtnText("AUTO-PICK WORKING MIC");
 }
 
 /** Standalone mic test — bypasses MediaRecorder. Captures 3s of raw PCM, reports peak/RMS.
