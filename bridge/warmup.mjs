@@ -2,7 +2,7 @@
  *
  *  Why: a cold bridge takes 2-3s to load the 14b/32b text model, ~600ms to load
  *  Kokoro, and ~1-2s to load the VL model. The first real operator query pays
- *  that combined tax — they say "hey flat-out" and wait three seconds for any
+ *  that combined tax — they say "hey jarvis" and wait three seconds for any
  *  reply. Pre-warming fires a tiny no-op request to each service after the bridge
  *  binds its port, so by the time the operator says anything, every model is
  *  already resident.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# diagnose.sh — one-command diagnostic bundle for Flat-Out Jarvis.
+# diagnose.sh — one-command diagnostic bundle for Jarvis Jarvis.
 #
 # Why: when something breaks, the operator shouldn't need to know which logs
 # matter or how to attach them. This script bundles every relevant log into a
@@ -14,24 +14,24 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-OUT="$HOME/Desktop/flat-out-diag-${STAMP}.tgz"
+OUT="$HOME/Desktop/jarvis-diag-${STAMP}.tgz"
 
-# Collect every /tmp/flat-out-*.log we can find. Skip files that don't exist
+# Collect every /tmp/jarvis-*.log we can find. Skip files that don't exist
 # (kokoro/whisper logs are absent on installs without the Python venv).
 LOGS=()
-for f in /tmp/flat-out-bridge.log \
-         /tmp/flat-out-kokoro.log \
-         /tmp/flat-out-whisper.log \
-         /tmp/flat-out-static.log \
-         /tmp/flat-out-rebuild.log \
-         /tmp/flat-out-bridge-test.log; do
+for f in /tmp/jarvis-bridge.log \
+         /tmp/jarvis-kokoro.log \
+         /tmp/jarvis-whisper.log \
+         /tmp/jarvis-static.log \
+         /tmp/jarvis-rebuild.log \
+         /tmp/jarvis-bridge-test.log; do
   [[ -f "$f" ]] && LOGS+=("$f")
 done
 
 # Snapshot of system state — version drift, brand config, healthz response.
 META_DIR="$(mktemp -d)"
 {
-  echo "=== Flat-Out diagnostic snapshot ==="
+  echo "=== Jarvis diagnostic snapshot ==="
   echo "Generated: $(date)"
   echo "Hostname:  $(hostname)"
   echo "Mac:       $(sw_vers -productName 2>/dev/null) $(sw_vers -productVersion 2>/dev/null)"
@@ -70,7 +70,7 @@ echo ""
 if [[ "${1:-}" == "--tail" ]]; then
   echo "  Last 200 lines of bridge log:"
   echo "  ─────────────────────────────"
-  tail -200 /tmp/flat-out-bridge.log 2>/dev/null | sed 's/^/    /'
+  tail -200 /tmp/jarvis-bridge.log 2>/dev/null | sed 's/^/    /'
   exit 0
 fi
 
@@ -83,14 +83,14 @@ fi
 if command -v osascript >/dev/null 2>&1; then
   osascript <<APPLESCRIPT 2>/dev/null || true
 tell application "Mail"
-  set newMessage to make new outgoing message with properties {subject:"Flat-Out Jarvis bug report — ${STAMP}", content:"
+  set newMessage to make new outgoing message with properties {subject:"Jarvis Jarvis bug report — ${STAMP}", content:"
 What I was trying to do:
 
 
 What went wrong:
 
 
-(Diagnostic bundle attached. Includes /tmp/flat-out-*.log, system snapshot, brand.json. No secrets — .env is excluded.)
+(Diagnostic bundle attached. Includes /tmp/jarvis-*.log, system snapshot, brand.json. No secrets — .env is excluded.)
 "}
   tell newMessage
     make new to recipient at end of to recipients with properties {address:"Antony@aoneill.co.uk"}

@@ -1,6 +1,6 @@
-# Flat-Out — Project Plan
+# Jarvis — Project Plan
 
-A branded AI voice assistant + HUD for **Flat-Out Media** (automotive PR & video agency, Leicester UK). Killer feature for FOM specifically: voice-driven cinematic video editing pipeline — *"Flat-Out, give me a 30-second the client teaser from yesterday's shoot"*.
+A branded AI voice assistant + HUD for **Jarvis AI** (automotive PR & video agency, Leicester UK). Killer feature for  the agency specifically: voice-driven cinematic video editing pipeline — *"Jarvis, give me a 30-second the client teaser from yesterday's shoot"*.
 
 ---
 
@@ -10,13 +10,13 @@ The plan below is the original phase breakdown from project kickoff. The codebas
 
 ### Shipped + working
 
-**Voice loop (was Phase 1):** Local-only voice loop running on Ollama (Qwen 2.5 14B / 32B configurable per hardware tier) + Whisper STT + Kokoro TTS — no isair/jarvis fork. Wake-phrase `hey flat-out` with mishear variants. Sentence-level TTS streaming with mic-RMS barge-in detection (first audio in ~1s instead of waiting for the full reply). Bridge owns the WebSocket pubsub + tool dispatch.
+**Voice loop (was Phase 1):** Local-only voice loop running on Ollama (Qwen 2.5 14B / 32B configurable per hardware tier) + Whisper STT + Kokoro TTS — no isair/jarvis fork. Wake-phrase `hey jarvis` with mishear variants. Sentence-level TTS streaming with mic-RMS barge-in detection (first audio in ~1s instead of waiting for the full reply). Bridge owns the WebSocket pubsub + tool dispatch.
 
 **HUD overlay (was Phase 2):** Vanilla HTML/CSS/JS kiosk app loaded directly in Chrome via `./launch.sh kiosk` (no Electron / Tauri wrapper — the kiosk runs full-screen in Chrome's `--app` mode and that's enough for the deployment model). White-label brand config at `config/brand.json`, per-profile theming, editable widget layout (Cmd+L), tablet/iPad responsive variants, transparent plan-stage panel, demo mode (Cmd+D), command palette (Cmd+K), conversation history drawer (H), audit overlay, usage telemetry overlay, settings modal with folder configuration.
 
 **Agency tool integrations (was Phase 3):** 76+ tools registered. Apple Mail (read summary, draft never-auto-send), Apple Calendar (events + add), web search (DuckDuckGo HTML), filesystem (under sandboxed shoots/output roots), Frame.io V4 review/comment workflow, Adobe Premiere ExtendScript via osascript (open project, import folder, create sequence, render). MCP server endpoint at `POST /mcp` exposes every tool to Claude Desktop / Cursor / Continue.
 
-**Video pipeline (was Phase 4):** Local-only — no DaVinci, no Capture One, no Remotion (all dropped, see "Dropped" below). Canvas + ffmpeg + ImageMagick build the FOM-branded teasers, YouTube thumbnails, YouTube shorts, brand-pack zip exports, contact sheets, watermarked variants, multi-aspect crops. Vision via local Qwen 2.5-VL captions + finds frames + scores clips. Optional containerised render env (`docker/render/Dockerfile`) for reproducible binary versions across operator Macs (`RENDER_USE_DOCKER=1`).
+**Video pipeline (was Phase 4):** Local-only — no DaVinci, no Capture One, no Remotion (all dropped, see "Dropped" below). Canvas + ffmpeg + ImageMagick build the agency-branded teasers, YouTube thumbnails, YouTube shorts, brand-pack zip exports, contact sheets, watermarked variants, multi-aspect crops. Vision via local Qwen 2.5-VL captions + finds frames + scores clips. Optional containerised render env (`docker/render/Dockerfile`) for reproducible binary versions across operator Macs (`RENDER_USE_DOCKER=1`).
 
 **Voice quality (was Phase 5):** Kokoro local TTS, British male voice (`bm_daniel`) default. Voice-cloning explicitly out — operator finds it "weird" (durable feedback memory). Voice picker in settings exposes the Kokoro voice library.
 
@@ -26,8 +26,8 @@ The plan below is the original phase breakdown from project kickoff. The codebas
 
 ### Dropped (originally in the plan but removed)
 
-- **DaVinci Resolve Python bridge** — FOM edits in Premiere; nobody's grading in Resolve. Whole video pipeline rebuilt around canvas + ffmpeg instead.
-- **Capture One scripting** — FOM doesn't run Capture One. Tethering goes through Lightroom or direct-to-card. AppleScript hook idea shelved.
+- **DaVinci Resolve Python bridge** —  the agency edits in Premiere; nobody's grading in Resolve. Whole video pipeline rebuilt around canvas + ffmpeg instead.
+- **Capture One scripting** —  the agency doesn't run Capture One. Tethering goes through Lightroom or direct-to-card. AppleScript hook idea shelved.
 - **Remotion** — paid licence at >3 employees ($100-500/mo). Branded graphics stay in the canvas + ffmpeg overlay filtergraph pipeline; if iteration speed becomes painful the LGPL MLT framework is the documented backup.
 - **isair/jarvis fork** — bridge is a from-scratch Node.js server. Borrowed concepts (embedding tool router, MCP support) but not the codebase.
 - **ElevenLabs cloud TTS** — Kokoro local proved good enough for the brand voice.
@@ -38,7 +38,7 @@ The plan below is the original phase breakdown from project kickoff. The codebas
 ### Still pending (small)
 
 - Operator manual + handover document with screenshots (TODO.md flagged 🟥).
-- Brand white-label install path verification on a fresh Mac (verify `setup-wizard.mjs --non-interactive` cleans every Flat-Out string).
+- Brand white-label install path verification on a fresh Mac (verify `setup-wizard.mjs --non-interactive` cleans every Jarvis string).
 - HUD performance baseline measurement on M1 Max vs target M5 Max.
 - Embeddings model version pin (record nomic-embed model + version with each row to invalidate on upgrade).
 - CLAUDE.md at project root for future AI sessions on the codebase's conventions.
@@ -51,12 +51,12 @@ The bulk of Phase 1-6 plus several never-planned wins are live. The remaining it
 
 `/Users/Antony/Desktop/Jarvis/` — browser-based HUD prototype.
 
-- Brand-true: Oswald + Rubik fonts (extracted from flatoutmedia.org), `#E10600` bright red + `#8F0003` deep red, FOM dial + wordmark assets in `assets/`.
-- Centerpiece: animated 0–200 speedometer with red-zone, ticks, numerals, breathing needle, FOM dial layered behind, "FLAT/OUT" core mark.
+- Brand-true: Oswald + Rubik fonts (extracted from jarvismedia.org), `#00d4ff` arc-reactor cyan + `#0077a8` deep,  the agency dial + wordmark assets in `assets/`.
+- Centerpiece: animated 0–200 speedometer with red-zone, ticks, numerals, breathing needle,  the agency dial layered behind, "FLAT/OUT" core mark.
 - Live UK clock, calendar strip, weather panel, comms feed, launch panel, telemetry waveform, fake live system stats.
-- Voice demo: Web Speech API picks up "Flat-Out" wake word, canned replies, system TTS, speedo state lights up (listening / thinking / speaking).
+- Voice demo: Web Speech API picks up "Jarvis" wake word, canned replies, system TTS, speedo state lights up (listening / thinking / speaking).
 - Fullscreen: press `F`, double-click speedo, or run `./launch.sh` (Chrome `--app` mode, no browser chrome) / `./launch.sh kiosk`.
-- Real verbatim FOM phrases used: *"we live and breathe automotive"*, *"stepping your automotive business up a gear"*.
+- Real verbatim  the agency phrases used: *"we live and breathe automotive"*, *"stepping your automotive business up a gear"*.
 
 Purpose: visual proof-of-concept for the client meeting. Not the deliverable.
 
@@ -100,8 +100,8 @@ What the assistant can actually *do*. MCP server per integration so each is isol
 - **Music** — Spotify Web API (play playlists, control transport).
 - **Capture One** — AppleScript scripting for retouch queue inspection, session opens.
 - **Adobe CC** — UXP scripts for Premiere/Photoshop ("open today's project", "export 1080p H.264").
-- **FOM DAM** — depends on what they actually use (Capture One Cultural Heritage, NetX, Bynder, custom?). Discovery question.
-- **Filesystem** — read/list/move within designated FOM project folders. No deletes without confirmation.
+- **agency DAM** — depends on what they actually use (Capture One Cultural Heritage, NetX, Bynder, custom?). Discovery question.
+- **Filesystem** — read/list/move within designated  the agency project folders. No deletes without confirmation.
 - **Web search** — DuckDuckGo / Brave (already built into jarvis).
 
 **Deliverable:** 6–8 working voice commands covering daily agency flow.
@@ -125,14 +125,14 @@ Static car photos → cinematic motion clips for social/editorial.
   - **Wan 2.2** — open-weights fallback for sensitive client work
 - LLM picks the right model based on prompt + cost target, builds the motion prompt ("slow cinematic dolly from grille to driver window, golden hour, shallow DOF"), calls Fal, gets back MP4.
 - Output drops into a watch-folder Premiere/Resolve picks up.
-- Voice flow: *"Flat-Out, animate yesterday's hero shot of the DBX, slow orbit, 4 seconds"* → done in ~30s.
+- Voice flow: *"Jarvis, animate yesterday's hero shot of the DBX, slow orbit, 4 seconds"* → done in ~30s.
 
 ### 4b. Voice-Driven Rough Cuts
 
 - **DaVinci Resolve Studio** integration — Python scripting API, called from jarvis tool layer.
 - Resolve's Neural Engine: scene cut detection, smart reframe, auto color match across angles, voice isolation.
 - LLM picks beat-synced cut points (call out to a small audio analysis script for BPM/transient detection).
-- Apply FOM's signature LUT/grade automatically (we extract their look from a reference reel during discovery).
+- Apply the agency's signature LUT/grade automatically (we extract their look from a reference reel during discovery).
 - Smart-reframe to deliver 9:16 / 1:1 / 16:9 from one master.
 - Voice flow: *"30-second teaser from yesterday's the client, vertical, beat-synced"* → 60-second turnaround for a rough cut.
 
@@ -150,7 +150,7 @@ Static car photos → cinematic motion clips for social/editorial.
 
 ### 4e. Brand-Consistent Output
 
-- "FOM editorial style" encoded as a rules pack: cold-open with engine sound, mid-build, hero shot at 60% mark, logo close on red blade.
+- "agency editorial style" encoded as a rules pack: cold-open with engine sound, mid-build, hero shot at 60% mark, logo close on red blade.
 - Built during discovery by sitting with their lead editor, watching them work, abstracting decisions.
 - Versioned — they can tweak the style, the LLM picks up the new rules immediately.
 
@@ -166,7 +166,7 @@ The single biggest gap between TikTok demos and a credible client install.
 
 - **Local-only:** Kokoro-82M (free, Apache 2.0, runs on CPU) or Orpheus 3B (better, needs ~6GB VRAM). Sounds "decent audiobook narrator", not Hollywood.
 - **Cloud-hybrid:** ElevenLabs (~£20/month, sounds genuinely human, handles emotion and unusual words). Privacy tradeoff is theatre — only the response text leaves the building, never their files. **Strong recommendation for a client-facing showpiece.**
-- **Voice clone:** F5-TTS or ElevenLabs Pro — clone one of FOM's people so "Flat-Out" sounds like an actual member of the team. Distinctive and on-brand. Adds ~1 week.
+- **Voice clone:** F5-TTS or ElevenLabs Pro — clone one of the agency's people so "Jarvis" sounds like an actual member of the team. Distinctive and on-brand. Adds ~1 week.
 
 **Deliverable:** A voice that doesn't sound like a 2010 GPS.
 
@@ -174,13 +174,13 @@ The single biggest gap between TikTok demos and a credible client install.
 
 ## Phase 6 — Install + Training + Handoff (1 week)
 
-- Install on FOM's actual machine (we'll spec it during discovery — 64GB+ M-series Mac strongly recommended).
+- Install on the agency's actual machine (we'll spec it during discovery — 64GB+ M-series Mac strongly recommended).
 - Setup wizard for non-technical staff.
 - Two training sessions: (1) lead editor on the video pipeline, (2) general staff on voice commands + admin.
 - Documentation: command cheatsheet, troubleshooting guide, "when to call us" matrix.
 - Maintenance contract: Ollama updates, model upgrades, OS compat (macOS 27 will land mid-cycle), bug fixes. Suggested: ~£200/month retainer or per-incident.
 
-**Deliverable:** A running install at FOM's Leicester office, trained staff, support agreement.
+**Deliverable:** A running install at the agency's Leicester office, trained staff, support agreement.
 
 ---
 
@@ -192,7 +192,7 @@ The single biggest gap between TikTok demos and a credible client install.
 | Voice loop | isair/jarvis (forked) | Mature, prebuilt mac binary, MCP support, active project |
 | ASR | Whisper medium (.en) | Built into jarvis, GPU-accelerated on Apple Silicon |
 | TTS | ElevenLabs (recommended) / Kokoro (fallback) | See Phase 5 |
-| Wake word | "Flat-Out" anywhere in sentence | jarvis's intent judge handles this natively |
+| Wake word | "Jarvis" anywhere in sentence | jarvis's intent judge handles this natively |
 | Wrapper | Electron (or Tauri for smaller) | Transparent overlay, multi-monitor, code-signable |
 | Image-to-video | Fal.ai (pay-per-use) | Single API for Kling/Veo/Luma/Runway, no monthly lock-in |
 | NLE | DaVinci Resolve Studio (they have it) | Python scriptable, neural engine, free upgrade for them |
@@ -269,7 +269,7 @@ These are working ranges, not quotes. Real number depends on discovery answers.
 
 Small visual polish remaining on the sandbox:
 
-- FOM logo currently a watermark — bring it back to prominent (per recent client direction).
+-  the agency logo currently a watermark — bring it back to prominent (per recent client direction).
 - Verify wake button repositioning didn't introduce overlap with the calendar dates.
 - Stress-test voice demo in noisy environment before client meeting.
 

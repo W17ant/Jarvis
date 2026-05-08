@@ -8,8 +8,8 @@
  *
  *  Exported helpers:
  *    subjectSlug(subject)    — filesystem-safe slug for shoot folders
- *    buildIntroCard()        — 3s vertical FOM intro mp4 (cached)
- *    buildOutroCard()        — 2s vertical FOM outro mp4 (cached)
+ *    buildIntroCard()        — 3s vertical brand intro mp4 (cached)
+ *    buildOutroCard()        — 2s vertical brand outro mp4 (cached)
  *    stitchFinal()           — kept for reference (slow-cut concatenation)
  *    stitchFinalFastCut()    — kept for reference (paced fast-cut concatenation)
  */
@@ -42,14 +42,23 @@ async function ensureDirs() {
   Paths.getOutputDir();
 }
 
-/** Build a 2-second FOM outro card from the wordmark + dial overlay. Cached. */
+/** Build a 2-second brand outro card from the wordmark + dial overlay. Cached. */
 export async function buildOutroCard({ force = false } = {}) {
   await ensureDirs();
   const outroPath = path.join(ASSET_DIR, "outro-2s.mp4");
   if (existsSync(outroPath) && !force) return outroPath;
 
-  const wordmark = path.join(ASSET_DIR, "fom-wordmark.png");
-  const dial = path.join(ASSET_DIR, "fom-dial.png");
+  const wordmark = path.join(ASSET_DIR, "brand-wordmark.png");
+  const dial = path.join(ASSET_DIR, "brand-dial.png");
+  // Why: white-label distribution ships without bundled brand artwork.
+  // If the operator hasn't dropped in their own assets, skip the card build
+  // and let the consumer (edit.mjs) handle a null return — better than
+  // erroring on every video-tool invocation. Operators provide their own
+  // brand-wordmark.png / brand-dial.png to re-enable.
+  if (!existsSync(wordmark) || !existsSync(dial)) {
+    console.warn("[video] brand artwork missing — skipping intro/outro card build");
+    return null;
+  }
 
   const cmd = [
     "ffmpeg", "-y",
@@ -75,14 +84,24 @@ export async function buildOutroCard({ force = false } = {}) {
   return outroPath;
 }
 
-/** Build a 3-second FOM intro mp4 from the wordmark logo over black. Cached after first build. */
+/** Build a 3-second brand intro mp4 from the wordmark logo over black. Cached after first build.
+ *  Returns null if brand artwork (assets/brand-wordmark.png + assets/brand-dial.png) is absent. */
 export async function buildIntroCard({ force = false } = {}) {
   await ensureDirs();
   const introPath = path.join(ASSET_DIR, "intro-3s.mp4");
   if (existsSync(introPath) && !force) return introPath;
 
-  const wordmark = path.join(ASSET_DIR, "fom-wordmark.png");
-  const dial = path.join(ASSET_DIR, "fom-dial.png");
+  const wordmark = path.join(ASSET_DIR, "brand-wordmark.png");
+  const dial = path.join(ASSET_DIR, "brand-dial.png");
+  // Why: white-label distribution ships without bundled brand artwork.
+  // If the operator hasn't dropped in their own assets, skip the card build
+  // and let the consumer (edit.mjs) handle a null return — better than
+  // erroring on every video-tool invocation. Operators provide their own
+  // brand-wordmark.png / brand-dial.png to re-enable.
+  if (!existsSync(wordmark) || !existsSync(dial)) {
+    console.warn("[video] brand artwork missing — skipping intro/outro card build");
+    return null;
+  }
 
   /* Intro is silent — but we still attach an AAC silent track so concat downstream sees
    * matching stream layout against video segments that carry source audio. */

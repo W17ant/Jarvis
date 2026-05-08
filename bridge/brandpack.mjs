@@ -1,6 +1,6 @@
 /** brandpack.mjs - One-shot deliverable export for a hero shot.
  *
- *  Why: post-shoot delivery for FOM consistently produces the same package —
+ *  Why: post-shoot delivery consistently produces the same package —
  *  one hero in 4 aspect ratios (16:9 / 9:16 / 1:1 / 4:5), watermarked AND clean
  *  variants, plus a brand-credit text file. Composing this manually takes ~8
  *  minutes of click-export-watermark-zip-rename per hero. This tool composes
@@ -9,7 +9,7 @@
  *  Pipeline:
  *    1. Resolve source path (under shoots/ or absolute inside project)
  *    2. Crop to 4 aspect ratios via Vision.exportAllAspects (existing primitive)
- *    3. Apply FOM watermark to a parallel copy via ImageMagick
+ *    3. Apply brand watermark to a parallel copy via ImageMagick
  *    4. Drop a credit.txt with brand boilerplate
  *    5. Zip the whole folder for handoff
  *
@@ -30,7 +30,7 @@ const PROJECT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 const ASSETS_DIR = path.join(PROJECT_DIR, "assets");
 /* OUTPUT_DIR / SHOOTS_DIR resolved at call sites via Paths.* — operator-configurable. */
 
-const DEFAULT_WATERMARK = path.join(ASSETS_DIR, "fom-wordmark.png");
+const DEFAULT_WATERMARK = path.join(ASSETS_DIR, "brand-wordmark.png");
 const ASPECTS = ["16:9", "9:16", "1:1", "4:5"];
 
 /** Resolve a source path inside the project tree. Refuses paths that escape. */
@@ -69,7 +69,7 @@ async function watermarkOne(src, dest, { opacity = 0.6, scale = 0.12, marginPx =
 function creditBody(srcBasename) {
   const brand = loadBrand();
   const agency = brand?.agency || {};
-  const name = agency.name || "Flat-Out Media";
+  const name = agency.name || "Jarvis AI";
   const tagline = agency.tagline || "";
   const handle = primarySocialHandle(agency);
   const date = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });

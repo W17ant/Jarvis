@@ -133,3 +133,15 @@ assets/*.pdf
 # 8 ── PERSONAL TAILSCALE / DAEMON CONFIG ──────────────────────
 tools/launchd/com.flatoutmedia.hud.plist
 tools/launchd/com.flatoutmedia.*.plist
+
+# Playwright MCP session artifacts (local debugging, not deliverable)
+.playwright-mcp/
+
+# HUD smoke-test screenshots (local debugging, not deliverable)
+jarvis-*.png
+jarvis-clean*.png
+jarvis-hud-*.png
+jarvis-instrument*.png
+jarvis-mk7-*.png
+jarvis-online*.png
+jarvis-temps*.png

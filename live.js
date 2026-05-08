@@ -48,7 +48,7 @@ function connectWS() {
   });
   ws.addEventListener("close", () => {
     connStatus.textContent = "disconnected — retrying";
-    connStatus.style.color = "var(--fom-red)";
+    connStatus.style.color = "var(--accent)";
     /* Why: if the operator's phone goes to sleep + wakes, the WS dies silently. Retry
      * with a small backoff so they don't have to refresh the page after every break. */
     setTimeout(connectWS, 2000);

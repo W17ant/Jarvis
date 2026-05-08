@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# launch.sh - One-command Flat-Out HUD startup.
+# launch.sh - One-command Jarvis HUD startup.
 # Starts: static server (8765), Node bridge (8766), Kokoro TTS server (8767),
 # Whisper STT server (8768), then opens Chrome.
 #
@@ -51,7 +51,7 @@ stop_services() {
   for port in 8765 8766 8767 8768; do
     pids=$(lsof -ti ":$port" 2>/dev/null || true)
     if [[ -n "$pids" ]]; then
-      echo "[Flat-Out] killing :${port} (pid=${pids})"
+      echo "[Jarvis] killing :${port} (pid=${pids})"
       kill -TERM $pids 2>/dev/null || true
       killed_any=1
     fi
@@ -70,15 +70,15 @@ stop_services() {
   # operator's regular Chrome session is untouched.
   hud_pids=$(pgrep -f -- "--app=${URL}" 2>/dev/null || true)
   if [[ -n "$hud_pids" ]]; then
-    echo "[Flat-Out] closing HUD Chrome window (pid=${hud_pids})"
+    echo "[Jarvis] closing HUD Chrome window (pid=${hud_pids})"
     kill -TERM $hud_pids 2>/dev/null || true
     killed_any=1
   fi
 
   if (( killed_any )); then
-    echo "[Flat-Out] services stopped"
+    echo "[Jarvis] services stopped"
   else
-    echo "[Flat-Out] nothing to stop — services were already down"
+    echo "[Jarvis] nothing to stop — services were already down"
   fi
 }
 
@@ -89,7 +89,7 @@ case "${1:-}" in
     exit 0
     ;;
   restart)
-    echo "[Flat-Out] restarting services..."
+    echo "[Jarvis] restarting services..."
     stop_services
     SKIP_CHROME=1   # the operator usually has the HUD already open in Chrome
     set -- "app"
@@ -99,10 +99,10 @@ esac
 start_if_free() {
   local port="$1"; local name="$2"; shift 2
   if lsof -i ":${port}" >/dev/null 2>&1; then
-    echo "[Flat-Out] ${name} already running on :${port}"
+    echo "[Jarvis] ${name} already running on :${port}"
   else
-    "$@" >/tmp/flat-out-${name}.log 2>&1 &
-    echo "[Flat-Out] ${name} started on :${port} (pid=$!)"
+    "$@" >/tmp/jarvis-${name}.log 2>&1 &
+    echo "[Jarvis] ${name} started on :${port} (pid=$!)"
   fi
 }
 
@@ -118,15 +118,15 @@ heal_bridge_if_native_binding_mismatched() {
     sleep 1
     lsof -i ":8766" >/dev/null 2>&1 && return 0
   done
-  if grep -q "NODE_MODULE_VERSION\|ERR_DLOPEN_FAILED\|better-sqlite3" /tmp/flat-out-bridge.log 2>/dev/null; then
-    echo "[Flat-Out] native binding ABI mismatch detected — auto-rebuilding (one-time, ~30s) ..."
-    (cd "$HERE" && npm rebuild better-sqlite3 --silent) >/tmp/flat-out-rebuild.log 2>&1
+  if grep -q "NODE_MODULE_VERSION\|ERR_DLOPEN_FAILED\|better-sqlite3" /tmp/jarvis-bridge.log 2>/dev/null; then
+    echo "[Jarvis] native binding ABI mismatch detected — auto-rebuilding (one-time, ~30s) ..."
+    (cd "$HERE" && npm rebuild better-sqlite3 --silent) >/tmp/jarvis-rebuild.log 2>&1
     if [[ $? -eq 0 ]]; then
-      echo "[Flat-Out] rebuild ok — retrying bridge"
-      bash -c "cd '$HERE' && node bridge/server.mjs" >/tmp/flat-out-bridge.log 2>&1 &
-      echo "[Flat-Out] bridge retry pid=$!"
+      echo "[Jarvis] rebuild ok — retrying bridge"
+      bash -c "cd '$HERE' && node bridge/server.mjs" >/tmp/jarvis-bridge.log 2>&1 &
+      echo "[Jarvis] bridge retry pid=$!"
     else
-      echo "[Flat-Out] rebuild failed — see /tmp/flat-out-rebuild.log"
+      echo "[Jarvis] rebuild failed — see /tmp/jarvis-rebuild.log"
     fi
   fi
 }
@@ -145,14 +145,14 @@ if [[ -x "$HERE/.venv/bin/python" ]]; then
   start_if_free 8767 "kokoro"   bash -c "cd '$HERE' && '$HERE/.venv/bin/python' bridge/kokoro_server.py"
   start_if_free 8768 "whisper"  bash -c "cd '$HERE' && '$HERE/.venv/bin/python' bridge/whisper_server.py"
 else
-  echo "[Flat-Out] no .venv found — Kokoro & Whisper disabled. Run: python3 -m venv .venv && .venv/bin/pip install kokoro-onnx onnxruntime soundfile numpy faster-whisper mlx-whisper"
+  echo "[Jarvis] no .venv found — Kokoro & Whisper disabled. Run: python3 -m venv .venv && .venv/bin/pip install kokoro-onnx onnxruntime soundfile numpy faster-whisper mlx-whisper"
 fi
 
 # Give services a moment to bind
 sleep 2
 
 if [[ "$SKIP_CHROME" == "1" ]]; then
-  echo "[Flat-Out] services restarted — Chrome window not re-opened. Refresh the HUD with Cmd+R."
+  echo "[Jarvis] services restarted — Chrome window not re-opened. Refresh the HUD with Cmd+R."
   exit 0
 fi
 
@@ -173,7 +173,7 @@ case "$MODE" in
   app|*) "$CHROME" --app="$URL" --window-size=1600,1000 $MIC_FLAGS >/dev/null 2>&1 & ;;
 esac
 
-echo "[Flat-Out] launched in ${MODE} mode → $URL"
+echo "[Jarvis] launched in ${MODE} mode → $URL"
 echo ""
 echo "Tail logs:"
-echo "  tail -f /tmp/flat-out-static.log /tmp/flat-out-bridge.log /tmp/flat-out-kokoro.log"
+echo "  tail -f /tmp/jarvis-static.log /tmp/jarvis-bridge.log /tmp/jarvis-kokoro.log"

@@ -52,7 +52,7 @@ export function init({ autoPickMic, getPreferredDeviceId, setPreferredDevice, wf
 }
 
 export function loadSavedVoice() { return Storage.get(VOICE_KEY, "bm_daniel"); }
-export function getSavedAgency() { return Storage.get(AGENCY_KEY, "Flat-Out Media"); }
+export function getSavedAgency() { return Storage.get(AGENCY_KEY, "Jarvis AI"); }
 export function getSavedTier()   { return Storage.get(TIER_KEY, "standard"); }
 export function getTierPreset()  { return TIER_PRESETS[getSavedTier()] || TIER_PRESETS.standard; }
 
@@ -127,7 +127,7 @@ export async function maybeShowSetup() {
 
   document.getElementById("setupSubmit").addEventListener("click", async () => {
     Storage.set(VOICE_KEY, voiceEl.value);
-    Storage.set(AGENCY_KEY, agencyEl.value || "Flat-Out Media");
+    Storage.set(AGENCY_KEY, agencyEl.value || "Jarvis AI");
     Storage.set(TIER_KEY, tierEl.value);
 
     /* If the operator typed a city different from the detected one, geocode it via Open-Meteo
@@ -145,14 +145,14 @@ export async function maybeShowSetup() {
           latitude: r?.latitude ?? op.latitude,
           longitude: r?.longitude ?? op.longitude,
           timezone: r?.timezone || op.timezone,
-          agency: agencyEl.value || "Flat-Out Media",
+          agency: agencyEl.value || "Jarvis AI",
         };
         await fetch("http://localhost:8766/config/override", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),
         });
-      } catch (e) { console.warn("[Flat-Out] location override failed:", e.message); }
-    } else if (agencyEl.value && agencyEl.value !== "Flat-Out Media") {
+      } catch (e) { console.warn("[Jarvis] location override failed:", e.message); }
+    } else if (agencyEl.value && agencyEl.value !== "Jarvis AI") {
       // Agency name change only
       await fetch("http://localhost:8766/config/override", {
         method: "POST", headers: { "content-type": "application/json" },

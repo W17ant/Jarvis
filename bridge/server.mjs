@@ -1,4 +1,4 @@
-/** server.mjs - Flat-Out HUD bridge.
+/** server.mjs - Jarvis HUD bridge.
  *  Single Node process that the HUD frontend talks to over websocket.
  *  Provides: real system stats, Ollama LLM proxy, weather, calendar/mail
  *  bridges, video edit pipeline, vision, brand-pack export, agency tools.
@@ -12,27 +12,16 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
 import { buildProductionTeaser, TEASER_STAGES } from "./edit.mjs";
-import * as Premiere from "./premiere.mjs";
 import { createPdf, listTemplates as listPdfTemplates } from "./pdf.mjs";
 import { getUpcomingEvents, addCalendarEvent } from "./calendar.mjs";
 import { getMailSummary, draftEmail } from "./mail.mjs";
-import { applyLightroomPreset, listLightroomPresets } from "./lightroom.mjs";
-import * as LightroomCatalog from "./lightroom-catalog.mjs";
 import { runShell, writeFileSandboxed, shellAllowlist } from "./shell.mjs";
 import * as Memory from "./memory.mjs";
 import * as Vision from "./vision.mjs";
-import * as FrameIO from "./frameio.mjs";
-import { generateShootReport } from "./reports.mjs";
 import * as Agency from "./agency.mjs";
-import * as Leads from "./leads.mjs";
 import * as Youtube from "./youtube.mjs";
-import { loadBrand, invalidateBrandCache } from "./brand.mjs";
+import { loadBrand, invalidateBrandCache, saveBrand } from "./brand.mjs";
 import { creativeStylePromptBlock, loadCreativeStyle, invalidateCreativeStyleCache, creativeStylePath } from "./creative-style.mjs";
-import * as Shotflag from "./shotflag.mjs";
-import { buildHeroContactSheet } from "./contactsheet.mjs";
-import { batchWatermark } from "./watermark.mjs";
-import * as Rights from "./rights.mjs";
-import { trackdayTag } from "./trackday.mjs";
 import * as Tasks from "./tasks.mjs";
 import * as Audit from "./audit.mjs";
 import * as Usage from "./usage.mjs";
@@ -47,16 +36,11 @@ import * as CachePrune from "./cache-prune.mjs";
 import * as Window from "./window.mjs";
 import * as DreamCycle from "./dream-cycle.mjs";
 import * as DailyDigest from "./daily-digest.mjs";
-import * as PressRadar from "./press-radar.mjs";
-import * as MediaDays from "./media-days.mjs";
-import * as StyleMemory from "./style-memory.mjs";
-import { autoCull } from "./autocull.mjs";
 import { exportBrandPack } from "./brandpack.mjs";
 import * as Purchases from "./purchases.mjs";
 import * as Browse from "./browse.mjs";
 import * as LlmProviders from "./llm/providers.mjs";
 import * as Personal from "./personal.mjs";
-import * as VisualStyle from "./visual-style.mjs";
 import * as Transcribe from "./transcribe.mjs";
 import * as UsageLog from "./usage-log.mjs";
 import * as EodDigest from "./eod-digest.mjs";
@@ -64,12 +48,12 @@ import * as FastPath from "./fast-path.mjs";
 import * as FastPathCandidates from "./fast-path-candidates.mjs";
 import * as Crew from "./crew.mjs";
 import * as CrewHelpers from "./crew-helpers.mjs";
-import * as StudioMap from "./studio-map.mjs";
 import * as IMessageListener from "./imessage-listener.mjs";
 import * as Knowledge from "./knowledge.mjs";
 import * as CodeAgent from "./code-agent.mjs";
 import * as Office from "./office.mjs";
 import * as ToolRouter from "./tool-router.mjs";
+import * as Macmon from "./macmon.mjs";
 
 const execp = promisify(exec);
 
@@ -144,7 +128,7 @@ async function persistEnvVar(key, value) {
 /* ---------- CONFIG ---------- */
 let CONFIG = {
   operator: { city: "Leicester", country: "UK", latitude: 52.6369, longitude: -1.1398, timezone: "Europe/London" },
-  agency: { name: "Flat-Out Media", tagline: "we live and breathe automotive", social: "@flatoutmediauk", redHex: "#E10600" },
+  agency: { name: "Jarvis AI", tagline: "your voice-first AI assistant", social: "", redHex: "#00d4ff" },
 };
 try {
   const raw = readFileSync(new URL("../config.json", import.meta.url), "utf8");
@@ -242,7 +226,7 @@ const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
  * 2026-05-01 — VL alone consumed 46GB and stalled "Stopping..." for 30+s while text
  * couldn't load, dropping the assistant to offline-fallback mid-demo). Code default is
  * the **middle tier** (qwen2.5:14b text + qwen2.5vl:7b vision) — comfortable on any
- * 64GB Mac. For FOM's production M5 Max 96GB+, set in .env:
+ * 64GB Mac. For production M5 Max 96GB+, set in .env:
  *   OLLAMA_MODEL=qwen2.5:32b
  *   VL_MODEL=qwen2.5vl:32b
  *   VL_KEEP_ALIVE=10m
@@ -261,7 +245,7 @@ const PORT = Number(process.env.PORT || 8766);
 console.log(`[bridge] Ollama: ${OLLAMA_URL} (${getModel()})`);
 
 /* Boot summary — single block that prints the operator-relevant config so a
- * non-developer reading /tmp/flat-out-bridge.log can see at a glance what's
+ * non-developer reading /tmp/jarvis-bridge.log can see at a glance what's
  * configured and what's missing. Avoids forcing them to grep across 20 lines
  * for the bits that matter. Keys are reported as set/missing only, never the
  * value, matching the no-secrets-in-logs rule from SECURITY.md. */
@@ -270,18 +254,23 @@ console.log("[bridge] ── boot summary ──");
 console.log(`[bridge]   Project root : ${PROJECT_ROOT}`);
 console.log(`[bridge]   Text model   : ${getModel()}`);
 console.log(`[bridge]   Vision model : ${process.env.VL_MODEL || "(unset)"}`);
-console.log(`[bridge]   FRAMEIO      : ${_bootKey("FRAMEIO_TOKEN")}`);
-console.log(`[bridge]   SERPAPI      : ${_bootKey("SERPAPI_KEY")}`);
-console.log(`[bridge]   HUNTER       : ${_bootKey("HUNTER_API_KEY")}`);
+/* Optional API key surfaces — kept in boot summary so operators can spot
+ * mis-configured creds. FRAMEIO/SERPAPI/HUNTER tools were removed in the
+ * white-label rebrand; the env-var hints stay so a fork can reintroduce
+ * them without rewiring the boot diagnostics. */
+console.log(`[bridge]   ANTHROPIC    : ${_bootKey("ANTHROPIC_API_KEY")}`);
+console.log(`[bridge]   OPENAI       : ${_bootKey("OPENAI_API_KEY")}`);
 console.log("[bridge] ──────────────────");
 
 /* ---------- SYSTEM STATS ----------
  * Why: browsers are sandboxed from real CPU/RAM/net. We poll the OS here and push to clients. */
+/* Returns { overall, perCore: [...] }. perCore is per-CPU utilisation 0..100.
+ * The reactor HUD draws an individual rim arc for each core. */
 async function getCpuPercent() {
-  // sample twice ~250ms apart, compute delta
   const a = os.cpus();
   await new Promise(r => setTimeout(r, 250));
   const b = os.cpus();
+  const perCore = [];
   let totalIdle = 0, totalTotal = 0;
   for (let i = 0; i < a.length; i++) {
     const tA = Object.values(a[i].times).reduce((s, n) => s + n, 0);
@@ -290,8 +279,13 @@ async function getCpuPercent() {
     const totalDelta = tB - tA;
     totalIdle += idleDelta;
     totalTotal += totalDelta;
+    const corePct = totalDelta > 0
+      ? Math.max(0, Math.min(100, (1 - idleDelta / totalDelta) * 100))
+      : 0;
+    perCore.push(+corePct.toFixed(1));
   }
-  return Math.max(0, Math.min(100, (1 - totalIdle / totalTotal) * 100));
+  const overall = Math.max(0, Math.min(100, (1 - totalIdle / totalTotal) * 100));
+  return { overall, perCore };
 }
 
 async function getMemoryStats() {
@@ -357,6 +351,24 @@ async function getGpuStats() {
   } catch {
     return { usagePct: null, allocGB: null, inUseGB: null, thermal: "unknown" };
   }
+}
+
+/* CPU temp probe — opportunistic. Apple Silicon doesn't expose °C without
+ * sudo or third-party deps; we try `osx-cpu-temp` (brew) first, fall back to
+ * pmset thermal level, return null when neither works. The HUD's temp gauge
+ * gracefully shows a thermal-level chip when °C is null. */
+let _hasOsxCpuTemp = null;
+async function getCpuTemp() {
+  if (_hasOsxCpuTemp === false) return null;
+  try {
+    if (_hasOsxCpuTemp === null) {
+      try { await execp("which osx-cpu-temp"); _hasOsxCpuTemp = true; }
+      catch { _hasOsxCpuTemp = false; return null; }
+    }
+    const { stdout } = await execp("osx-cpu-temp -f");
+    const m = stdout.match(/([\d.]+)\s*°?C/);
+    return m ? parseFloat(m[1]) : null;
+  } catch { return null; }
 }
 
 async function getNetStats() {
@@ -446,7 +458,7 @@ async function gatherContext(query) {
   if (/\b(cpu|ram|memory|disk|storage|performance|usage|load|space)\b/.test(q)) {
     try {
       const [cpu, mem, disk] = await Promise.all([getCpuPercent(), getMemoryStats(), getDiskStats()]);
-      ctx.push(`System: CPU ${cpu.toFixed(0)}%, RAM ${mem.usedGB.toFixed(1)}/${mem.totalGB.toFixed(0)} GB used, disk ${disk.usedTB.toFixed(2)}/${disk.totalTB.toFixed(2)} TB used.`);
+      ctx.push(`System: CPU ${cpu.overall.toFixed(0)}%, RAM ${mem.usedGB.toFixed(1)}/${mem.totalGB.toFixed(0)} GB used, disk ${disk.usedTB.toFixed(2)}/${disk.totalTB.toFixed(2)} TB used.`);
     } catch {}
   }
 
@@ -466,40 +478,8 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "premiere_open_project",
-      description: "Open an existing Adobe Premiere Pro project (.prproj) on the operator's Mac.",
-      parameters: { type: "object", properties: { projectPath: { type: "string" } }, required: ["projectPath"] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "premiere_import_folder",
-      description: "Import every video / photo file in a folder into the active Premiere Pro project. Use when the operator asks to bring footage from a shoot folder into the current project.",
-      parameters: { type: "object", properties: { folderPath: { type: "string" } }, required: ["folderPath"] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "premiere_create_sequence_from_folder",
-      description: "Imports a folder of video clips into a new bin in Premiere AND creates a new sequence with those clips on the timeline. Use for 'build a rough cut from yesterday's shoot' type requests.",
-      parameters: { type: "object", properties: { folderPath: { type: "string" }, name: { type: "string" } }, required: ["folderPath"] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "premiere_render_active_sequence",
-      description: "Queue the active Premiere sequence for render in Adobe Media Encoder. Use when operator says 'render this' or 'export the sequence'.",
-      parameters: { type: "object", properties: { presetName: { type: "string" } } },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "create_pdf",
-      description: `Generate a branded Flat-Out Media PDF document. Available templates: ${listPdfTemplates().join(", ")}.\n\nFor 'quote': data = { client, project, lineItems: [{description, amount}], shootDates, validUntil, notes, vatRate }.\nFor 'brief': data = { client, subject, dates, location, deliverables, crew, objectives, shotList: [...], notes }.\nFor 'shoot-report': data = { client, subject, date, location, weather, crew, fileCount, summary, highlights: [...], issues, nextSteps }.\nFor 'press-release': data = { headline, subhead, dateline, lead, body, quote, quoteAttribution, boilerplate, contact, releaseDate }.`,
+      description: `Generate a branded Jarvis AI PDF document. Available templates: ${listPdfTemplates().join(", ")}.\n\nFor 'quote': data = { client, project, lineItems: [{description, amount}], shootDates, validUntil, notes, vatRate }.\nFor 'brief': data = { client, subject, dates, location, deliverables, crew, objectives, shotList: [...], notes }.\nFor 'shoot-report': data = { client, subject, date, location, weather, crew, fileCount, summary, highlights: [...], issues, nextSteps }.\nFor 'press-release': data = { headline, subhead, dateline, lead, body, quote, quoteAttribution, boilerplate, contact, releaseDate }.`,
       parameters: {
         type: "object",
         properties: {
@@ -554,45 +534,6 @@ const TOOLS = [
         type: "object",
         properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, cc: { type: "string" } },
         required: ["to", "subject"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "apply_lightroom_preset",
-      description: "Apply a Lightroom develop preset to every RAW image in a folder by writing XMP sidecars. Doesn't need Lightroom open. Use when the operator says 'apply our standard preset to today's RAWs' etc.",
-      parameters: {
-        type: "object",
-        properties: { folder: { type: "string" }, preset: { type: "string" } },
-        required: ["folder", "preset"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_lightroom_presets",
-      description: "List available Lightroom presets the operator can apply.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "find_lr_photo",
-      description: "Search the operator's Lightroom Classic catalogue (read-only, opens .lrcat as SQLite). Use when the operator says 'find me five-star shots from the Bentley shoot', 'show every rejected photo from last week', 'list the picks tagged Goodwood'. Returns absolute file paths so other tools can act on the matches. Filters: rating (min stars 0-5), pick (1=picked, -1=rejected, 0=neutral), after / before (ISO date), keyword (substring of any keyword), format (e.g. 'RAW'). Limit defaults to 50.",
-      parameters: {
-        type: "object",
-        properties: {
-          rating:  { type: "number", description: "Minimum star rating, 0-5." },
-          pick:    { type: "number", description: "Pick flag: 1=picked, -1=rejected, 0=neutral." },
-          after:   { type: "string", description: "ISO date — return photos taken on or after this." },
-          before:  { type: "string", description: "ISO date — return photos taken on or before this." },
-          keyword: { type: "string", description: "Substring of a keyword (case-insensitive)." },
-          format:  { type: "string", description: "File format filter, e.g. 'RAW' or 'JPEG'." },
-          limit:   { type: "number", description: "Max rows (default 50, cap 500)." },
-        },
       },
     },
   },
@@ -711,82 +652,6 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "caption_shoot_folder",
-      description: "Sample N media files from a shoot folder, caption each, return the digest. Use when the operator asks 'what's in the latest shoot', 'summarise the shoot', or 'what did we capture'. Defaults to most-recent folder if name omitted. Captions are cached so re-runs are instant.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Shoot folder (e.g. '2026-05-01-press-car'). Optional — defaults to most recent." },
-          sampleCount: { type: "number", description: "How many files to caption (default 8). Captions are evenly distributed across the folder." },
-          prompt: { type: "string", description: "Optional custom caption angle, e.g. 'focus on lighting and angle for a director's-cut review'." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "find_frame",
-      description: "Semantic search across cached frame captions: 'find shots of the front grille', 'where do we have wheel close-ups', 'low-angle hero shot of the press car'. Returns ranked file paths. If a folder hasn't been captioned yet, this auto-warms the cache (16 samples) before searching.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Natural-language description of the shot you want to find." },
-          folder: { type: "string", description: "Restrict search to one shoot folder (e.g. '2026-05-01-press-car'). Optional — searches all captioned frames if omitted." },
-          limit: { type: "number", description: "Max results (default 5)." },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "score_clip_for_trailer",
-      description: "Rate a video clip's suitability for a cinematic trailer (1-10) by sampling 6 frames and asking the VL model to judge motion, composition, lighting, subject clarity. Returns the score, a one-line reason, and the start time of the best 3-second segment within the clip. Use to deliberately pick hero clips for the teaser pipeline rather than relying on motion-energy heuristics alone.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "Path to the video clip (mp4/mov)." },
-          frameCount: { type: "number", description: "Frames to sample (default 6). Higher = more accurate but slower." },
-          style: { type: "string", description: "Style hint, e.g. 'cinematic-automotive', 'elegant-glamour', 'documentary'. Influences how the model rates frames." },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "find_portrait_crop",
-      description: "Identify the salient subject's bounding box in an image (or video keyframe), then compute centered crop windows for 9:16 / 1:1 / 4:5 aspects. Returns ready-to-use ffmpeg crop=W:H:X:Y commands. Use when the operator says 'reframe this for stories', 'make a vertical version', or 'where should I crop for Instagram'.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "Path to the image or video." },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "crop_to_portrait",
-      description: "Actually run the 9:16 (or 1:1, 4:5) crop and write the output to output/portraits/. Wraps find_portrait_crop + ffmpeg in one call. Use when the operator says 'export a vertical cut', 'crop this for Reels', etc.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "Path to source image or video." },
-          aspect: { type: "string", description: "Target aspect: '9:16' (default), '1:1', or '4:5'." },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "generate_youtube_promo",
       description: "Generate BOTH the YouTube thumbnail AND a 30-second YouTube short for a shoot in ONE tool call. STRONGLY PREFERRED when the operator asks for a thumbnail and a short together (e.g. 'a thumbnail and a short for the press car shoot, V10 beast, the car that broke me'). The thumbnail returns fast (~10s, pops in HUD modal); the short renders in the background (~2-3 min, auto-plays when ready). The thumbnail auto-derives make/model + headline specs (BHP / top speed / 0-60 / drivetrain) from the folder + the model's training knowledge, so the operator doesn't need to dictate them.",
       parameters: {
@@ -809,7 +674,7 @@ const TOOLS = [
     type: "function",
     function: {
       name: "generate_youtube_thumbnail",
-      description: "Generate a YouTube video thumbnail (1280x720) for a shoot. Picks the strongest hero shot AND an engine bay close-up via vision (the engine inlay is the FOM client requirement — old thumbnails missed this). Layout: full-bleed hero with vignette, big yellow Anton-style headline rotated -2°, red subhead box, engine inlay bottom-right with red border, optional spec strip across bottom showing things like 'V10 · 5.0L · 510 BHP · 0-60 IN 3.2s'. Use when operator says 'make a thumbnail', 'YouTube thumb for [subject]', 'design a thumb with [headline] and [subhead]', or as part of 'a thumb and short for the [subject] shoot'.",
+      description: "Generate a YouTube video thumbnail (1280x720) for a shoot. Picks the strongest hero shot AND an engine bay close-up via vision (the engine inlay is an established client requirement — old thumbnails missed this). Layout: full-bleed hero with vignette, big yellow Anton-style headline rotated -2°, red subhead box, engine inlay bottom-right with red border, optional spec strip across bottom showing things like 'V10 · 5.0L · 510 BHP · 0-60 IN 3.2s'. Use when operator says 'make a thumbnail', 'YouTube thumb for [subject]', 'design a thumb with [headline] and [subhead]', or as part of 'a thumb and short for the [subject] shoot'.",
       parameters: {
         type: "object",
         properties: {
@@ -836,63 +701,6 @@ const TOOLS = [
           subhead: { type: "string", description: "Secondary kicker phrase, e.g. 'The Car That Broke Me'." },
           music: { type: "string", description: "Music mood ('epic', 'driving', 'cinematic'), 'auto', or 'none'." },
         },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "describe_shoot_with_specs",
-      description: "Comprehensive briefing on a shoot — combines visual summary (what was photographed) with the vehicle's headline specs (engine size, BHP, drivetrain, 0-60, top speed) pulled from web search. Use when operator says 'tell me about the latest shoot', 'what's in today's shoot and what's the car', 'brief me on the recent shoot'. Defaults to most recent shoot folder if none specified.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Shoot folder name. Defaults to latest." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "generate_outreach_pack",
-      description: "Generate the monthly cold-outreach lead pack: SerpAPI surfaces recent automotive press / launches / hiring, Hunter.io enriches with named contacts at those companies, Qwen drafts a personalised opener for each. Outputs a branded PDF the operator works through. Use when operator says 'build this month's outreach', 'find me leads', 'who should I email this month'. Requires SERPAPI_KEY + HUNTER_API_KEY in .env (setup-wizard prompts for both).",
-      parameters: {
-        type: "object",
-        properties: {
-          month: { type: "string", description: "YYYY-MM tag for dedupe + naming. Default current month." },
-          focus: { type: "string", description: "Optional override — e.g. 'McLaren' to focus the pack on one manufacturer rather than the full config list." },
-          limit: { type: "number", description: "Max leads in the pack (default 20, max 50)." },
-          dryRun: { type: "boolean", description: "Skip Hunter + Qwen, return discovered domains only — useful for previewing query reach without burning Hunter credits." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_outreach_leads",
-      description: "List previously discovered outreach leads. Use to review last month's pack ('who didn't I get back to from October?') or surface uncontacted leads ('show me the leads I haven't actioned yet').",
-      parameters: {
-        type: "object",
-        properties: {
-          month: { type: "string", description: "Optional YYYY-MM filter." },
-          contacted: { type: "boolean", description: "true = only contacted, false = only uncontacted, omit = all." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "mark_lead_contacted",
-      description: "Mark a lead as contacted (used after the operator sends the cold email so future packs know to follow up rather than re-cold them). Voice: 'mark Ben at the client as contacted'.",
-      parameters: {
-        type: "object",
-        properties: {
-          email: { type: "string" },
-        },
-        required: ["email"],
       },
     },
   },
@@ -990,27 +798,6 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "generate_shoot_report",
-      description: "Auto-generate a branded shoot report PDF from a shoot folder. AUTO-PULLS: image/video file counts, total payload size, shoot time-window from EXIF DateTimeOriginal, estimated edit time, and 4 hero shot picks via vision. Operator only needs to provide the folder name (or omit for the latest shoot) plus any context they want to add (location, weather, crew, notes). Use whenever the operator says 'draft a shoot report', 'wrap-up doc for the [subject] shoot', 'client report for today's session'. PDF opens in HUD modal automatically.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Shoot folder name (e.g. '2026-05-01-press-car'). Omit to use most recent." },
-          client: { type: "string", description: "Client name. Optional — defaults to inferred from folder." },
-          subject: { type: "string", description: "Shoot subject. Optional — defaults to inferred from folder." },
-          location: { type: "string" },
-          weather: { type: "string" },
-          crew: { type: "string", description: "Comma-separated names." },
-          notes: { type: "string", description: "Free-form context to append to the auto-generated summary." },
-          heroCount: { type: "number", description: "How many hero shots to feature (default 4)." },
-        },
-        required: ["folder"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "export_all_aspects",
       description: "Crop a master image or video to ALL common social aspect ratios (16:9, 9:16, 1:1, 4:5) in one call, with the subject auto-centered. Outputs to output/aspects/. Use when operator says 'export every aspect for socials', 'make all the variants', 'one-shot crop everything'.",
       parameters: {
@@ -1020,110 +807,6 @@ const TOOLS = [
           aspects: { type: "array", items: { type: "string" }, description: "Optional subset, e.g. ['9:16', '1:1']. Default all four." },
         },
         required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "find_similar_shots",
-      description: "Find similar shots ACROSS ALL captioned shoot folders, not just one. Use when operator references a past shot: 'we did this exact angle on the 720S — show me', 'find shots that look like this'. Captions the reference if needed, then semantic-searches every frame ever captioned.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "Path to the reference image." },
-          limit: { type: "number", description: "Max matches (default 8)." },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "color_match_reference",
-      description: "Analyse the colour grade of a reference image (warm/cool, contrast, saturation, dominant tints) and suggest Lumetri starting values the editor can dial in. Use when operator says 'match this look', 'what grade is this', 'how do I get this feel in Premiere'. Returns structured grade params, not an applied LUT.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "Reference image or video keyframe path." },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "frameio_list_pending_review",
-      description: "List Frame.io files that are currently in review status across the operator's account. Use when the operator asks 'what's pending review', 'what needs my approval on Frame.io', 'anything in the review queue'. Optionally narrow to a specific project name.",
-      parameters: {
-        type: "object",
-        properties: {
-          projectName: { type: "string", description: "Optional — restrict to a Frame.io project whose name contains this substring (case-insensitive)." },
-          limit: { type: "number", description: "Max files to return (default 25)." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "frameio_get_comments",
-      description: "Read the review comments on a Frame.io file. Returns timecoded feedback. Use after frameio_list_pending_review or frameio_search_files surfaces a file ID, e.g. 'read me the comments on the press car v3'.",
-      parameters: {
-        type: "object",
-        properties: {
-          fileId: { type: "string", description: "Frame.io file ID (UUID)." },
-          limit: { type: "number" },
-        },
-        required: ["fileId"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "frameio_add_comment",
-      description: "Drop a comment on a Frame.io file, optionally pinned to a timecode. Use when the operator says 'leave a comment saying X' or 'reply with on it'. ALWAYS confirm the file and text with the operator before calling.",
-      parameters: {
-        type: "object",
-        properties: {
-          fileId: { type: "string", description: "Frame.io file ID." },
-          text: { type: "string", description: "Comment text. British English unless instructed otherwise." },
-          timecodeSec: { type: "number", description: "Optional — seconds into the clip to pin the comment to (e.g. 23 for 0:23)." },
-        },
-        required: ["fileId", "text"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "frameio_set_status",
-      description: "Change a Frame.io file's review status: in_progress, needs_review, approved, or rejected. Use when the operator says 'approve the manufacturer v3' or 'mark the press car teaser as needing more work'. Confirm BEFORE calling — status changes are visible to clients.",
-      parameters: {
-        type: "object",
-        properties: {
-          fileId: { type: "string" },
-          status: { type: "string", enum: ["in_progress", "needs_review", "approved", "rejected"] },
-        },
-        required: ["fileId", "status"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "frameio_search_files",
-      description: "Search Frame.io files by name across the operator's account. Use when the operator references a clip by name ('the press car v3', 'the last shoot') and you need its file ID for get_comments / add_comment / set_status.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Free-text search across file names." },
-          limit: { type: "number", description: "Max results (default 10)." },
-        },
-        required: ["query"],
       },
     },
   },
@@ -1169,338 +852,6 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "flag_shot",
-      description: "Flag a shot during/after a shoot so the editor finds it later. Use when the operator says 'flag this one as hero', 'mark the last shot as keep', 'skip the next three', 'remind me to reshoot the rear three-quarter'. Status MUST be one of: hero, keep, maybe, skip, reshoot. file omitted = flags the most recently modified file in the folder (so 'flag this one' / 'flag the last shot' works without dictating filenames).",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Shoot folder name. Defaults to most recent." },
-          file: { type: "string", description: "File name (basename, e.g. 'DSC0193.jpg'). Omit to flag the most recent media file." },
-          status: { type: "string", enum: ["hero", "keep", "maybe", "skip", "reshoot"] },
-          note: { type: "string", description: "Optional voice note ('rear 3/4 angle is soft', 'reshoot in afternoon light')." },
-        },
-        required: ["status"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_shot_flags",
-      description: "Read shot flags for a folder, optionally filtered by status. Use when the operator says 'show me what's flagged on the press car shoot', 'what did I mark for reshoot', 'list the heroes from yesterday'.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Shoot folder name. Omit to list across all shoots." },
-          status: { type: "string", enum: ["hero", "keep", "maybe", "skip", "reshoot"] },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "clear_shot_flag",
-      description: "Remove a single shot flag (operator made a mistake or the asset moved). Confirms before removal — no destructive surprise.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string" },
-          file: { type: "string" },
-        },
-        required: ["folder", "file"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "hero_contact_sheet",
-      description: "Generate a branded PDF contact sheet of the strongest 6-12 hero stills from a shoot folder. Auto-prioritises any shots flagged 'hero' via flag_shot, then tops up via Vision.find_frame using a hero-shot query. Use when the operator says 'give me a contact sheet of the heroes', 'pick eight hero shots for the client', 'lay out the best stills'. PDF auto-opens in HUD modal when ready.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Shoot folder. Defaults to most recent." },
-          count: { type: "number", description: "How many shots on the sheet (clamped 6-12, default 8)." },
-          query: { type: "string", description: "Override the selection query — e.g. 'low-angle hero shots only', 'engine bay close-ups'." },
-          client: { type: "string", description: "Optional client label printed on the document." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "batch_watermark",
-      description: "Apply the FOM watermark to every still and clip in a folder. Outputs to output/watermarked/<runId>/. Defaults: bottom-right, 60% opacity, watermark scaled to 12% of frame width. Use when the operator says 'watermark the deliverables', 'brand all of today's shots', 'apply the wordmark to the gallery'. Source files are never modified.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Folder relative to shoots/ or output/, or absolute path." },
-          watermark: { type: "string", description: "'fom' (default — wordmark), or path to a custom PNG." },
-          opacity: { type: "number", description: "0.0-1.0 (default 0.6)." },
-          scale: { type: "number", description: "Watermark width as fraction of frame width (default 0.12 = 12%)." },
-          position: { type: "string", description: "bottom-right (default), bottom-left, top-right, top-left, centre." },
-          marginPx: { type: "number", description: "Margin from corner in pixels (default 28)." },
-          recursive: { type: "boolean", description: "Walk subfolders (default false)." },
-          dryRun: { type: "boolean", description: "Plan without writing — useful for previewing scope." },
-        },
-        required: ["folder"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "press_release_from_bullets",
-      description: "Take 4-5 dictated bullet points (or a free-form list) and produce a finished branded press release PDF. Use when the operator says 'draft a press release: the press car to Goodwood, July 18, AMR Pro showcase, sub-3s 0-60, client previews'. The model expands bullets into headline, subhead, dateline, lead, body (3-4 paragraphs), one quote where implied, and the FOM boilerplate. Opens for review — never sent.",
-      parameters: {
-        type: "object",
-        properties: {
-          bullets: { type: "array", items: { type: "string" }, description: "Operator's dictated bullets — at least two." },
-          client: { type: "string", description: "Client / manufacturer (helps voice + boilerplate)." },
-          subject: { type: "string", description: "Vehicle or event subject." },
-          contact: { type: "string", description: "Press contact line. Defaults to FOM press address." },
-          releaseDate: { type: "string", description: "ISO date (defaults to today)." },
-          city: { type: "string", description: "Dateline city. Defaults to Leicester, UK." },
-        },
-        required: ["bullets"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "add_usage_rights",
-      description: "Record a usage clearance for an asset: which client cleared what uses, until when, exclusive or not. Use when the operator says 'log that the client cleared IMG_001.jpg for web and social until end of June', 'record that McLaren bought exclusive on the orange shots'. Upserts on (asset, client) — re-recording supersedes the previous grant.",
-      parameters: {
-        type: "object",
-        properties: {
-          assetPath: { type: "string", description: "Asset path (e.g. 'shoots/2026-05-01-press-car/IMG_001.jpg')." },
-          client: { type: "string" },
-          uses: { type: "array", items: { type: "string", enum: ["web", "social", "print", "broadcast", "internal", "pitch", "exclusive", "all"] } },
-          clearedBy: { type: "string", description: "Who at the client signed off." },
-          clearedOn: { type: "string", description: "ISO date — defaults to today." },
-          expiresOn: { type: "string", description: "ISO date — omit for perpetual." },
-          exclusive: { type: "boolean", description: "True = no other client can be granted use." },
-          notes: { type: "string" },
-        },
-        required: ["assetPath", "client", "uses"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "check_usage_rights",
-      description: "Answer 'can client X use asset A for use Y?'. Returns one of: ok / ok-expiring / blocked / expired / unknown plus a reason safe to read aloud. Use when the operator asks 'can we put the press car front-three-quarter in McLaren's pitch deck?', 'is the wheel close-up cleared for print?', 'has anyone bought exclusive on the orange shots?'.",
-      parameters: {
-        type: "object",
-        properties: {
-          assetPath: { type: "string" },
-          client: { type: "string" },
-          use: { type: "string", enum: ["web", "social", "print", "broadcast", "internal", "pitch", "exclusive", "all"] },
-        },
-        required: ["assetPath", "client"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_usage_rights",
-      description: "Audit usage rights — by client, by asset substring, or upcoming expiries. Use when the operator says 'what does the client have rights to', 'which clearances expire next month', 'show me all exclusives'.",
-      parameters: {
-        type: "object",
-        properties: {
-          client: { type: "string" },
-          assetLike: { type: "string", description: "Substring filter on asset path." },
-          expiringDays: { type: "number", description: "If set, only show grants expiring within this many days." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "expire_usage_rights",
-      description: "Manually revoke a client's clearance on an asset (campaign cancelled, scope reduced, exclusivity surrendered). Confirmation gate fires before this runs because it overwrites a documented grant. Voice flow: 'revoke the client's rights on the orange the press car shots'.",
-      parameters: {
-        type: "object",
-        properties: {
-          assetPath: { type: "string" },
-          client: { type: "string" },
-        },
-        required: ["assetPath", "client"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "trackday_tag",
-      description: "Auto-tag a track-day or motorsport shoot folder with conditions metadata: time-of-day window, golden-hour status (morning/evening/non-golden), session slot (early-morning/morning/midday/afternoon/evening/dusk), and per-file weather (temp, precipitation, wind) pulled from Open-Meteo's free archive API using EXIF GPS. Writes a sidecar trackday-tags.json into the shoot folder so the editor can grep through later. Use when the operator says 'tag the track-day metadata', 'when did the rain start at Goodwood', 'tag conditions for the Bedford shoot'.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Shoot folder. Defaults to most recent." },
-          location: { type: "string", description: "Optional location override if EXIF GPS is missing (e.g. 'Goodwood', 'Bedford Autodrome')." },
-          sampleCount: { type: "number", description: "How many files to tag (default 80, clamped 20-200). Evenly distributed across the folder." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "press_cycle_radar",
-      description: "Sweep automotive press for recent launches / embargoed news from FOM's tracked manufacturers (the manufacturer, McLaren, Bentley, etc) at the major outlets (Top Gear, Autocar, Carwow, Motor1, Evo). Use when the operator says 'what's in the press cycle?', 'any pitch opportunities?', 'what's the client been doing this week?'. Optional manufacturer arg to focus on one. Runs automatically at 09:00 daily — manual invocation is for on-demand check-ins.",
-      parameters: {
-        type: "object",
-        properties: {
-          manufacturer: { type: "string", description: "Restrict to one manufacturer (overrides the configured list)." },
-          dryRun: { type: "boolean", description: "Don't persist to data/press-signals.jsonl, just return findings." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "add_media_day",
-      description: "Add a manufacturer media day, press day, track day, launch event, or embargo to the calendar. Use when the operator says 'add a media day for the manufacturer on June 15 at Goodwood' or when an email mentions an upcoming press event you should track. The date can be ISO ('2026-06-15') or freeform ('June 15', '15/6/26') — bare day-month inputs resolve to the next future occurrence.",
-      parameters: {
-        type: "object",
-        properties: {
-          manufacturer: { type: "string", description: "Brand name, e.g. 'the manufacturer'." },
-          vehicle:      { type: "string", description: "Specific car / model if known, e.g. 'the new model S'." },
-          date:         { type: "string", description: "ISO yyyy-mm-dd OR freeform like 'June 15'." },
-          location:     { type: "string", description: "Venue, e.g. 'Goodwood', 'Silverstone'." },
-          kind:         { type: "string", description: "press-day | track-day | launch | embargo | other (default press-day)." },
-          notes:        { type: "string", description: "Free-form notes — invitee list, embargo time, dress code, etc." },
-          sourceUrl:    { type: "string", description: "Press email URL or invite if available." },
-        },
-        required: ["manufacturer", "date"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_media_days",
-      description: "List upcoming manufacturer media days / press events. Defaults to the next 60 days. Use when the operator asks 'what's coming up at Goodwood?', 'any the client events this month?', 'what's on the press calendar?'. Filter by manufacturer to scope to one brand.",
-      parameters: {
-        type: "object",
-        properties: {
-          manufacturer: { type: "string", description: "Case-insensitive substring match — 'aston' matches 'Aston Martin' (matches by substring against the manufacturer name field)." },
-          daysAhead:    { type: "number", description: "Upper bound on the date filter, default 60. Use 0 for all future events." },
-          includesPast: { type: "boolean", description: "Include events whose date has already passed." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "extract_style",
-      description: "Analyse a folder of finished hero edits and save the grading signature as a named style. Use when the operator says 'capture the FOM look from these recent edits' or 'save this folder as our cinematic style'. Runs ImageMagick across up to 12 most-recent images, extracts colour balance / saturation / contrast / luminance, generates a colourist's prose description, and stores it in memory under the given name. Idempotent — re-running with the same name updates the existing style.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder:      { type: "string", description: "Folder to analyse — under shoots/ OR an output/ subfolder of finished edits." },
-          name:        { type: "string", description: "Style identifier, e.g. 'fom-signature' or 'cinematic-warm'." },
-          sampleCount: { type: "number", description: "Max images to analyse (default 12)." },
-          description: { type: "string", description: "Optional override description; otherwise generated from the numerical signature." },
-          dryRun:      { type: "boolean", description: "Compute but don't save — use for previewing." },
-        },
-        required: ["folder", "name"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_styles",
-      description: "List all saved editorial styles with their descriptions + signatures. Use when the operator asks 'what styles do we have', 'list our looks'.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "recall_style",
-      description: "Recall one named editorial style — returns the description + numerical signature so the editor can match it. Use when the operator says 'what's our FOM look', 'remind me of the cinematic-warm style', 'what does the signature grade look like'.",
-      parameters: {
-        type: "object",
-        properties: { name: { type: "string", description: "Style identifier, e.g. 'fom-signature'." } },
-        required: ["name"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "compare_to_style",
-      description: "Compare a folder's current grade against a saved style. Returns delta values + adjustment advice (e.g. 'cool by 0.03; raise contrast by 0.04'). Use when the operator says 'how does this Bentley footage compare to the FOM look', 'is this on style', 'what would I need to push to match cinematic-warm'.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder:      { type: "string", description: "Folder of candidate images to compare." },
-          styleName:   { type: "string", description: "Saved style to compare against." },
-          sampleCount: { type: "number", description: "Max images to sample (default 8)." },
-        },
-        required: ["folder", "styleName"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_style",
-      description: "Delete a saved editorial style by name. Confirm before calling — this is irreversible.",
-      parameters: {
-        type: "object",
-        properties: { name: { type: "string", description: "Style identifier to remove." } },
-        required: ["name"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_media_day",
-      description: "Remove a media-day entry from the calendar by id (returned from list_media_days). Use when the operator says 'cancel the new model press day' — first call list_media_days to find the id, then call this with confirmation.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "number", description: "The id field returned by list_media_days." },
-        },
-        required: ["id"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "pre_shoot_checklist",
-      description: "Generate a kit checklist for an upcoming shoot. Pulls live weather forecast for the location + date, and asks the model to tailor kit decisions to vehicle type, indoor/outdoor, crew count, and duration. Use when the operator says 'kit check for tomorrow's Bentley shoot at Goodwood', 'what should we pack for Friday's track day', 'pre-shoot list for the McLaren launch'. Returns structured cameras / lenses / lighting / audio / comms / power / weatherProtection sections. Operator can call create_pdf with template:'brief' to print it if needed.",
-      parameters: {
-        type: "object",
-        properties: {
-          project: { type: "string", description: "Shoot name or subject (e.g. 'the hero at Goodwood')." },
-          vehicleType: { type: "string", description: "e.g. 'sportscar', 'SUV', 'classic', 'open-wheeler'." },
-          location: { type: "string", description: "Place name for weather lookup (e.g. 'Goodwood', 'Bedford Autodrome')." },
-          indoor: { type: "boolean", description: "true = studio/indoor, false = outdoor, omit for mixed." },
-          crewCount: { type: "number", description: "Number of crew on day. Drives comms + power needs." },
-          durationHours: { type: "number", description: "Shoot length in hours. Drives battery + media counts." },
-          weatherDate: { type: "string", description: "ISO date for forecast (default tomorrow)." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "brand_pack_export",
       description: "Build a delivery brand-pack from a hero shot — generates 16:9 / 9:16 / 1:1 / 4:5 crops with subject auto-centred, both clean AND watermarked variants, plus a credit.txt for the email and a zip for the client. Use when the operator says 'build a brand pack of the press car hero', 'export deliverables for IMG_001', 'pack this up for the client'. Output goes to output/brand-packs/<basename>_<ts>/.",
       parameters: {
@@ -1511,22 +862,6 @@ const TOOLS = [
           zip: { type: "boolean", description: "Zip the output folder for handoff (default true)." },
         },
         required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "auto_cull",
-      description: "Automatically cull near-duplicate stills from a shoot folder. Captions every still via Vision, groups by caption-embedding cosine similarity above the threshold (default 0.92), then keeps the alphabetically-first file in each duplicate group and flags the rest as 'skip'. Saves 30-60 minutes of manual culling per shoot. Voice flow: 'cull today's shoot', 'auto-cull the press car folder'. Use dryRun:true to preview before committing.",
-      parameters: {
-        type: "object",
-        properties: {
-          folder: { type: "string", description: "Shoot folder name. Defaults to most recent." },
-          threshold: { type: "number", description: "Cosine similarity threshold for 'duplicate' (0.7-0.99, default 0.92). Higher = stricter dedup." },
-          sampleCount: { type: "number", description: "How many files to caption (default 120, max 500)." },
-          dryRun: { type: "boolean", description: "Report what would be culled without flagging — preview pass." },
-        },
       },
     },
   },
@@ -1558,21 +893,6 @@ const TOOLS = [
       name: "undo_last",
       description: "Reverse the most recent undoable action. Use when the operator says 'undo', 'scratch that', 'never mind that', 'reverse that', or similar. Limited to genuinely-reversible operations: flag_shot (restores prior flag or clears it), expire_usage_rights (restores prior expiry), add_usage_rights (deletes the row), add_contact / add_project (deletes the row). Doesn't reverse renders, sent emails, or file writes — speak that limitation if asked to undo something outside the supported set.",
       parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "video_edit_from_shoot",
-      description: "Cut a Top Gear / Gran Turismo style 30-second teaser from a shoot folder under shoots/. Scans the latest folder by default OR a specific subject if named. Returns immediately with 'started' status — render takes 2-3 minutes and result plays automatically in the HUD. Use whenever the operator says 'edit a teaser', 'cut a reel', 'build a video', etc. Accepts customText for a closing title card AND music for a backing track that beat-syncs the cuts.",
-      parameters: {
-        type: "object",
-        properties: {
-          subject: { type: "string", description: "Optional subject name (e.g. 'the press car'). If omitted, uses the most recent shoot folder." },
-          customText: { type: "string", description: "Optional closing title card text — appears near the end of the teaser. Keep short (1-5 words ideally), will be uppercased automatically and stacked one-word-per-line." },
-          music: { type: "string", description: "Optional backing track. Use a mood ('epic', 'driving', 'cinematic', 'action') and the system picks a matching track from the library; OR pass 'none' to skip music entirely (source video audio only). When music is on, all cuts beat-sync to the track's BPM." },
-        },
-      },
     },
   },
   {
@@ -1908,7 +1228,7 @@ const TOOLS = [
     type: "function",
     function: {
       name: "search_knowledge",
-      description: "Search the operator's curated knowledge base — brand briefs, client onboarding docs, past press releases, anything they dropped into docs/knowledge/. Hybrid retrieval: vector cosine similarity + BM25 keyword fusion via Reciprocal Rank Fusion. Returns top-K chunks with source citations (rel path, title, format) so replies can quote the source. Use whenever the operator asks something that might be in their docs — 'what did the client brief say about deliverables', 'what's the FOM brand voice on hashtags', 'how did we phrase the Bentley press release'.",
+      description: "Search the operator's curated knowledge base — brand briefs, client onboarding docs, past press releases, anything they dropped into docs/knowledge/. Hybrid retrieval: vector cosine similarity + BM25 keyword fusion via Reciprocal Rank Fusion. Returns top-K chunks with source citations (rel path, title, format) so replies can quote the source. Use whenever the operator asks something that might be in their docs — 'what did the client brief say about deliverables', 'what's the brand voice on hashtags', 'how did we phrase the Bentley press release'.",
       parameters: {
         type: "object",
         properties: {
@@ -1930,19 +1250,6 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "studio_map",
-      description: "Quick-orient digest of what's in the kiosk right now: active projects, recent shoot folders, upcoming media days, last conversation. Cached for 60s. Use this BEFORE running heavy workflows so you have grounded context — saves a chain of recall + list_projects + list_shoots calls.",
-      parameters: {
-        type: "object",
-        properties: {
-          force: { type: "boolean", description: "Skip cache and rebuild fresh. Default false." },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "compare_products",
       description:
         "Compare a product across multiple online retailers IN PARALLEL. Builds a multi-agent crew under the hood — one research agent per merchant runs simultaneously via request_browse, then a synthesis agent merges findings into a comparison table. Use for: 'compare 50mm primes across WEX, MPB and Park Cameras', 'find me the best deal on a vacuum across Currys and AO and John Lewis'. Requires a cloud vision provider (anthropic / openai) because each research agent uses request_browse. ~3x faster than sequentially asking the LLM to research each merchant.",
@@ -1954,55 +1261,6 @@ const TOOLS = [
           maxPriceGbp: { type: "number", description: "Optional upper bound for candidate filtering." },
         },
         required: ["item", "merchants"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "spawn_crew",
-      description:
-        "Spawn a multi-agent crew to tackle a task that benefits from role-splitting or parallel execution. Use for: structured pipelines (research → draft → format), comparison tasks across multiple sources (compare lenses across WEX/MPB/Park Cameras), or any workload where multiple sub-agents working independently produces a better result than one agent doing it all sequentially. Sub-agents can use cloud providers (anthropic / openai) for true parallelism — local Ollama agents serialise behind a single GPU slot.",
-      parameters: {
-        type: "object",
-        properties: {
-          mode: {
-            type: "string",
-            enum: ["sequential", "parallel"],
-            description: "sequential = pipeline (each task waits for upstream). parallel = independent tasks run simultaneously (cloud-only — Ollama serialises).",
-          },
-          agents: {
-            type: "array",
-            description: "Agent specs. Each: { id, role, goal, provider?, model?, maxSteps? }. provider defaults to the workload-routed default (usually ollama).",
-            items: {
-              type: "object",
-              properties: {
-                id:       { type: "string", description: "Unique within the crew." },
-                role:     { type: "string", description: "Short title — e.g. 'WEX researcher', 'press release drafter'." },
-                goal:     { type: "string", description: "What this agent is trying to accomplish, in one sentence." },
-                provider: { type: "string", enum: ["anthropic", "openai", "ollama"], description: "Optional override — for parallel mode at least one cloud agent is required." },
-              },
-              required: ["id", "role", "goal"],
-            },
-          },
-          tasks: {
-            type: "array",
-            description: "Task specs. Each: { id, description, agentId, dependsOn?, expectedOutput? }. dependsOn lists upstream task ids whose results pass into this task's context.",
-            items: {
-              type: "object",
-              properties: {
-                id:             { type: "string" },
-                description:    { type: "string" },
-                agentId:        { type: "string" },
-                dependsOn:      { type: "array", items: { type: "string" } },
-                expectedOutput: { type: "string" },
-              },
-              required: ["id", "description", "agentId"],
-            },
-          },
-          maxParallel: { type: "number", description: "Max concurrent agents in parallel mode. Default 4, max 8. Sequential mode ignores this." },
-        },
-        required: ["mode", "agents", "tasks"],
       },
     },
   },
@@ -2032,23 +1290,6 @@ const TOOLS = [
           sampleFrames:  { type: "number", description: "How many keyframes to caption when includeVisual is true. Default 8, max 20. More frames = more API spend." },
         },
         required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "learn_visual_style",
-      description: "Analyse a folder, file, or list of reference frames/videos to capture the operator's visual style. Combines numerical metrics (brightness/contrast/saturation curves via ImageMagick) with a vision-LLM prose description (palette, lighting, framing, grading). Use for: 'learn my style from these reference shoots', 'capture the FOM look from output/heroes/'. For videos, ffmpeg samples 4 keyframes per file. Stored alongside the existing style memory so 'apply my style' tools can recall it later.",
-      parameters: {
-        type: "object",
-        properties: {
-          target: { type: "string", description: "Folder path (preferred — ships numerical + prose), or single file path. For multiple unrelated files, call once per file." },
-          name:   { type: "string", description: "Style identifier — e.g. 'fom-signature', 'editorial-warm'. Existing styles with the same name are overwritten." },
-          sampleCount:    { type: "number", description: "Max frames sent to the vision model. Default 12." },
-          framesPerVideo: { type: "number", description: "Keyframes extracted per video file. Default 4." },
-        },
-        required: ["target", "name"],
       },
     },
   },
@@ -2210,23 +1451,8 @@ Tasks.recoverInterrupted((entry) => Audit.record(entry));
 const NEEDS_CONFIRMATION = {
   draft_email: (a) => `Draft email to ${a.to || "(no recipient)"} with subject "${a.subject || "(no subject)"}". Send it?`,
   add_calendar_event: (a) => `Add calendar event "${a.title || "(no title)"}" on ${a.startDate || a.date || "(no date)"}. Confirm?`,
-  frameio_add_comment: (a) => `Post comment on Frame.io file ${a.fileId?.slice(0, 8) || "(no id)"}: "${(a.text || "").slice(0, 80)}"${a.timecodeSec ? ` at ${a.timecodeSec}s` : ""}. Send to client?`,
-  frameio_set_status: (a) => `Change Frame.io file ${a.fileId?.slice(0, 8) || "(no id)"} status to "${a.status}". Notifies the client. Confirm?`,
-  video_edit_from_shoot: (a) => `Render a teaser from ${a.subject ? `"${a.subject}"` : "the latest shoot"}${a.customText ? ` with closing card "${a.customText}"` : ""}. Takes 2-3 minutes. Start?`,
-  apply_lightroom_preset: (a) => `Apply Lightroom preset "${a.preset || "(none)"}" to ${a.folder || "(folder)"}. Writes XMP sidecars. Confirm?`,
-  premiere_render_active_sequence: (a) => `Render the active Premiere sequence with preset "${a.presetName || "default"}". Confirm?`,
-  crop_to_portrait: (a) => `Crop ${a.path || "(file)"} to ${a.aspect || "9:16"} and write to output/portraits/. Confirm?`,
   run_shell: (a) => `Run shell command: ${(a.command || "").slice(0, 120)}${a.command?.length > 120 ? "…" : ""}. Confirm?`,
   write_file: (a) => `Write to ${a.relPath || "(no path)"} (${(a.content || "").length} bytes). Confirm?`,
-  batch_watermark: (a) => `Watermark every still and clip in ${a.folder || "(folder)"} (${a.position || "bottom-right"} at ${Math.round((a.opacity ?? 0.6) * 100)}%). Output to output/watermarked/. Confirm?`,
-  expire_usage_rights: (a) => `Revoke ${a.client || "(client)"}'s rights on ${a.assetPath || "(asset)"}. Confirm?`,
-  /* Why: only gate exclusivity grants — they bind the agency long-term and block all
-   * other clients from the asset. Routine non-exclusive grants would be too noisy. */
-  add_usage_rights: (a) => a?.exclusive
-    ? `Record EXCLUSIVE rights for ${a.client || "(client)"} on ${a.assetPath || "(asset)"} — no other client can be granted use. Confirm?`
-    : null,
-  delete_media_day: (a) => `Remove media-day entry #${a.id || "(no id)"} from the calendar. Confirm?`,
-  delete_style: (a) => `Delete editorial style "${a.name || "(no name)"}". This is irreversible. Confirm?`,
   /* Purchases use a synchronous tier check via Purchases.tierForAmount. The auto
    * tier (≤£5 by default) returns null → no voice gate, just journal + go. The
    * voice tier (≤£25 default) returns a summary the LLM must speak verbatim before
@@ -2275,13 +1501,9 @@ const NEEDS_CONFIRMATION = {
  * if the LLM misheard. Read-only / cheap tools (list_*, get_*, recall, web_search)
  * are excluded so the panel doesn't spam during chatty turns. */
 const PLAN_PROPOSED_TOOLS = new Set([
-  "video_edit_from_shoot", "generate_youtube_short", "generate_youtube_thumbnail",
-  "generate_youtube_promo", "build_brand_pack", "batch_watermark",
-  "build_contact_sheet", "caption_shoot_folder", "run_shell",
-  "premiere_render_active_sequence", "premiere_create_sequence_from_folder",
-  "premiere_import_folder", "apply_lightroom_preset", "crop_to_portrait",
+  "generate_youtube_short", "generate_youtube_thumbnail",
+  "generate_youtube_promo", "run_shell",
   "draft_email", "add_calendar_event", "create_pdf",
-  "frameio_add_comment", "frameio_set_status",
   /* Purchases: always plan-broadcast — operator must see what the LLM intends to
    * buy with a real card BEFORE the dispatcher fires, even if the amount sits
    * inside the auto tier. */
@@ -2292,10 +1514,6 @@ const PLAN_PROPOSED_TOOLS = new Set([
   "request_browse",
   /* Transcribe: 30-90s job. Plan-stage so operator sees what's happening. */
   "transcribe_video",
-  /* Crew: multi-agent dispatch is high-leverage and high-cost (multiple LLM
-   * calls per crew). Plan-broadcast surfaces the agent count + cost shape
-   * before the parallel fan-out fires. */
-  "spawn_crew",
   "compare_products",
   /* Code agent: highest-trust action available — operator wants to see
    * the purpose + line count + tool subset before they say yes. */
@@ -2316,23 +1534,13 @@ const PLAN_PROPOSED_TOOLS = new Set([
 function summariseToolCall(name, args) {
   const a = args || {};
   switch (name) {
-    case "video_edit_from_shoot": return `Cut a teaser from ${a.subject ? `the ${a.subject} shoot` : "the latest shoot"}`;
     case "generate_youtube_short": return `Render a 9:16 YouTube short for ${a.subject || "the latest shoot"}`;
     case "generate_youtube_thumbnail": return `Generate a YouTube thumbnail for ${a.subject || "the latest shoot"}`;
     case "generate_youtube_promo": return `Build a YouTube promo (thumbnail + short) for ${a.subject || "the latest shoot"}`;
-    case "build_brand_pack": return `Build a brand pack for ${a.path || "(asset)"}`;
-    case "batch_watermark": return `Watermark every file in ${a.folder || "(folder)"}`;
-    case "build_contact_sheet": return `Build a contact sheet for ${a.folder || "the latest shoot"}`;
-    case "caption_shoot_folder": return `Caption ${a.sampleCount || 8} frames from ${a.folder || "the latest shoot"}`;
     case "run_shell": return `Run shell: ${(a.command || "").slice(0, 60)}${(a.command || "").length > 60 ? "…" : ""}`;
-    case "premiere_render_active_sequence": return `Render the active Premiere sequence`;
     case "draft_email": return `Draft email to ${a.to || "(recipient)"} — ${(a.subject || "").slice(0, 50)}`;
     case "add_calendar_event": return `Add calendar event "${(a.title || "").slice(0, 40)}" on ${a.start || "(date)"}`;
     case "create_pdf": return `Generate ${a.template || "(template)"} PDF`;
-    case "frameio_add_comment": return `Comment on Frame.io clip — "${(a.text || "").slice(0, 50)}"`;
-    case "frameio_set_status": return `Set Frame.io status to ${a.status || "(status)"}`;
-    case "apply_lightroom_preset": return `Apply preset ${a.preset || "(preset)"} to ${a.folder || "(folder)"}`;
-    case "crop_to_portrait": return `Crop ${a.path || "(file)"} to ${a.aspect || "9:16"}`;
     case "request_purchase": {
       const amt = Number.isFinite(Number(a.maxPriceGbp)) ? `£${Number(a.maxPriceGbp).toFixed(2)}` : "(no price)";
       return `Buy ${a.item || "(item)"} from ${a.merchant || "(merchant)"} for up to ${amt}`;
@@ -2341,18 +1549,10 @@ function summariseToolCall(name, args) {
       return `Compare on ${a.merchant || "(?)"}: ${(a.query || "").slice(0, 50)}`;
     case "find_flights":
       return `Find flights ${a.from || "?"} → ${a.to || "?"} on ${a.depart || "?"}${a.returnDate ? ` returning ${a.returnDate}` : ""}`;
-    case "learn_visual_style":
-      return `Learn style "${a.name || "?"}" from ${typeof a.target === "string" ? a.target.slice(0, 50) : "(reference set)"}`;
     case "transcribe_video":
       return `Transcribe video: ${(a.path || "(?)").slice(0, 60)}${a.includeVisual === false ? " (audio only)" : ""}`;
     case "request_eod_digest":
       return `End-of-day digest`;
-    case "spawn_crew": {
-      const mode = a.mode || "?";
-      const agentCount = Array.isArray(a.agents) ? a.agents.length : 0;
-      const taskCount = Array.isArray(a.tasks) ? a.tasks.length : 0;
-      return `Spawn ${mode} crew · ${agentCount} agents · ${taskCount} tasks`;
-    }
     case "compare_products": {
       const merchants = Array.isArray(a.merchants) ? a.merchants : [];
       return `Compare "${(a.item || "?").slice(0, 40)}" across ${merchants.length} merchants in parallel`;
@@ -2508,7 +1708,6 @@ async function _executeToolInner(name, args) {
       const startUrl = "https://www.skyscanner.net/";
       return await Browse.requestBrowse({ goal, startUrl, maxSteps: 18 });
     }
-    case "learn_visual_style": return await VisualStyle.learnVisualStyle(args);
     case "transcribe_video":   return await Transcribe.transcribeVideo(args);
     case "request_eod_digest": {
       const digest = await EodDigest.buildDigest(args || {});
@@ -2516,7 +1715,6 @@ async function _executeToolInner(name, args) {
       return digest;
     }
     case "compare_products": return await CrewHelpers.compareProducts(args || {});
-    case "studio_map":       return await StudioMap.buildStudioMap(args || {});
     case "search_knowledge": return await Memory.searchKnowledge(args || {});
     case "ingest_knowledge": return await Knowledge.ingestAll();
     case "code_agent_run":   return await CodeAgent.runCode(args || {});
@@ -2534,28 +1732,6 @@ async function _executeToolInner(name, args) {
       const r = await Office.generateXlsx(args || {});
       if (r.ok) broadcastToClients({ type: "office.complete", data: { kind: "xlsx", title: args.title, path: r.path, sizeKB: r.sizeKB, sheets: r.sheetCount } });
       return r;
-    }
-    case "spawn_crew": {
-      /* Crew validation lives inside runCrew — the LLM gets a clean error
-       * envelope back if the spec is malformed (missing agentId, circular
-       * dependsOn, all-ollama parallel, etc). On success, returns the
-       * aggregated results array + cost + elapsed. */
-      const result = await Crew.runCrew(args || {});
-      /* Audit broadcast for the HUD — crew's own events fired during the
-       * run; this final envelope marks completion in the agent console. */
-      broadcastToClients({
-        type: "crew.recorded",
-        data: {
-          crewId: result.crewId,
-          ok: result.ok,
-          mode: result.mode,
-          taskCount: result.taskCount,
-          totalCostUSD: result.totalCostUSD,
-          totalElapsedMs: result.totalElapsedMs,
-          error: result.error || null,
-        },
-      });
-      return result;
     }
     case "cancel_active_jobs": {
       Vision.raiseAbort();
@@ -2631,10 +1807,6 @@ async function _executeToolInner(name, args) {
       });
       return r;
     }
-    case "premiere_open_project":              return await Premiere.premiereOpenProject(args.projectPath);
-    case "premiere_import_folder":             return await Premiere.premiereImportFolder(args.folderPath);
-    case "premiere_create_sequence_from_folder": return await Premiere.premiereCreateSequenceFromFolder(args.folderPath, args.name);
-    case "premiere_render_active_sequence":    return await Premiere.premiereRenderActiveSequence(args.presetName);
     case "create_pdf": {
       const result = await createPdf({ template: args.template, data: args.data });
       // Broadcast so HUD pops the PDF window (mirrors the video.edit.complete pattern)
@@ -2661,9 +1833,6 @@ async function _executeToolInner(name, args) {
     }
     case "get_mail_summary":                   return await getMailSummary({ unreadOnly: args.unreadOnly, max: args.max });
     case "draft_email":                        return await draftEmail(args);
-    case "apply_lightroom_preset":             return await applyLightroomPreset(args);
-    case "list_lightroom_presets":             return await listLightroomPresets();
-    case "find_lr_photo":                      return await LightroomCatalog.findLrPhoto(args || {});
     case "run_shell":                          return await runShell(args || {});
     case "write_file":                         return await writeFileSandboxed(args || {});
     case "add_contact":                        return await Memory.addContact(args || {});
@@ -2675,46 +1844,13 @@ async function _executeToolInner(name, args) {
     case "list_projects":                      return Memory.listProjects(args || {});
     case "save_conversation":                  return await Memory.saveConversation(args || {});
     case "describe_image":                     return await Vision.describeImage(args || {});
-    case "caption_shoot_folder":               return await Vision.captionShootFolder(args || {});
-    case "find_frame":                         return await Vision.findFrame(args || {});
-    case "score_clip_for_trailer":             return await Vision.scoreClipForTrailer(args || {});
-    case "find_portrait_crop":                 return await Vision.findPortraitCrop(args || {});
-    case "crop_to_portrait":                   return await Vision.cropToPortrait(args || {});
     case "export_all_aspects":                 return await Vision.exportAllAspects(args || {});
-    case "find_similar_shots":                 return await Vision.findSimilarShots(args || {});
-    case "color_match_reference":              return await Vision.colorMatchReference(args || {});
-    case "frameio_list_pending_review":        return await FrameIO.listPendingReview(args || {});
-    case "frameio_get_comments":               return await FrameIO.getComments(args || {});
-    case "frameio_add_comment":                return await FrameIO.addComment(args || {});
-    case "frameio_set_status":                 return await FrameIO.setAssetStatus(args || {});
-    case "frameio_search_files":               return await FrameIO.searchFiles(args || {});
     case "generate_social_captions":           return await Agency.generateSocialCaptions(args || {});
     case "check_brand_tone":                   return await Agency.checkBrandTone(args || {});
     case "hashtag_research":                   return await Agency.hashtagResearch(args || {});
     case "vehicle_spec_lookup":                return await Agency.vehicleSpecLookup(args || {});
     case "ask_internal":                       return await Agency.askInternal(args || {});
     case "team_standup":                       return await Agency.teamStandup(args || {});
-    case "generate_outreach_pack": {
-      /* Why: outreach packs are slow (multi-API + multi-LLM personalisation), so the tool
-       * runs synchronously rather than async-broadcasting like the teaser pipeline. The
-       * trade-off is voice latency — Qwen will say "working on it" and the operator waits
-       * 1-3 minutes. PDF still pops a HUD modal via pdf.complete event for consistency. */
-      const r = await Leads.generateOutreachPack(args || {});
-      if (r.ok && r.pdf) {
-        broadcastToClients({
-          type: "pdf.complete",
-          data: {
-            url: r.pdf.url,
-            template: "outreach-pack",
-            title: `Outreach Pack — ${r.month}`,
-            sizeKB: Math.round(r.pdf.size / 1024),
-          },
-        });
-      }
-      return r;
-    }
-    case "list_outreach_leads":                return { ok: true, leads: Leads.listLeads(args || {}) };
-    case "mark_lead_contacted":                return Leads.markLeadContacted(args || {});
     case "generate_youtube_thumbnail": {
       /* Why: thumbnail generation is fast (~5-10s) but picking the engine shot needs VL.
        * Broadcast stage events so the screen-recorded demo shows progress ticking.
@@ -2785,7 +1921,6 @@ async function _executeToolInner(name, args) {
       });
       return { ok: true, status: "started", runId, note: "Short rendering — auto-plays when ready (2-3 min)." };
     }
-    case "describe_shoot_with_specs":          return await Agency.describeShootWithSpecs(args || {});
     case "generate_youtube_promo": {
       /* Combined thumbnail + short — preferred when the operator asks for "a thumbnail
        * and a short" in one breath, which the 14b model wasn't reliably chaining as
@@ -2853,38 +1988,6 @@ async function _executeToolInner(name, args) {
       }, 360_000);
       return { ...r, runId: promoRunId };
     }
-    case "generate_shoot_report": {
-      /* Why: generate_shoot_report builds a PDF and broadcasts a pdf.complete event so
-       * the HUD pops the modal — same pattern as create_pdf. The tool returns a summary
-       * for Qwen to read aloud (file counts, edit-time estimate, hero count). */
-      const reportRunId = Tasks.startTask({
-        kind: "shoot.report",
-        label: `Shoot report · ${args.subject || args.folder || "latest"}`,
-        etaSec: 60,
-      });
-      try {
-        const r = await generateShootReport(args || {});
-        if (r.ok && r.pdf) {
-          Tasks.completeTask(reportRunId, { pdfUrl: r.pdf.url });
-          broadcastToClients({
-            type: "pdf.complete",
-            runId: reportRunId,
-            data: {
-              url: r.pdf.url,
-              template: "shoot-report",
-              title: `${args.subject || args.folder} — Shoot Report`,
-              sizeKB: Math.round(r.pdf.size / 1024),
-            },
-          });
-        } else {
-          Tasks.errorTask(reportRunId, r?.error || "report generation failed");
-        }
-        return r;
-      } catch (err) {
-        Tasks.errorTask(reportRunId, err);
-        throw err;
-      }
-    }
     case "get_capabilities": {
       // Enumerate runtime state the LLM might need before making decisions
       const fs = await import("node:fs/promises");
@@ -2893,7 +1996,6 @@ async function _executeToolInner(name, args) {
         const ents = await fs.readdir(Paths.getShootsDir(), { withFileTypes: true });
         shootFolders = ents.filter(e => e.isDirectory()).map(e => e.name).sort().reverse();
       } catch {}
-      const lp = await listLightroomPresets();
       const musicMod = await import("./music.mjs");
       const tracks = await musicMod.listTracks();
       return {
@@ -2902,76 +2004,19 @@ async function _executeToolInner(name, args) {
         operator: { city: CONFIG.operator.city, country: CONFIG.operator.country, timezone: CONFIG.operator.timezone },
         agency: CONFIG.agency,
         shootFolders,
-        lightroomPresets: lp.presets || [],
         pdfTemplates: listPdfTemplates(),
         voices: ["bm_daniel", "bm_george", "bm_lewis", "bm_fable", "bf_emma", "bf_alice", "bf_isabella", "bf_lily"],
         videoEffects: ["normal", "speed-up", "slow-mo", "punch-zoom", "flash-in", "freeze-hit"],
         musicTracks: tracks,
         musicMoods: ["epic", "driving", "cinematic", "action", "chase"],
-        videoNote: "Teaser pipeline already includes flash cuts, speed ramps, punch zooms, FOM intro+outro, panel cards, single-word stacked tail card. Music auto-picks from available library and beat-syncs cuts to the track BPM. customText for closing card; pass music='none' to skip backing track.",
         shellAllowlist: shellAllowlist(),
         shellNote: "When no curated tool fits, you can call run_shell to compose ad-hoc commands using the allowlisted binaries. Sandboxed to project dir, dangerous patterns blocked.",
         memory: Memory.memoryStats(),
         memoryNote: "Persistent memory across sessions. Use get_contact before draft_email, recall for past discussions, remember for stable preferences, save_conversation at session end.",
         vision: Vision.visionStats(),
-        visionNote: "Local Qwen 2.5-VL can caption images and video keyframes. Use describe_image for single files, caption_shoot_folder for batches, find_frame for semantic shot search.",
-        frameio: FrameIO.frameioStatus(),
-        frameioNote: "Frame.io review-by-voice. Set FRAMEIO_TOKEN in .env (developer token from https://developer.frame.io/app). When configured, frameio_* tools list pending reviews, read/post comments, set approval status.",
+        visionNote: "Local Qwen 2.5-VL can caption images and video keyframes. Use describe_image for single files.",
       };
     }
-    case "flag_shot": {
-      const r = await Shotflag.flagShot(args || {});
-      if (r.ok) {
-        /* Why: most-likely mishear is "skip this" / "keep this" / "hero this" — a
-         * single inverse (clear the flag) covers the common case. Restoring a
-         * prior status is a future enhancement; v1 just removes the flag. */
-        Undo.push({
-          description: `Clear ${r.status} flag on ${r.file} in ${r.folder}`,
-          run: async () => Shotflag.clearShotFlag({ folder: r.folder, file: r.file }),
-        });
-      }
-      return r;
-    }
-    case "list_shot_flags":                    return Shotflag.listShotFlags(args || {});
-    case "clear_shot_flag":                    return Shotflag.clearShotFlag(args || {});
-    case "hero_contact_sheet": {
-      /* Why: hero contact sheet builds a PDF — broadcast pdf.complete so the HUD pops it
-       * the same way create_pdf and generate_shoot_report do. */
-      const r = await buildHeroContactSheet(args || {});
-      if (r.ok && r.pdf) {
-        broadcastToClients({
-          type: "pdf.complete",
-          data: {
-            url: r.pdf.url,
-            template: "contact-sheet",
-            title: `${r.subject || r.folder} — Contact Sheet`,
-            sizeKB: Math.round(r.pdf.size / 1024),
-          },
-        });
-      }
-      return r;
-    }
-    case "batch_watermark":                    return await batchWatermark(args || {});
-    case "press_release_from_bullets": {
-      const r = await Agency.pressReleaseFromBullets(args || {});
-      if (r.ok && r.pdf) {
-        broadcastToClients({
-          type: "pdf.complete",
-          data: {
-            url: r.pdf.url,
-            template: "press-release",
-            title: r.headline || "Press Release",
-            sizeKB: Math.round(r.pdf.size / 1024),
-          },
-        });
-      }
-      return r;
-    }
-    case "add_usage_rights":                   return Rights.addUsageRights(args || {});
-    case "check_usage_rights":                 return Rights.checkUsageRights(args || {});
-    case "list_usage_rights":                  return Rights.listUsageRights(args || {});
-    case "expire_usage_rights":                return Rights.expireUsageRights(args || {});
-    case "trackday_tag":                       return await trackdayTag(args || {});
     case "undo_last": {
       /* Reverse the most recent undoable action. Stack is small (8 entries) and
        * lives in-process; on bridge restart the stack is empty. */
@@ -2979,59 +2024,7 @@ async function _executeToolInner(name, args) {
     }
     case "read_active_window":                 return await Window.readActiveWindow();
     case "dream_cycle":                        return await DreamCycle.runCycle(args || {});
-    case "auto_cull":                          return await autoCull(args || {});
     case "brand_pack_export":                  return await exportBrandPack(args || {});
-    case "pre_shoot_checklist":                return await Agency.preShootChecklist(args || {});
-    case "press_cycle_radar":                  return await PressRadar.runRadar(args || {});
-    case "add_media_day":                      return MediaDays.addMediaDay(args || {});
-    case "list_media_days":                    return { events: MediaDays.listMediaDays(args || {}) };
-    case "delete_media_day":                   return MediaDays.deleteMediaDay(args || {});
-    case "extract_style":                      return await StyleMemory.extractStyle(args || {});
-    case "list_styles":                        return { styles: StyleMemory.listStyles() };
-    case "recall_style":                       return StyleMemory.recallStyle(args || {}) || { ok: false, error: `style not found: ${args?.name}` };
-    case "delete_style":                       return StyleMemory.deleteStyle(args || {});
-    case "compare_to_style":                   return await StyleMemory.compareToStyle(args || {});
-    case "video_edit_from_shoot": {
-      if (currentVideoRun && !currentVideoRun.done) {
-        return { ok: false, status: "busy", note: "Another video edit is already running." };
-      }
-      const subject = args && args.subject ? String(args.subject) : null;
-      const customText = args && args.customText ? String(args.customText) : null;
-      const music = args && args.music !== undefined ? args.music : "auto";
-      /* Why: task lifecycle gives the HUD's task strip a stable runId for the whole
-       * render. Existing video.edit.complete event still fires too — modal-pop logic
-       * keeps working unchanged. ETA at 150s is a working average from production runs. */
-      const runId = Tasks.startTask({
-        kind: "video.edit",
-        label: `Teaser · ${subject || "latest shoot"}${customText ? ` · "${customText}"` : ""}`,
-        etaSec: 150,
-        /* Stage manifest — HUD renders horizontal pipeline pills,
-         * lights up each one as buildProductionTeaser's onStage fires. */
-        stages: TEASER_STAGES,
-      });
-      currentVideoRun = { startedAt: Date.now(), done: false, subject, runId };
-      /* onStage callback pumps lane-grouped progress into the task strip — the
-       * operator sees the pipeline move through scanning → planning → encoding → final. */
-      const onStage = (stageName, percent) => Tasks.progressTask(runId, { stage: stageName, percent });
-      buildProductionTeaser({ subject, customText, music, onStage }).then((result) => {
-        currentVideoRun.done = true;
-        Tasks.completeTask(runId, { finalUrl: `/output/${result.runId}/final.mp4` });
-        broadcastToClients({
-          type: "video.edit.complete",
-          data: {
-            runId: result.runId,
-            subject: result.subject,
-            durationSec: result.durationSec,
-            finalUrl: `/output/${result.runId}/final.mp4`,
-          },
-        });
-      }).catch((err) => {
-        currentVideoRun.done = true;
-        Tasks.errorTask(runId, err);
-        broadcastToClients({ type: "video.edit.error", runId: currentVideoRun?.runId, data: { error: String(err.message || err) } });
-      });
-      return { ok: true, status: "started", runId, subject: subject || "(latest shoot folder)", note: "Render takes 2-3 minutes. Will play automatically when ready." };
-    }
     default: return { error: `unknown tool: ${name}` };
   }
 }
@@ -3063,7 +2056,7 @@ async function askLLM(query, history = [], { sessionId = null } = {}) {
 
   const brand = loadBrand();
   const agencyName = brand.agency.name || CONFIG.agency.name;
-  const agentName = brand.agent.name || "Flat-Out";
+  const agentName = brand.agent.name || "Jarvis";
   const tagline = brand.agency.tagline ? ` — ${brand.agency.tagline}.` : ".";
   /* Why: active-project context becomes part of the system prompt so tool calls
    * default to the operator's current scope without re-asking. Empty string when
@@ -3103,17 +2096,15 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
   locations, looking up routes, checking weather, browsing kit suppliers,
   reading news, finding contacts, drafting messages, managing his calendar,
   controlling Mac apps, taking screenshots, looking things up online — all of
-  it. NEVER say "I'm only here for automotive Flat-Out tasks" or refuse a
+  it. NEVER say "I'm only here for automotive Jarvis tasks" or refuse a
   reasonable internet / personal-assistant task. If the operator asks for a
   map, route, weather, web lookup, or anything that needs the internet, USE
   THE TOOL (open_url, request_browse, web_search, get_weather, etc) — don't
   decline. The brand identity is the voice, not the limit.
 
 CONFIRMATION CONTRACT (CRITICAL — client-visible writes):
-  Some tools (draft_email, add_calendar_event, frameio_add_comment, frameio_set_status,
-  video_edit_from_shoot, apply_lightroom_preset, premiere_render_active_sequence,
-  crop_to_portrait, run_shell, write_file) REQUIRE explicit operator confirmation.
-  When you call them WITHOUT confirmed: true, the bridge returns:
+  Some tools (draft_email, add_calendar_event, run_shell, write_file) REQUIRE explicit
+  operator confirmation. When you call them WITHOUT confirmed: true, the bridge returns:
       { requires_confirmation: "<readable summary>", hint: "..." }
   When this happens you MUST:
     1. Speak the summary verbatim to the operator (one short sentence).
@@ -3125,55 +2116,22 @@ CONFIRMATION CONTRACT (CRITICAL — client-visible writes):
 PERSISTENT MEMORY: contacts, projects, free-form facts, and past conversation summaries are stored across sessions. Use them aggressively:
   - When the operator names a person ("send Ben an email"), call get_contact FIRST to find their email + context. Don't ask for an email if memory has it.
   - When the operator says "remember that...", "always X", "going forward Y" → call remember.
-  - When introducing a new person ("add Sarah Mitchell, sarah at example dot press, press liaison") → call add_contact with the parsed fields.
-  - When the operator references a past project / decision ("what did we agree on the press car", "same setup as the last shoot") → call recall to surface stored memory before answering.
+  - When introducing a new person → call add_contact with the parsed fields.
+  - When the operator references a past project / decision → call recall to surface stored memory before answering.
   - At the end of a session (when the operator dismisses) → call save_conversation with a 2-3 sentence summary + topic tags so the next session can recall it.
 
-YOUTUBE & SHOOT BRIEFINGS:
-  - "Tell me about the most recent shoot" / "what's in the latest shoot and what's the car" → describe_shoot_with_specs (combines visual digest with vehicle specs).
-  - "Make a thumbnail / YouTube thumb for the [subject] shoot with [headline]" → generate_youtube_thumbnail (1280x720, engine inlay, spec strip).
-  - "Cut a 30-second short for the [subject] shoot, [headline], [subhead]" → generate_youtube_short (16:9, cinematic cuts, headline+subhead as closing kicker).
-  - When the operator asks for BOTH a thumb AND a short in one breath ("a thumb and a short for the press car shoot, V10 beast, the car that broke me") → call generate_youtube_promo (single tool that does both). Pass folder OR subject as the operator named it ("ascari"). Pull headline + subhead from the phrasing — short punchy phrase becomes headline (e.g. "V10 BEAST"), more descriptive line becomes subhead (e.g. "The Car That Broke Me"). DO NOT pass make/model/stats — the tool auto-derives them. After it returns, tell the operator the thumbnail is ready in the HUD and the short is rendering.
-
 VISION: you can SEE images and video keyframes via the local Qwen 2.5-VL model.
-  - "What's in shoots/X/IMG_01.jpg" → describe_image.
-  - "Summarise the latest shoot" / "what did we capture today" → caption_shoot_folder (defaults to most recent folder).
-  - "Find the front-grille shots" / "where's the low-angle hero" → find_frame.
-  - "Is this clip any good for the teaser?" / "score these clips" → score_clip_for_trailer.
-  - "Where should I crop this for Reels?" / "make a vertical" → find_portrait_crop (analysis only) or crop_to_portrait (actually exports the file).
+  - "What's in this image" → describe_image.
   - Captions are cached so calling these repeatedly is cheap. Vision and text models share GPU on this Mac, so don't fire batch caption jobs while the operator is mid-conversation.
-
-FRAME.IO REVIEW WORKFLOW: review/comment on client-facing cuts via voice.
-  - "What's pending review on Frame.io" / "anything need my approval" → frameio_list_pending_review.
-  - "Read me the comments on the press car v3" → frameio_search_files (resolve name → fileId) THEN frameio_get_comments.
-  - "Reply saying 'on it' at 0:23" → frameio_add_comment with timecodeSec=23. ALWAYS read back the comment text to the operator and confirm before sending — comments are client-visible.
-  - "Approve the press car teaser" / "mark v3 as needing more work" → frameio_set_status. Confirm BEFORE calling — status changes notify the client.
-  - If FRAMEIO_TOKEN isn't set, the tools return that as an error — tell the operator they need to set up Frame.io before this works.
-
-
 
 When the operator asks for something that doesn't have a curated tool (e.g. "rename these files", "convert these clips to vertical", "count files matching X"), reach for run_shell. Compose ONE shell command that does the job — using ffmpeg / find / awk / sips / magick / python3 / etc. Include a short 'justification' string. The command is sandboxed: allowlist of safe binaries, no sudo / rm -rf / eval. The stdout/stderr come back so you can self-correct if it fails.
 
-Don't pre-emptively run_shell when a curated tool exists (use video_edit_from_shoot for teasers, create_pdf for documents, etc). But for the long tail of one-off requests, run_shell is your friend.
-
-
 • web_search: for current/news/recent info beyond your training cutoff
-• premiere_open_project / premiere_import_folder / premiere_create_sequence_from_folder / premiere_render_active_sequence: drive Adobe Premiere Pro 2025 directly
-• create_pdf: generate branded Flat-Out PDFs (quote / brief / shoot-report / press-release)
+• create_pdf: generate branded PDFs (quote / brief / press-release)
 • get_upcoming_events / add_calendar_event: read or create macOS Calendar events (synced to Google)
 • get_mail_summary / draft_email: read inbox, draft outgoing mail (NEVER auto-sends — always opens for approval)
-• apply_lightroom_preset / list_lightroom_presets: write XMP sidecars to RAW images so Lightroom shows them with the preset already applied
 
-For tools that change state (calendar, draft, render, apply preset): briefly confirm details before calling, especially times and recipients. After successful tool calls, report what you did in one short sentence — don't read raw JSON.
-
-For create_pdf specifically: NEVER call the tool until you have the key fields. Ask SHORT one-question-at-a-time follow-ups to gather them. Examples:
-  • Quote: client name → project description → line items (description + amount, one at a time) → shoot dates → any extra notes. Once you have at least 1 line item with an amount, you can build the PDF.
-  • Brief: subject → date(s) → location → deliverables → crew → objectives.
-  • Shoot-report: subject → date → location → weather → file count → highlights.
-  • Press-release: headline → subhead → lead paragraph → body (1-2 paragraphs) → quote + attribution.
-Keep questions tight ("What's the client's name?" not "Could you please tell me what the client's name is?"). When the operator gives you "everything you need" or says "that's enough info", build the PDF with what you have. After build, the PDF opens automatically in a window — just say "Quote drafted" or similar.
-
-IMPORTANT: when video_edit_from_shoot returns ok:true and status:"started", the render is now running asynchronously and WILL succeed. Reply with a confident "On it. The [subject] teaser is rendering — it'll play here when it's ready." Never say "I couldn't find" or "I'm not sure" after a status:"started" response — the tool already accepted the request.
+For tools that change state (calendar, draft): briefly confirm details before calling, especially times and recipients. After successful tool calls, report what you did in one short sentence — don't read raw JSON.
 
 When given [Context], use those facts verbatim. If asked to do something you don't have a tool for, say so plainly.`;
 
@@ -3352,7 +2310,7 @@ async function askLLMStream({ query, history = [], onSentence, sessionId = null 
   console.log(`[stream] ask: "${query.slice(0, 80)}${query.length > 80 ? '…' : ''}"`);
   const brand = loadBrand();
   const agencyName = brand.agency.name || CONFIG.agency.name;
-  const agentName = brand.agent.name || "Flat-Out";
+  const agentName = brand.agent.name || "Jarvis";
   const tagline = brand.agency.tagline ? ` — ${brand.agency.tagline}.` : ".";
   const projectHint = Projects.systemPromptHint();
   /* SYSTEM is shared with askLLM — keep duplicated here so both paths stay in sync.
@@ -3373,7 +2331,7 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
   Adam's daily work involves scouting locations, looking up routes, checking
   weather, browsing kit suppliers, reading news, finding contacts, drafting
   messages, managing his calendar, controlling Mac apps, looking things up
-  online — all of it. NEVER say "I'm only here for automotive Flat-Out tasks"
+  online — all of it. NEVER say "I'm only here for automotive Jarvis tasks"
   or refuse a reasonable internet / personal-assistant task. If the operator
   asks for a map, route, weather, web lookup, or anything that needs the
   internet, USE THE TOOL (open_url, request_browse, web_search, etc) — don't
@@ -3992,7 +2950,7 @@ const httpServer = createServer(async (req, res) => {
      * that this is a fresh install and the operator should run setup-wizard.mjs.
      * The bridge still serves a FALLBACK brand so the HUD doesn't crash; this
      * flag just lets us show a friendly "first run? run the setup wizard"
-     * overlay instead of leaving them with default Flat-Out branding. */
+     * overlay instead of leaving them with default Jarvis branding. */
     let setupRequired = false;
     try {
       const fs = await import("node:fs");
@@ -4016,6 +2974,31 @@ const httpServer = createServer(async (req, res) => {
      * with this before rendering so a single deploy can serve any client. */
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify(loadBrand()));
+    return;
+  }
+  /* POST /brand — settings-panel writer. Accepts a partial patch (agent /
+   * agency / colors / fonts / logo) and shallow-merges over the current
+   * brand. Persists to config/brand.json + invalidates cache + broadcasts
+   * "brand.updated" so HUD live-reloads. Body shape:
+   *   { agent: { name?, wakePhrase?, wakeMishears?, voice? },
+   *     agency: { name?, tagline?, socials? }, colors?, fonts?, logo? } */
+  if (req.url === "/brand" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const patch = JSON.parse(body || "{}");
+      if (patch.agent?.wakeMishears && typeof patch.agent.wakeMishears === "string") {
+        patch.agent.wakeMishears = patch.agent.wakeMishears
+          .split(",").map((s) => s.trim()).filter(Boolean);
+      }
+      const merged = saveBrand(patch);
+      broadcastToClients({ type: "brand.updated", data: merged });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, brand: merged }));
+    } catch (e) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
     return;
   }
   if (req.url === "/style" && req.method === "GET") {
@@ -4063,16 +3046,31 @@ const httpServer = createServer(async (req, res) => {
    * of the value when present, for visual identification only. */
   if (req.url === "/api-keys" && req.method === "GET") {
     const mask = (v) => v ? `…${String(v).slice(-4)}` : null;
+    /* Scan .env for user-managed keys. Anything starting with letters and
+     * containing _KEY/_TOKEN/_SECRET/_API/_TOKEN_ID/etc is treated as a
+     * settings-panel-editable secret. The legacy hard-coded names below stay
+     * for back-compat but are now also surfaced through the generic list. */
+    const SECRET_PATTERN = /^[A-Z][A-Z0-9_]*(_KEY|_TOKEN|_SECRET|_API|_PASSWORD|_PWD|_TOKEN_ID)$/;
+    const RESERVED = new Set([
+      "PATH", "HOME", "USER", "SHELL", "TERM", "LANG", "LC_ALL",
+      "OLLAMA_MODEL", "VL_MODEL", "VL_KEEP_ALIVE",
+      "LLM_PROVIDER_DEFAULT", "LLM_PROVIDER_VISION", "LLM_PROVIDER_HIGHSTAKES",
+    ]);
+    const generic = [];
+    for (const [name, value] of Object.entries(process.env)) {
+      if (RESERVED.has(name)) continue;
+      if (!SECRET_PATTERN.test(name)) continue;
+      generic.push({ name, set: !!value, hint: mask(value) });
+    }
+    generic.sort((a, b) => a.name.localeCompare(b.name));
     res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify({
       ok: true,
       keys: {
-        frameio:   { set: !!process.env.FRAMEIO_TOKEN,     hint: mask(process.env.FRAMEIO_TOKEN) },
-        serpapi:   { set: !!process.env.SERPAPI_KEY,       hint: mask(process.env.SERPAPI_KEY) },
-        hunter:    { set: !!process.env.HUNTER_API_KEY,    hint: mask(process.env.HUNTER_API_KEY) },
         anthropic: { set: !!process.env.ANTHROPIC_API_KEY, hint: mask(process.env.ANTHROPIC_API_KEY) },
         openai:    { set: !!process.env.OPENAI_API_KEY,    hint: mask(process.env.OPENAI_API_KEY) },
       },
+      generic,
       routing: {
         default:    process.env.LLM_PROVIDER_DEFAULT    || "ollama",
         vision:     process.env.LLM_PROVIDER_VISION     || "ollama",
@@ -4125,6 +3123,21 @@ const httpServer = createServer(async (req, res) => {
         await persistEnvVar(envKey, v);
         if (v) process.env[envKey] = v; else delete process.env[envKey];
         updated[shortKey] = v ? "set" : "cleared";
+      }
+      /* Generic NAME=VALUE keys: any operator-defined env var, validated
+       * against an env-name regex so a stray POST can't write garbage to
+       * .env. Names are uppercase, alphanumeric + underscore, must start
+       * with a letter. Values bounded to 1024 chars. */
+      if (Array.isArray(parsed.custom)) {
+        const NAME_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+        for (const entry of parsed.custom) {
+          const name = String(entry?.name || "").trim().toUpperCase();
+          if (!NAME_RE.test(name)) continue;
+          const v = String(entry?.value ?? "").slice(0, 1024);
+          await persistEnvVar(name, v);
+          if (v) process.env[name] = v; else delete process.env[name];
+          updated[name] = v ? "set" : "cleared";
+        }
       }
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, updated }));
@@ -4267,18 +3280,17 @@ const httpServer = createServer(async (req, res) => {
      * OR { url: "https://..." } → open url in default browser. */
     const APPS = {
       "mail":        { app: "Mail" },
-      "capture-one": { app: "Capture One" },
-      "adobe":       { app: "Adobe Creative Cloud" },
-      "premiere":    { app: "Adobe Premiere Pro 2025" },
-      "lightroom":   { app: "Adobe Lightroom Classic" },
-      "photoshop":   { app: "Adobe Photoshop 2025" },
-      "music":       { app: "Music" },
-      "calendar":    { app: "Calendar" },
       "messages":    { app: "Messages" },
+      "calendar":    { app: "Calendar" },
+      "music":       { app: "Music" },
+      "notes":       { app: "Notes" },
+      "reminders":   { app: "Reminders" },
+      "chrome":      { app: "Google Chrome" },
+      "safari":      { app: "Safari" },
+      "terminal":    { app: "Terminal" },
+      "photos":      { app: "Photos" },
       "slack":       { app: "Slack" },
-      "output":      { folder: "output" },               // rendered teasers / PDFs / thumbnails
-      "shoots":      { folder: "shoots" },               // raw shoot folders
-      "frameio":     { url: "https://app.frame.io" },    // Frame.io web app
+      "output":      { folder: "output" },               // generated artefacts
     };
     const entry = APPS[String(payload.app || "").toLowerCase()];
     if (!entry) {
@@ -4364,30 +3376,6 @@ const httpServer = createServer(async (req, res) => {
         ? { k: `${summ.count} unread`, v: "editorial inbox" }
         : { k: "0 unread", v: "inbox clear" });
     } catch { out.push({ k: "mail", v: "offline" }); }
-
-    /* --- pending Frame.io reviews --- */
-    if (process.env.FRAMEIO_TOKEN) {
-      try {
-        const r = await FrameIO.listPendingReview({ limit: 50 });
-        if (r?.ok && r.count > 0) out.push({ k: `${r.count} pending`, v: "frame.io review" });
-      } catch {}
-    }
-
-    /* --- uncontacted leads --- */
-    try {
-      const uncontacted = Leads.listLeads({ contacted: false }).length;
-      if (uncontacted > 0) out.push({ k: `${uncontacted} leads`, v: "uncontacted" });
-    } catch {}
-
-    /* --- upcoming media days within 60 days, top 3 --- */
-    try {
-      const events = MediaDays.listMediaDays({ daysAhead: 60 }).slice(0, 3);
-      for (const e of events) {
-        const when = new Date(e.date).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
-        const label = `${e.manufacturer.split(/\s+/)[0]}${e.vehicle ? " " + e.vehicle : ""}`;
-        out.push({ k: `${e.kind} ${when}`, v: `${label}${e.location ? " · " + e.location : ""}`, kind: "event" });
-      }
-    } catch {}
 
     /* --- shoot folders (most-recent first, all of them) --- */
     /* Why: was only listing the latest. Operator wants every shoot accessible from the HUD;
@@ -4717,125 +3705,6 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  /* POST /live/transcribe — phone uploads a raw audio blob (webm/opus or mp4 from
-   * iOS Safari) with the mime type in Content-Type. Bridge forwards to the local
-   * Whisper service (port 8768), parses the response, and routes the transcript:
-   *   - If it matches a flag intent ("hero", "reshoot", "skip" + variants), fire
-   *     flag_shot on the most recent file in the active shoot folder.
-   *   - Otherwise broadcast as a live.note event so the kiosk's HUD shows it. */
-  if (req.url?.startsWith("/live/transcribe") && req.method === "POST") {
-    const url = new URL(req.url, "http://localhost");
-    const project = url.searchParams.get("project") || null;
-    const contentType = req.headers["content-type"] || "audio/webm";
-    /* Buffer the blob in memory — typical push-to-talk recordings are 1-30s, so under
-     * a few MB. We don't expect long-form recordings here. */
-    const chunks = [];
-    let total = 0;
-    const MAX_BYTES = 25 * 1024 * 1024;  // 25 MB cap
-    req.on("data", (chunk) => {
-      total += chunk.length;
-      if (total > MAX_BYTES) {
-        try { req.destroy(); } catch {}
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", async () => {
-      if (total > MAX_BYTES) {
-        res.writeHead(413, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "audio too large (>25MB)" }));
-        return;
-      }
-      const buf = Buffer.concat(chunks);
-      let text = "";
-      try {
-        /* Whisper service expects a multipart upload with field name "audio". We build
-         * that here so the phone client can stay simple (raw blob upload). */
-        const boundary = `----flat-out-${Date.now().toString(36)}`;
-        const ext = /webm/i.test(contentType) ? "webm" : /mp4/i.test(contentType) ? "mp4" : "wav";
-        const head = Buffer.from(
-          `--${boundary}\r\n` +
-          `Content-Disposition: form-data; name="audio"; filename="live.${ext}"\r\n` +
-          `Content-Type: ${contentType}\r\n\r\n`,
-          "utf8"
-        );
-        const tail = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
-        const body = Buffer.concat([head, buf, tail]);
-        const wr = await fetch("http://localhost:8768/transcribe", {
-          method: "POST",
-          headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
-          body,
-        });
-        if (!wr.ok) throw new Error(`whisper ${wr.status}`);
-        const wj = await wr.json();
-        text = (wj.text || wj.transcript || "").trim();
-      } catch (e) {
-        res.writeHead(502, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: `transcribe failed: ${e.message}` }));
-        return;
-      }
-
-      /* Flag-intent detection. Keep it loose so "make this a hero", "this one's a hero",
-       * "flag hero" all match. Status names match shotflag.mjs's VALID_STATUS set. */
-      const lower = text.toLowerCase();
-      let action = null;
-      const flagMap = [
-        { pat: /\b(hero|the hero|a hero)\b/, status: "hero" },
-        { pat: /\b(reshoot|re-shoot|do it again|shoot again)\b/, status: "reshoot" },
-        { pat: /\b(skip|delete|bin|trash|throw out)\b/, status: "skip" },
-        { pat: /\b(maybe|not sure|unclear)\b/, status: "maybe" },
-        { pat: /\b(keep|good|nice one)\b/, status: "keep" },
-      ];
-      for (const m of flagMap) {
-        if (m.pat.test(lower)) {
-          try {
-            const result = await Shotflag.flagShot({ folder: project, status: m.status, note: text });
-            action = { kind: "flag", status: m.status, file: result.file, summary: `${m.status.toUpperCase()} → ${result.file || "(latest)"}` };
-            broadcastToClients({ type: "live.flag", data: { status: m.status, file: result.file, text, project } });
-          } catch (e) {
-            action = { kind: "flag", error: e.message };
-          }
-          break;
-        }
-      }
-      if (!action) {
-        /* No flag intent — broadcast as a transcript note so the kiosk surfaces it. */
-        broadcastToClients({ type: "live.note", data: { text, project } });
-      }
-      broadcastToClients({ type: "live.caption", data: { text, project } });
-
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, text, action }));
-    });
-    return;
-  }
-
-  /* POST /live/flag — quick-action chip (HERO / KEEP / MAYBE / RESHOOT). Same effect
-   * as a voice-routed flag but skips the STT round-trip — useful when ambient noise
-   * makes Whisper unreliable. */
-  if (req.url === "/live/flag" && req.method === "POST") {
-    let body = "";
-    req.on("data", (c) => body += c);
-    req.on("end", async () => {
-      try {
-        const j = JSON.parse(body || "{}");
-        const status = String(j.status || "").toLowerCase();
-        if (!["hero", "keep", "maybe", "skip", "reshoot"].includes(status)) {
-          res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: "status must be hero/keep/maybe/skip/reshoot" }));
-          return;
-        }
-        const result = await Shotflag.flagShot({ folder: j.folder || null, status });
-        broadcastToClients({ type: "live.flag", data: { status, file: result.file, project: j.folder || null } });
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, ...result }));
-      } catch (e) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: e.message }));
-      }
-    });
-    return;
-  }
 
   /* POST /mcp — Model Context Protocol JSON-RPC endpoint. Lets external MCP hosts
    * (Claude Desktop, Claude Code, Cursor, Continue) discover + invoke every bridge
@@ -4950,7 +3819,7 @@ const httpServer = createServer(async (req, res) => {
            * land in brand.json and break colour-derived CSS variables. */
           if (!/^#[0-9a-f]{6}$/i.test(j.color)) {
             res.writeHead(400, { "content-type": "application/json" });
-            res.end(JSON.stringify({ ok: false, error: `color must be a 6-digit hex like #E10600` }));
+            res.end(JSON.stringify({ ok: false, error: `color must be a 6-digit hex like #00d4ff` }));
             return;
           }
           const brandPath = new URL("../config/brand.json", import.meta.url);
@@ -5188,7 +4057,7 @@ wss.on("connection", (ws) => {
 /* ---------- BROADCAST LIVE STATS ---------- */
 let prevNet = null;
 async function broadcastStats() {
-  const [cpu, mem, gpu, net, disk] = await Promise.all([getCpuPercent(), getMemoryStats(), getGpuStats(), getNetStats(), getDiskStats()]);
+  const [cpu, mem, gpu, net, disk, cpuTempC] = await Promise.all([getCpuPercent(), getMemoryStats(), getGpuStats(), getNetStats(), getDiskStats(), getCpuTemp()]);
   let netRate = { downKBs: 0, upKBs: 0 };
   if (prevNet) {
     const dt = (Date.now() - prevNet.t) / 1000;
@@ -5197,12 +4066,33 @@ async function broadcastStats() {
   }
   prevNet = { t: Date.now(), rx: net.rxBytes, tx: net.txBytes };
 
-  const stats = { cpu, mem, gpu, net: netRate, disk };
+  /* loadAvg = OS-reported 1-min load average. Surfaced for the LOAD readout
+   * alongside the CPU/GPU/RAM percentages so the operator can spot scheduler
+   * pressure that a raw CPU% number doesn't capture. */
+  const loadAvg = (os.loadavg && os.loadavg()[0]) ?? null;
+  /* Apple Silicon temps + power via macmon (sudoless SMC reader). When
+   * macmon isn't on the host these come back null and the HUD shows "—°".
+   * macmon's reading takes precedence over the legacy osx-cpu-temp probe
+   * because that one returns 0.0°C on M-series. */
+  const mac = Macmon.getLatest();
+  const stats = {
+    cpu, mem, gpu, net: netRate, disk, loadAvg,
+    cpuTempC: mac?.cpuTempC ?? cpuTempC,
+    gpuTempC: mac?.gpuTempC ?? null,
+    cpuPowerW: mac?.cpuPowerW ?? null,
+    gpuPowerW: mac?.gpuPowerW ?? null,
+    anePowerW: mac?.anePowerW ?? null,
+    sysPowerW: mac?.sysPowerW ?? null,
+  };
   /* Route through broadcastToClients so the stats envelope picks up the same
    * ts auto-stamp every other broadcast does — single envelope shape for all. */
   broadcastToClients({ type: "stats", data: stats });
 }
 setInterval(broadcastStats, 1500);
+/* Spawn macmon (sudoless Apple Silicon temp + power monitor) so the HUD
+ * gets real CPU/GPU °C and per-domain wattage. Graceful no-op if the binary
+ * isn't installed — bridge keeps working with temps=null. */
+Macmon.start();
 
 /* Why: schedule cache pruning so frame-cache + weather-cache + trackday sidecars
  * don't grow unbounded over a months-long kiosk uptime. Initial sweep at +5s so
@@ -5215,17 +4105,14 @@ DreamCycle.schedule();
  * as a notification. Operator can ask for it on-demand via team_standup. */
 DailyDigest.setBroadcaster(broadcastToClients);
 DailyDigest.schedule();
-/* Press-cycle radar at 09:00 daily — sweeps automotive press for FOM's tracked
- * manufacturers, persists hits to data/press-signals.jsonl. */
-PressRadar.schedule();
 
 httpServer.listen(PORT, () => {
   /* Brand banner — print once on startup if the terminal is wide enough to render
-   * the FOM logo cleanly. Daemon-launched bridges write this to /tmp/flat-out-bridge.log
+   * the FOM logo cleanly. Daemon-launched bridges write this to /tmp/jarvis-bridge.log
    * so it lands in the diagnostic trail too. */
   try {
     const cols = process.stdout.columns || 80;
-    const banner = readFileSync(new URL("../assets/fom-ascii.txt", import.meta.url), "utf8");
+    const banner = readFileSync(new URL("../assets/brand-ascii.txt", import.meta.url), "utf8");
     if (cols >= 145) console.log(`\x1b[31m${banner}\x1b[0m`);
   } catch {}
   console.log(`[bridge] listening on ws://localhost:${PORT}  (health: http://localhost:${PORT}/health)`);

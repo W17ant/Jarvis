@@ -124,7 +124,7 @@ export async function autoPickMic(buttonEl) {
   // Pick highest-peak device above noise floor
   results.sort((a, b) => b.peak - a.peak);
   const winner = results[0];
-  console.log("[Flat-Out] mic auto-pick results:", results.map(r => `${r.label}: peak=${r.peak.toFixed(4)}`));
+  console.log("[Jarvis] mic auto-pick results:", results.map(r => `${r.label}: peak=${r.peak.toFixed(4)}`));
 
   if (winner && winner.peak > 0.001) {
     _setPreferredDevice(winner.device.deviceId, winner.label);

@@ -91,7 +91,7 @@ export async function runShell({ command, justification, cwd, timeoutSec }) {
     workDir = abs;
   }
 
-  /* If RENDER_USE_DOCKER is set AND the flat-out/render image is built, route through
+  /* If RENDER_USE_DOCKER is set AND the jarvis/render image is built, route through
    * the container for reproducible binary versions across operator machines. The
    * container has shoots (ro) and output (rw) mounted; PROJECT_DIR/assets is mounted
    * read-only too. Mac-specific binaries (osascript, sips) aren't in the image and

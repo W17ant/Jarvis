@@ -3,11 +3,11 @@ import WS from "ws";
 
 const ws = new WS("ws://localhost:8766");
 const queries = [
-  "Flat-Out, create a 30 second video for Instagram from yesterday's shoot",
-  "Flat-Out, make a teaser of the batmobile",
-  "Flat-Out, create a video of an ice cream van for stories",
-  "Flat-Out, build a 30s reel from yesterday's Aston Martin DBX shoot",
-  "Flat-Out, generate a teaser featuring a vintage Land Rover Defender",
+  "Jarvis, create a 30 second video for Instagram from yesterday's shoot",
+  "Jarvis, make a teaser of the batmobile",
+  "Jarvis, create a video of an ice cream van for stories",
+  "Jarvis, build a 30s reel from yesterday's Aston Martin DBX shoot",
+  "Jarvis, generate a teaser featuring a vintage Land Rover Defender",
 ];
 let pending = queries.length;
 const tStart = Date.now();

@@ -1,22 +1,16 @@
 {
   "operator": {
-    "city": "Manchester",
-    "country": "United Kingdom",
-    "latitude": 53.48095,
-    "longitude": -2.23743,
+    "city": "53.449,-2.121",
+    "country": "GB",
+    "latitude": 53.44934946578453,
+    "longitude": -2.121384688561343,
     "timezone": "Europe/London"
   },
-  "agency": {
-    "name": "Flat-Out Media",
-    "tagline": "we live and breathe automotive",
-    "social": "@flatoutmediauk",
-    "redHex": "#E10600"
-  },
-  "_comment": "Per-install config for the Flat-Out HUD. Edit on the client's machine to match their location.",
+  "_comment": "Per-install config for the Jarvis HUD. Edit on the client's machine to match their location.",
   "hardware": {
     "chip": "Apple M1 Max",
     "memoryGB": 64,
     "tier": "pro"
   },
-  "lockLocation": false
+  "lockLocation": true
 }

@@ -105,10 +105,10 @@ export function pushChunk(chunk) {
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         _latestPartialText = (j?.text || "").trim();
-        console.log(`[Flat-Out] partial transcribe (${Date.now() - t0}ms): "${_latestPartialText}"`);
+        console.log(`[Jarvis] partial transcribe (${Date.now() - t0}ms): "${_latestPartialText}"`);
         return _latestPartialText;
       })
-      .catch((e) => { console.warn("[Flat-Out] partial transcribe failed:", e.message); return ""; });
+      .catch((e) => { console.warn("[Jarvis] partial transcribe failed:", e.message); return ""; });
   }
 }
 
@@ -161,7 +161,7 @@ export async function transcribeAndHandle() {
     const partialText = await partialPromise;
     if (partialText && partialText.length >= PARTIAL_MIN_TEXT_LEN) {
       heard = partialText;
-      console.log(`[Flat-Out] using speculative partial — skipped final transcribe (chunk delta: ${finalChunkCount - firedAt})`);
+      console.log(`[Jarvis] using speculative partial — skipped final transcribe (chunk delta: ${finalChunkCount - firedAt})`);
       _dbgSet("whisper", `"${heard}" (partial)`);
     }
   }
@@ -181,10 +181,10 @@ export async function transcribeAndHandle() {
       if (!res.ok) throw new Error(`whisper ${res.status}`);
       const { text } = await res.json();
       heard = (text || "").trim();
-      console.log("[Flat-Out] whisper:", heard);
+      console.log("[Jarvis] whisper:", heard);
       _dbgSet("whisper", heard ? `"${heard}"` : "(empty)");
     } catch (e) {
-      console.warn("[Flat-Out] transcribe failed:", e.message);
+      console.warn("[Jarvis] transcribe failed:", e.message);
       _dbgSet("error", `whisper: ${e.message}`);
       _setState("idle");
       if (_replyEl) _replyEl.textContent = "Whisper isn't reachable. Check the bridge logs.";

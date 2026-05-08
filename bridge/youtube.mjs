@@ -32,7 +32,7 @@ const PROJECT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 /* Shoots/output roots resolved at call sites via Paths.* — operator-configurable. */
 const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
-const FOM_RED = "#E10600";
+const ACCENT_CYAN = "#00d4ff";
 const FOM_YELLOW = "#F8E71C";
 
 /** Resolve a folder name (or "latest") to absolute path under shoots/.
@@ -150,7 +150,7 @@ async function deriveSubjectAndStats({ folderName, overrideMake, overrideModel, 
 }
 
 /* ───────── THUMBNAIL TEMPLATE ─────────
- * Why: client feedback — existing FOM thumbnails (yellow text + car) don't show the engine
+ * Why: client feedback — legacy thumbnails (yellow text + car) don't show the engine
  * or any specs. New layout puts the hero car as full-bleed background, the engine bay as a
  * bottom-right inset (red bordered), big yellow Impact headline + red subhead on the left,
  * and a bottom spec strip with engine/BHP/0-60. */
@@ -189,7 +189,7 @@ function thumbnailHtml({ heroData, engineData, headline, subhead, stats, make, m
     text-transform: uppercase;
     letter-spacing: 0.18em;
     padding: 4px 10px;
-    border-left: 4px solid ${FOM_RED};
+    border-left: 4px solid ${ACCENT_CYAN};
     background: rgba(0, 0, 0, 0.45);
     margin-bottom: 12px;
   }
@@ -210,7 +210,7 @@ function thumbnailHtml({ heroData, engineData, headline, subhead, stats, make, m
     font-weight: 700;
     font-size: 42px;
     color: #fff;
-    background: ${FOM_RED};
+    background: ${ACCENT_CYAN};
     text-transform: uppercase;
     letter-spacing: 0.02em;
     margin-top: 26px;
@@ -222,17 +222,17 @@ function thumbnailHtml({ heroData, engineData, headline, subhead, stats, make, m
   /* Engine inlay — top-right corner, smaller now to leave room for the stats card. */
   .engine { position: absolute; right: 36px; top: 36px; width: 320px; height: 200px;
     background-image: url('${engineData}'); background-size: cover; background-position: center;
-    border: 5px solid ${FOM_RED};
+    border: 5px solid ${ACCENT_CYAN};
     box-shadow: 0 0 0 3px #000, 8px 8px 0 #000;
     z-index: 3;
   }
-  .engine__label { position: absolute; top: -22px; left: 0; background: ${FOM_RED}; color: #fff; font-family: "Oswald", sans-serif; font-weight: 700; font-size: 15px; padding: 3px 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+  .engine__label { position: absolute; top: -22px; left: 0; background: ${ACCENT_CYAN}; color: #fff; font-family: "Oswald", sans-serif; font-weight: 700; font-size: 15px; padding: 3px 10px; letter-spacing: 0.18em; text-transform: uppercase; }
 
   /* Top Trumps stats card — bottom-right. 2x2 grid of big number + small label cells.
    * Reads instantly: BHP / TOP SPEED / 0-60 / DRIVE all visible at thumbnail-grid size. */
   .stats { position: absolute; right: 36px; bottom: 36px; width: 380px;
     background: rgba(0, 0, 0, 0.82);
-    border: 3px solid ${FOM_RED};
+    border: 3px solid ${ACCENT_CYAN};
     box-shadow: 6px 6px 0 #000;
     padding: 14px 16px 16px;
     z-index: 4;
@@ -241,8 +241,8 @@ function thumbnailHtml({ heroData, engineData, headline, subhead, stats, make, m
   .stats__head {
     grid-column: 1 / -1;
     font-family: "Oswald", sans-serif; font-weight: 700; font-size: 14px;
-    color: ${FOM_RED}; letter-spacing: 0.32em; text-transform: uppercase;
-    border-bottom: 2px solid ${FOM_RED}; padding-bottom: 6px; margin-bottom: 4px;
+    color: ${ACCENT_CYAN}; letter-spacing: 0.32em; text-transform: uppercase;
+    border-bottom: 2px solid ${ACCENT_CYAN}; padding-bottom: 6px; margin-bottom: 4px;
   }
   .stat { display: flex; flex-direction: column; }
   .stat__value {
@@ -257,7 +257,7 @@ function thumbnailHtml({ heroData, engineData, headline, subhead, stats, make, m
     font-family: "Oswald", sans-serif;
     font-weight: 600;
     font-size: 11px;
-    color: ${FOM_RED};
+    color: ${ACCENT_CYAN};
     letter-spacing: 0.22em;
     margin-top: 2px;
     text-transform: uppercase;
@@ -271,7 +271,7 @@ function thumbnailHtml({ heroData, engineData, headline, subhead, stats, make, m
     letter-spacing: 0.06em;
     text-shadow: 2px 2px 0 #000;
   }
-  .agency em { font-style: normal; color: ${FOM_RED}; font-family: "Oswald", sans-serif; font-weight: 700; font-size: 16px; letter-spacing: 0.45em; display: block; margin-top: -2px; }
+  .agency em { font-style: normal; color: ${ACCENT_CYAN}; font-family: "Oswald", sans-serif; font-weight: 700; font-size: 16px; letter-spacing: 0.45em; display: block; margin-top: -2px; }
 </style></head>
 <body>
   <div class="frame">
@@ -282,7 +282,7 @@ function thumbnailHtml({ heroData, engineData, headline, subhead, stats, make, m
       ${subhead ? `<div class="subhead">${escapeHtml(subhead)}</div>` : ""}
     </div>
     ${engineData ? `<div class="engine"><div class="engine__label">UNDER THE SKIN</div></div>` : ""}
-    <div class="agency">${escapeHtml(agencyMark || "FLAT-OUT")}<em>MEDIA</em></div>
+    <div class="agency">${escapeHtml(agencyMark || "JARVIS")}<em>MEDIA</em></div>
     ${statEntries.length ? `<div class="stats"><div class="stats__head">SPEC SHEET</div>${statHtml}</div>` : ""}
   </div>
 </body></html>`;
@@ -357,7 +357,7 @@ function firstImage(folderAbs) {
  * @param {string} args.headline     Big yellow text e.g. "V10 BEAST".
  * @param {string} [args.subhead]    Red strap line e.g. "The Car That Broke Me".
  * @param {string[]} [args.specs]    Spec strip — e.g. ["V10", "5.0L", "510 BHP", "0-60 in 3.2s"].
- * @param {string} [args.agencyMark] Defaults "FLAT-OUT".
+ * @param {string} [args.agencyMark] Defaults "JARVIS".
  * @param {function} [broadcast]     Stage notifier — wired to HUD so the screen-recorded
  *                                   demo shows progress: 'captioning-folder' →
  *                                   'picking-hero' → 'picking-engine' → 'rendering' → 'done'.
@@ -395,7 +395,7 @@ export async function generateYoutubeThumbnail(args = {}, broadcast = () => {}) 
     heroData, engineData, make, model, stats: derivedStats,
     headline: args.headline,
     subhead: args.subhead || "",
-    agencyMark: args.agencyMark || "FLAT-OUT",
+    agencyMark: args.agencyMark || "JARVIS",
   });
 
   /* Land YouTube thumbnails under the canonical youtube/thumbnails subfolder so the
@@ -453,7 +453,7 @@ export async function generateYoutubeShort(args = {}) {
 
   /* Build the closing-card text from headline + subhead. Existing planEdit uppercases
    * and stacks one word per line, so " · " separator gives a clean two-line kicker. */
-  const closingText = [args.headline, args.subhead].filter(Boolean).join(" · ") || "FLAT-OUT";
+  const closingText = [args.headline, args.subhead].filter(Boolean).join(" · ") || "JARVIS";
 
   const subject = args.subject || (() => {
     const cleaned = path.basename(folderAbs).replace(/^\d{4}-\d{2}-\d{2}[-_]?/, "").replace(/[-_]/g, " ").trim();

@@ -1,4 +1,4 @@
-/** bridge-client.js - Single WebSocket client + pubsub for the Flat-Out bridge.
+/** bridge-client.js - Single WebSocket client + pubsub for the Jarvis bridge.
  *
  *  Why: voice.js owned the WebSocket plus all event-routing branching for every async
  *  bridge event. As event types proliferated (task.*, video.edit.*, yt.thumbnail.*,

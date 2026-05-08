@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# uninstall-wizard.sh - Interactive uninstaller for Flat-Out HUD on macOS.
+# uninstall-wizard.sh - Interactive uninstaller for Jarvis HUD on macOS.
 #
 # Walks through every artifact the install / runtime drops outside the project tree
 # and prompts before deleting each one. Defaults are conservative: items that hold
@@ -13,7 +13,7 @@
 #   ./tools/uninstall-wizard.sh --dry-run        # show what would happen, change nothing
 #
 # What it can remove (in roughly the order it asks):
-#   1. LaunchAgent  (~/Library/LaunchAgents/com.flatoutmedia.hud.plist) — auto-start on login
+#   1. LaunchAgent  (~/Library/LaunchAgents/com.jarvis.hud.plist) — auto-start on login
 #   2. Running processes (bridge / kokoro / whisper / static / kiosk Chrome window)
 #   3. Tailscale serve config (if the kiosk was published to a tailnet)
 #   4. Project-local artifacts (.venv, node_modules, output/, data/frame-cache, weather-cache)
@@ -26,7 +26,7 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-LABEL="com.flatoutmedia.hud"
+LABEL="com.jarvis.hud"
 PLIST_TARGET="$HOME/Library/LaunchAgents/$LABEL.plist"
 OLLAMA_HOME="$HOME/.ollama"
 
@@ -104,7 +104,7 @@ if [[ -f "$HERE/assets/fom-ascii.txt" ]] && [[ "$(tput cols 2>/dev/null || echo 
 fi
 
 cat <<EOF
-${C_BOLD}Flat-Out HUD — Uninstall Wizard${C_RESET}
+${C_BOLD}Jarvis HUD — Uninstall Wizard${C_RESET}
 ${C_DIM}Project root:${C_RESET} $HERE
 ${C_DIM}Mode:${C_RESET} $MODE
 
@@ -192,7 +192,7 @@ for entry in "${PROJECT_ITEMS[@]}"; do
   fi
 done
 
-# ------------- 5. Ollama models pulled by Flat-Out -------------
+# ------------- 5. Ollama models pulled by Jarvis -------------
 # This is the headline reason for the wizard — qwen lives in a hidden folder under
 # the user's home directory (~/.ollama), so a "rm -rf ./project" doesn't reclaim
 # the ~20GB that install.sh pulled.
@@ -275,7 +275,7 @@ fi
 # ------------- 9. Auxiliary brew packages (rarely wanted) -------------
 step "9. Brew packages (ffmpeg, imagemagick, node, python@3.12)"
 info "These are commonly used by other apps; default is to leave them installed."
-info "Skip this step entirely unless you set up the M5 Max purely for Flat-Out."
+info "Skip this step entirely unless you set up the M5 Max purely for Jarvis."
 if [[ "$(confirm "Even consider removing these shared brew packages?" "n" destructive)" == "y" ]]; then
   for pkg in ffmpeg imagemagick node python@3.12; do
     if brew list "$pkg" >/dev/null 2>&1; then

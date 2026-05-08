@@ -3,16 +3,16 @@
  *  Why: the kiosk gets used by lead photographer, editor, and MD. Each wants
  *  their own voice, colour preferences, tier, and (eventually) audit-log
  *  attribution. Storage already namespaces every key under
- *  flatout.<profile>.<key> — this module manages the registry of profile ids
+ *  jarvis.<profile>.<key> — this module manages the registry of profile ids
  *  and switches the active one, prompting a reload so every consumer rereads
  *  the new namespace.
  *
- *  Registry shape (stored top-level at flatout.profiles, NOT namespaced):
+ *  Registry shape (stored top-level at jarvis.profiles, NOT namespaced):
  *    [{ id: "default", name: "Default", createdAt }, { id: "marcus", name: "Marcus", ... }]
  *
  *  Switching profiles:
  *    1. Storage.setProfile(newId) — flips the namespace
- *    2. localStorage.setItem("flatout.activeProfile", newId) — persists the choice
+ *    2. localStorage.setItem("jarvis.activeProfile", newId) — persists the choice
  *    3. location.reload() — every consumer rereads through the new prefix
  *
  *  Creating profiles:
@@ -22,8 +22,8 @@
 
 import * as Storage from "./storage.js";
 
-const REGISTRY_KEY = "flatout.profiles";        /* top-level — not namespaced */
-const ACTIVE_KEY = "flatout.activeProfile";     /* top-level — drives Storage prefix */
+const REGISTRY_KEY = "jarvis.profiles";        /* top-level — not namespaced */
+const ACTIVE_KEY = "jarvis.activeProfile";     /* top-level — drives Storage prefix */
 
 const DEFAULT_PROFILE = { id: "default", name: "Default", createdAt: 0 };
 
@@ -82,7 +82,7 @@ export function remove(id) {
   const profiles = list().filter(p => p.id !== id);
   save(profiles);
   /* Sweep the operator's namespaced keys. */
-  const prefix = `flatout.${id}.`;
+  const prefix = `jarvis.${id}.`;
   const keysToRemove = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);

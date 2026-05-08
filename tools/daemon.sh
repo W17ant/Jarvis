@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# daemon.sh - Long-running supervisor for Flat-Out HUD services.
-# Started by launchd (com.flatoutmedia.hud) so it must stay in the foreground —
+# daemon.sh - Long-running supervisor for Jarvis HUD services.
+# Started by launchd (com.jarvis.hud) so it must stay in the foreground —
 # launch.sh detaches services and exits, which would make launchd respawn-loop.
 #
 # Why a separate script: launchd KeepAlive watches THIS process. We start the four
@@ -26,7 +26,7 @@ trap cleanup INT TERM
 start_svc() {
   local name="$1"; shift
   echo "[daemon] start $name: $*"
-  ( "$@" >>"${LOG_DIR}/flat-out-${name}.log" 2>&1 ) &
+  ( "$@" >>"${LOG_DIR}/jarvis-${name}.log" 2>&1 ) &
   PIDS+=("$!")
 }
 

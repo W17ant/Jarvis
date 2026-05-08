@@ -1,7 +1,9 @@
 {
   "_comment": "Inbound iMessage adapter. Disabled by default — flip enabled:true and add at least one phone/email to allowedSenders to opt in. The bridge polls chat.db every pollIntervalMs and forwards any message from an allowlisted sender that starts with `trigger` to the LLM. Full Disk Access permission required (macOS prompts on first read).",
   "enabled": false,
-  "allowedSenders": [],
-  "trigger": "hey flat-out",
+  "allowedSenders": [
+    "+447700900100"
+  ],
+  "trigger": "hey jarvis",
   "pollIntervalMs": 5000
 }

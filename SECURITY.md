@@ -1,6 +1,6 @@
 # Security & Privacy
 
-Operating notes for the Flat-Out HUD on a client machine. Read before shipping; these are
+Operating notes for the Jarvis HUD on a client machine. Read before shipping; these are
 the assumptions the system makes about how the kiosk is configured.
 
 ## Data flow — what stays local, what leaves
@@ -57,7 +57,7 @@ iCloud → Desktop & Documents Folders). If `~/Desktop/Jarvis` is iCloud-synced:
 
 **Action items per install:**
 
-1. **Disable iCloud Desktop sync** OR move the project off `~/Desktop` (recommended location: `~/Apps/Jarvis` or `~/Library/Application Support/flat-out-hud`).
+1. **Disable iCloud Desktop sync** OR move the project off `~/Desktop` (recommended location: `~/Apps/Jarvis` or `~/Library/Application Support/jarvis-hud`).
 2. Confirm `~/Desktop/Jarvis` is **not** inside any Dropbox / Google Drive / OneDrive / Box mirror.
 3. Confirm Time Machine backups go to an encrypted destination disk if backing up at all.
 
@@ -173,4 +173,4 @@ If the kiosk machine is lost or stolen:
 - [ ] `data/` is gitignored
 - [ ] The operator's macOS account password is set and screen-lock activates after inactivity
 - [ ] macOS firewall is ON
-- [ ] FOM has a documented process for what happens to the kiosk + keys when an employee leaves
+- [ ]  the lead client has a documented process for what happens to the kiosk + keys when an employee leaves

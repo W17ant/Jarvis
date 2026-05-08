@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Install Guide — Flat-Out Jarvis</title>
+<title>Install Guide — Jarvis Jarvis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Rubik:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  /** install-guide.html — Flat-Out Jarvis install + features + uninstall.
+  /** install-guide.html — Jarvis Jarvis install + features + uninstall.
    *
    *  Mirrors the AO MCP SEO outreach-pack layout (light A4 print-ready, accent
    *  rule on cover, page-head + page-foot per content page, AO monogram in
-   *  page header, numbered chapters) but FOM-branded: red accent (#E10600),
+   *  page header, numbered chapters) but Jarvis-branded: cyan accent (#00d4ff),
    *  Oswald display, Rubik body. Step flow mirrors the actual install.sh
    *  end-to-end (installer auto-runs the setup wizard, no separate manual
    *  step). */
@@ -23,10 +23,10 @@
     --ink: #0a0a0a;
     --ink-secondary: rgba(10, 10, 10, 0.78);
     --ink-muted: rgba(80, 80, 90, 0.95);
-    --accent: #E10600;
-    --accent-deep: #8F0003;
-    --accent-dim: rgba(225, 6, 0, 0.07);
-    --accent-tint: rgba(225, 6, 0, 0.04);
+    --accent: #00d4ff;
+    --accent-deep: #0077a8;
+    --accent-dim: rgba(0, 212, 255, 0.07);
+    --accent-tint: rgba(0, 212, 255, 0.04);
     --warning: #D17A00;
     --warning-dim: rgba(209, 122, 0, 0.07);
     --green: #2A8049;
@@ -99,21 +99,21 @@
     width: auto;
   }
 
-  /* FOM wordmark on the cover — heavy display type, brand red on the suffix
+  /* Brand wordmark on the cover — heavy display type, brand red on the suffix
    * matches the kiosk's calendar-strip wordmark + the marketing collateral. */
-  .cover-logos .fom-wordmark {
+  .cover-logos .brand-wordmark {
     display: flex;
     align-items: baseline;
     gap: 8px;
     font-family: var(--font-display);
   }
-  .cover-logos .fom-wordmark .primary {
+  .cover-logos .brand-wordmark .primary {
     font-weight: 700;
     font-size: 22px;
     letter-spacing: -0.02em;
     color: var(--ink);
   }
-  .cover-logos .fom-wordmark .suffix {
+  .cover-logos .brand-wordmark .suffix {
     font-weight: 500;
     font-size: 13px;
     letter-spacing: 0.45em;
@@ -134,7 +134,7 @@
     height: 4px;
     background: var(--accent);
     margin-bottom: 26px;
-    box-shadow: 0 0 16px rgba(225, 6, 0, 0.35);
+    box-shadow: 0 0 16px rgba(0, 212, 255, 0.35);
   }
 
   .cover-body h1 {
@@ -518,7 +518,7 @@
   <div class="cover-inner">
     <div class="cover-logos">
       <img src="ao-monogram.png" alt="AO" class="ao-mark" onerror="this.style.display='none'">
-      <div class="fom-wordmark">
+      <div class="brand-wordmark">
         <span class="primary">FLAT-OUT</span>
         <span class="suffix">MEDIA</span>
       </div>
@@ -526,7 +526,7 @@
     <div class="cover-body">
       <div class="cover-rule"></div>
       <h1>Install Guide</h1>
-      <div class="cover-client">Flat-Out Jarvis &middot; May 2026</div>
+      <div class="cover-client">Jarvis Jarvis &middot; May 2026</div>
       <div class="cover-meta-block">
         <span class="lbl">Product</span> Voice-driven AI kiosk for an automotive PR &amp; content agency<br>
         <span class="lbl">Platform</span> macOS 14+, Apple Silicon (M-series)<br>
@@ -541,7 +541,7 @@
     </div>
     <div class="cover-foot">
       <span>aoneill.co.uk &middot; Antony@aoneill.co.uk</span>
-      <span>For Flat-Out Media</span>
+      <span>For Jarvis AI</span>
     </div>
   </div>
 </div>
@@ -549,7 +549,7 @@
 <!-- ============ STEP 01 — TERMINAL ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Install Guide</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -575,7 +575,7 @@
 <!-- ============ STEP 02 — DOWNLOAD ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Install Guide</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -602,7 +602,7 @@
 <!-- ============ STEP 03 — INSTALLER ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Install Guide</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -633,7 +633,7 @@
 <!-- ============ STEP 04 — WIZARD (manual step — install.sh prints "Next: node tools/setup-wizard.mjs" if it didn't auto-run) ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Install Guide</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -645,11 +645,11 @@
       <div class="code"><span class="prompt">$</span> node tools/setup-wizard.mjs</div>
       <p>You&rsquo;ll be asked, in order:</p>
       <ul class="bullets">
-        <li><strong>Agent name</strong> &mdash; default <em>Flat-Out</em></li>
-        <li><strong>Wake phrase</strong> &mdash; default <em>hey flat-out</em></li>
+        <li><strong>Agent name</strong> &mdash; default <em>Jarvis</em></li>
+        <li><strong>Wake phrase</strong> &mdash; default <em>hey jarvis</em></li>
         <li><strong>Voice</strong> &mdash; default <em>Daniel</em> (British, Jarvis-tier)</li>
         <li><strong>Agency name + tagline</strong></li>
-        <li><strong>Brand colours</strong> &mdash; default FOM red</li>
+        <li><strong>Brand colours</strong> &mdash; default Jarvis cyan</li>
         <li><strong>Hardware tier</strong> &mdash; auto-picked from your Mac</li>
         <li><strong>API keys</strong> &mdash; skip any you don&rsquo;t have</li>
         <li><strong>Folders</strong> &mdash; where shoots live, where output goes</li>
@@ -670,7 +670,7 @@
 <!-- ============ STEP 05 — LAUNCH ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Install Guide</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Install Guide</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -681,12 +681,12 @@
       <div class="code"><span class="prompt">$</span> ./launch.sh kiosk</div>
       <p>The HUD opens in full-screen Chrome. The speedometer breathes. The corner brackets light up. You&rsquo;re live.</p>
       <p>Try saying:</p>
-      <div class="voice-quote">&ldquo;Hey Flat-Out, what&rsquo;s in my diary today?&rdquo;</div>
+      <div class="voice-quote">&ldquo;Hey Jarvis, what&rsquo;s in my diary today?&rdquo;</div>
       <p>If you hear a reply, the install worked.</p>
     </div>
     <div class="callout">
       <strong>Everyday use</strong>
-      Tap the wake button once, or say <em>&ldquo;hey Flat-Out&rdquo;</em>. To exit the kiosk: <code>⌘ Cmd + Q</code>.
+      Tap the wake button once, or say <em>&ldquo;hey Jarvis&rdquo;</em>. To exit the kiosk: <code>⌘ Cmd + Q</code>.
     </div>
     <div class="callout">
       <strong>Auto-start on login</strong>
@@ -711,7 +711,7 @@
 <!-- ============ FEATURES PAGE 1 — VOICE + VISION ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Features</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -723,7 +723,7 @@
     <div class="feat-grid">
       <div class="feat-card">
         <h3>Wake on phrase</h3>
-        <p>Say <em>&ldquo;hey Flat-Out&rdquo;</em>. Local Whisper transcribes, Qwen thinks, Kokoro speaks. First reply in your ear in about a second.</p>
+        <p>Say <em>&ldquo;hey Jarvis&rdquo;</em>. Local Whisper transcribes, Qwen thinks, Kokoro speaks. First reply in your ear in about a second.</p>
       </div>
       <div class="feat-card">
         <h3>Sentence-level streaming</h3>
@@ -731,7 +731,7 @@
       </div>
       <div class="feat-card">
         <h3>Barge-in</h3>
-        <p>Mic detects your voice while it&rsquo;s talking. Mid-sentence, Flat-Out stops and listens. No more talking over each other.</p>
+        <p>Mic detects your voice while it&rsquo;s talking. Mid-sentence, Jarvis stops and listens. No more talking over each other.</p>
       </div>
       <div class="feat-card">
         <h3>Captions every shot</h3>
@@ -753,7 +753,7 @@
 <!-- ============ FEATURES PAGE 2 — EDITING ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Features</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -795,7 +795,7 @@
 <!-- ============ FEATURES PAGE 3 — COMMS + STUDIO ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Features</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -837,7 +837,7 @@
 <!-- ============ FEATURES PAGE 4 — POWER ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Features</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Features</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -879,12 +879,12 @@
 <!-- ============ UNINSTALL ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Uninstall</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Uninstall</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
     <div class="step-num">UNINSTALL</div>
-    <div class="step-title">Removing Flat-Out</div>
+    <div class="step-title">Removing Jarvis</div>
     <p class="step-lede">Just as simple as install. The wizard walks through every step and asks before removing anything.</p>
     <div class="step-body">
       <ol class="num-list">
@@ -922,7 +922,7 @@
 <!-- ============ FAQ 01 — VOICE & CAMERA ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Diagnosis</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Diagnosis</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -933,7 +933,7 @@
     <p class="step-lede">Mic and camera issues account for ~90% of real-world problems on a kiosk Mac. Run through these before logging a ticket.</p>
 
     <div class="faq-row">
-      <div class="faq-q">I say &ldquo;hey Flat-Out&rdquo; and nothing happens</div>
+      <div class="faq-q">I say &ldquo;hey Jarvis&rdquo; and nothing happens</div>
       <div class="faq-body">
         <p class="cause">Most common cause: MacBook lid is closed and you&rsquo;re running off an external monitor &mdash; macOS disables the built-in mic in clamshell mode.</p>
         <p class="fix">Plug in a USB / 3.5&nbsp;mm mic, <em>or</em> use an iPhone via Continuity (see below). Then open <strong>System Settings &rarr; Sound &rarr; Input</strong> and confirm the level meter moves while you speak.</p>
@@ -979,7 +979,7 @@
 <!-- ============ FAQ 02 — BRIDGE & DIAGNOSTICS ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis &middot; Diagnosis</span>
+    <span class="pg-head-left">Jarvis Jarvis &middot; Diagnosis</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content">
@@ -1014,7 +1014,7 @@
       <div class="faq-q">Bundle everything and email Antony in one command</div>
       <div class="faq-body">
         <div class="code" style="margin: 6px 0;"><span class="prompt">$</span> ./tools/diagnose.sh</div>
-        <p class="fix">Writes a tarball to <code>~/Desktop/flat-out-diag-*.tgz</code> (logs + system snapshot + <code>brand.json</code>, no secrets) and opens a Mail draft to <strong>Antony@aoneill.co.uk</strong> with it attached. Add a sentence on what broke, hit Send.</p>
+        <p class="fix">Writes a tarball to <code>~/Desktop/jarvis-diag-*.tgz</code> (logs + system snapshot + <code>brand.json</code>, no secrets) and opens a Mail draft to <strong>Antony@aoneill.co.uk</strong> with it attached. Add a sentence on what broke, hit Send.</p>
       </div>
     </div>
 
@@ -1044,7 +1044,7 @@
 <!-- ============ END ============ -->
 <div class="page"><div class="pg-inner">
   <div class="pg-head">
-    <span class="pg-head-left">Flat-Out Jarvis</span>
+    <span class="pg-head-left">Jarvis Jarvis</span>
     <img src="ao-monogram.png" alt="AO">
   </div>
   <div class="pg-content" style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-top: 60px;">

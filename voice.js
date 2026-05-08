@@ -1,7 +1,7 @@
-/** voice.js - Flat-Out voice loop.
+/** voice.js - Jarvis voice loop.
  *  Web Speech API for mic + Kokoro TTS for output, Qwen 2.5 brain via the local bridge.
  *  Wake phrase + branding are loaded at runtime from /brand so the same codebase can be
- *  re-skinned without code changes — primary install is Flat-Out Media. */
+ *  re-skinned without code changes — white-label distribution is Jarvis. */
 
 import * as Bridge from "./bridge-client.js";
 import * as TTS from "./tts.js";
@@ -23,16 +23,15 @@ import * as BridgeEvents from "./bridge-events.js";
 /* Profile-namespaced Storage helper now lives in ./storage.js (imported above).
  * Same API: Storage.get / Storage.set / Storage.remove with bare logical names. */
 
-/* Why: defaults match the Flat-Out canonical install but get overridden by /brand response.
+/* Why: defaults match the Jarvis white-label install but get overridden by /brand response.
  * Kept mutable (let) so brand fetch on init can swap them in before the recognizer starts. */
-let WAKE_PHRASE = "hey flat-out";
+let WAKE_PHRASE = "hey jarvis";
 let WAKE_VARIANTS = [
-  "hey flat-out", "hey flat out", "hey flatout", "hey flatouts",
-  "hi flat-out", "hi flat out", "hi flatout",
-  "hey, flat-out", "hey, flat out",
-  "flat-out", "flat out", "flatout", "flatouts",
+  "hey jarvis", "hi jarvis", "hey, jarvis",
+  "hey jervis", "hey jarviz", "hey jarves", "hey jervice",
+  "jarvis", "jervis", "jarviz", "jarves",
 ];
-let AGENT_NAME = "Flat-Out";
+let AGENT_NAME = "Jarvis";
 
 /* Why: pulled in from /brand at boot. Failures fall back to the defaults above so the
  * mic loop still works on a half-configured install. */
@@ -51,7 +50,7 @@ async function loadBrandIntoVoice() {
     WakeParse.setBrand({ agentName: AGENT_NAME, wakeVariants: WAKE_VARIANTS });
     console.log(`[voice] brand loaded: agent="${AGENT_NAME}" wake="${WAKE_PHRASE}" variants=${WAKE_VARIANTS.length}`);
   } catch (e) {
-    console.warn("[voice] /brand fetch failed, using Flat-Out defaults:", e.message);
+    console.warn("[voice] /brand fetch failed, using Jarvis defaults:", e.message);
   }
 }
 /* Fire-and-forget — boot path doesn't await, but variants are mutated before the first wake check. */
@@ -160,8 +159,8 @@ function wfDraw() {
     const mid = h / 2;
     let speakSum = 0;
     ctx.lineWidth = 1.8;
-    ctx.strokeStyle = "#E10600";
-    ctx.shadowColor = "rgba(225,6,0,0.7)";
+    ctx.strokeStyle = "#00d4ff";
+    ctx.shadowColor = "rgba(0, 212, 255,0.7)";
     ctx.shadowBlur = 8;
     ctx.beginPath();
     for (let x = 0; x < w; x++) {
@@ -184,8 +183,8 @@ function wfDraw() {
     wf.phase += 0.35;
     const mid = h / 2;
     ctx.lineWidth = 1.6;
-    ctx.strokeStyle = "#E10600";
-    ctx.shadowColor = "rgba(225,6,0,0.6)";
+    ctx.strokeStyle = "#00d4ff";
+    ctx.shadowColor = "rgba(0, 212, 255,0.6)";
     ctx.shadowBlur = 6;
     ctx.beginPath();
     for (let x = 0; x < w; x++) {
@@ -199,7 +198,7 @@ function wfDraw() {
     wf.phase += 0.6;
     const mid = h / 2;
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(225,6,0,0.45)";
+    ctx.strokeStyle = "rgba(0, 212, 255,0.45)";
     ctx.shadowBlur = 0;
     ctx.beginPath();
     for (let x = 0; x < w; x++) {
@@ -340,7 +339,7 @@ function wireDeviceChange() {
      * devicechange that killed the stream it had just acquired. */
     const track = wf.micStream?.getAudioTracks?.()[0];
     if (track && track.readyState === "ended") {
-      console.log("[Flat-Out] devicechange — track ended, dropping stream");
+      console.log("[Jarvis] devicechange — track ended, dropping stream");
       try { wf.micStream.getTracks().forEach((t) => t.stop()); } catch {}
       wf.micStream = null;
       /* Analyser was wired to the OLD stream's MediaStreamSource — must
@@ -354,7 +353,7 @@ function wireDeviceChange() {
        * Otherwise leave the running cycle alone — it's still listening
        * to a healthy track. */
       if (passive) {
-        console.log("[Flat-Out] devicechange — restarting passive on new mic");
+        console.log("[Jarvis] devicechange — restarting passive on new mic");
         stopPassive();
         setTimeout(() => { startPassive().catch(() => {}); }, 250);
       }
@@ -390,7 +389,7 @@ async function wfStartListening() {
     // Now that we have a real grant, re-enumerate so the picker shows real labels
     refreshDevicePicker();
   } catch (e) {
-    console.warn("[Flat-Out] mic init failed:", e.message);
+    console.warn("[Jarvis] mic init failed:", e.message);
     dbgSet("error", `mic: ${e.name} ${e.message}`);
     dbgSet("device", "MIC DENIED");
     wf.mode = "idle";
@@ -483,7 +482,7 @@ function wireBridgeEvents() {
  *  and stop any in-flight TTS. The operator wakes Jarvis again by clicking
  *  the speedometer (which calls wfStartListening) or saying the wake word. */
 function handleEnterSleep() {
-  try { stopListening(); } catch (e) { console.warn("[Flat-Out] stopListening failed:", e.message); }
+  try { stopListening(); } catch (e) { console.warn("[Jarvis] stopListening failed:", e.message); }
   try { fetch("http://localhost:8766/cancel", { method: "POST" }); } catch {}
   const speedo = document.getElementById("speedo");
   if (speedo) {
@@ -492,7 +491,7 @@ function handleEnterSleep() {
   }
   const stateText = document.getElementById("stateText");
   if (stateText) stateText.textContent = "ASLEEP";
-  console.log("[Flat-Out] entered sleep — mic muted, awaiting wake");
+  console.log("[Jarvis] entered sleep — mic muted, awaiting wake");
 }
 
 /* ---------- CONVERSATION MEMORY ----------
@@ -525,10 +524,10 @@ function clearHistory() {
  * "this session" filter. */
 function getSessionId() {
   try {
-    let id = localStorage.getItem("flatout.sessionId");
+    let id = localStorage.getItem("jarvis.sessionId");
     if (!id) {
       id = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-      localStorage.setItem("flatout.sessionId", id);
+      localStorage.setItem("jarvis.sessionId", id);
     }
     return id;
   } catch { return null; }
@@ -618,10 +617,10 @@ function inboxQueryFor(file) {
 async function cancelActiveTool(reason = "operator-cancel") {
   try {
     await fetch("http://localhost:8766/cancel", { method: "POST" });
-    console.log("[Flat-Out] cancel request sent:", reason);
+    console.log("[Jarvis] cancel request sent:", reason);
     speak("Stopping.");
   } catch (e) {
-    console.warn("[Flat-Out] cancel failed:", e.message);
+    console.warn("[Jarvis] cancel failed:", e.message);
   }
 }
 
@@ -657,14 +656,14 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   /* Step 3: nothing to do — log only, don't speak. */
-  console.log("[Flat-Out] ESC pressed but nothing in flight — ignoring.");
+  console.log("[Jarvis] ESC pressed but nothing in flight — ignoring.");
 }, true);
 
 /* ---------- SLEEP / WAKE RESILIENCE ----------
  * Why: a kiosk Mac sleeps overnight. When the display wakes, the audio graph the page
  * built earlier is often suspended (AudioContext goes to "suspended"), the mic stream
  * may be revoked by the OS, and passive wake-word listening silently dies. The operator
- * walks up, says "Hey Flat-Out", and nothing happens.
+ * walks up, says "Hey Jarvis", and nothing happens.
  *
  * On document.visibilityState transitioning back to "visible":
  *   1. Resume the audio context if suspended.
@@ -680,11 +679,11 @@ document.addEventListener("visibilitychange", async () => {
     return;
   }
   if (document.visibilityState !== "visible") return;
-  console.log("[Flat-Out] page visible — checking audio graph");
+  console.log("[Jarvis] page visible — checking audio graph");
   try {
     if (wf.audioCtx && wf.audioCtx.state === "suspended") {
       await wf.audioCtx.resume();
-      console.log("[Flat-Out] AudioContext resumed");
+      console.log("[Jarvis] AudioContext resumed");
     }
     /* Why: getAudioTracks()[0].readyState === 'ended' means the OS revoked the stream
      * during sleep. Re-acquire by null-ing the cached stream so wfStartListening fetches
@@ -694,15 +693,15 @@ document.addEventListener("visibilitychange", async () => {
       if (!track || track.readyState === "ended") {
         try { wf.micStream.getTracks().forEach(t => t.stop()); } catch {}
         wf.micStream = null;
-        console.log("[Flat-Out] mic stream stale after sleep — will re-acquire");
+        console.log("[Jarvis] mic stream stale after sleep — will re-acquire");
       }
     }
     if (wasPassiveBeforeSleep && !passive) {
-      console.log("[Flat-Out] restoring passive listening after sleep");
+      console.log("[Jarvis] restoring passive listening after sleep");
       await startPassive();
     }
   } catch (e) {
-    console.warn("[Flat-Out] post-wake recovery failed:", e.message);
+    console.warn("[Jarvis] post-wake recovery failed:", e.message);
   }
 });
 function queueModal(showFn, announceText) {
@@ -754,7 +753,7 @@ async function handleHeard(text, isFinal) {
       let reply;
       try { reply = await speakStream(inboxQuery, conversationHistory.slice(0, -1)); }
       catch (e) {
-        console.warn("[Flat-Out] inbox stream failed, falling back:", e.message);
+        console.warn("[Jarvis] inbox stream failed, falling back:", e.message);
         try { reply = await askLLM(inboxQuery); } catch { reply = offlineFallback(); }
         replyEl.textContent = reply;
         await speak(reply);
@@ -785,7 +784,7 @@ async function handleHeard(text, isFinal) {
      * so a flaky bridge connection doesn't break the voice loop entirely. */
     reply = await speakStream(query, conversationHistory.slice(0, -1));
   } catch (e) {
-    console.warn("[Flat-Out] stream failed, falling back to non-streaming:", e.message);
+    console.warn("[Jarvis] stream failed, falling back to non-streaming:", e.message);
     try { reply = await askLLM(query); }
     catch { reply = offlineFallback(); }
     replyEl.textContent = reply;
@@ -834,7 +833,7 @@ async function startPassive() {
   passive = true;
   setState("listening");
   wakeBtn.querySelector(".wake__inner").textContent = "WAKE LISTENING — TAP TO STOP";
-  dbgSet("whisper", "(waiting for 'hey flat-out'…)");
+  dbgSet("whisper", "(waiting for 'hey jarvis'…)");
   cyclePassive();
 }
 
@@ -847,7 +846,7 @@ function stopPassive() {
   }
   passiveRecorder = null;
   setState("idle");
-  wakeBtn.querySelector(".wake__inner").textContent = "TAP / SAY \"HEY FLAT-OUT\"";
+  wakeBtn.querySelector(".wake__inner").textContent = "TAP / SAY \"HEY JARVIS\"";
 }
 
 /** Stream-driven cycle: wait for voice → record full utterance → transcribe → check wake. */
@@ -900,7 +899,7 @@ async function cyclePassive() {
       const j = await res.json();
       heard = (j.text || "").trim();
     }
-  } catch (e) { console.warn("[Flat-Out] passive whisper failed:", e.message); }
+  } catch (e) { console.warn("[Jarvis] passive whisper failed:", e.message); }
 
   // Forward every transcript to bridge log
   fetch("http://localhost:8766/log", {
@@ -960,7 +959,7 @@ async function startListening() {
   /* Reuse the mic stream that wfStartListening already opened — avoids two getUserMedia prompts. */
   const stream = wf.micStream;
   if (!stream) {
-    console.warn("[Flat-Out] no mic stream — wfStartListening failed");
+    console.warn("[Jarvis] no mic stream — wfStartListening failed");
     wakeBtn.querySelector(".wake__inner").textContent = "MIC BLOCKED — CHECK PERMISSIONS";
     return;
   }
@@ -996,7 +995,7 @@ function stopListening() {
   }
   /* Why: keep wf.micStream open so the listening waveform can keep rendering between turns.
    * The user releases by tapping; we don't tear down the device unless they truly stop. */
-  wakeBtn.querySelector(".wake__inner").textContent = "TAP / SAY \"HEY FLAT-OUT\"";
+  wakeBtn.querySelector(".wake__inner").textContent = "TAP / SAY \"HEY JARVIS\"";
 }
 
 /** Lightweight silence-based auto-stop. Reads the existing wf.analyser buffer (which we attached
@@ -1031,7 +1030,7 @@ function startSilenceWatcher() {
         if (rms > SILENCE_RMS * 2) everSpoke = true;
       }
       if (everSpoke && Date.now() - lastVoiceAt > SILENCE_MS) {
-        console.log("[Flat-Out] auto-stop on silence");
+        console.log("[Jarvis] auto-stop on silence");
         stopListening();
         return;
       }
@@ -1158,7 +1157,7 @@ function wireUI() {
 
   /* Tap wake → toggle PASSIVE wake-word listening.
    * In passive mode, we constantly transcribe rolling 3s chunks (skipping silence)
-   * and watch for "hey flat-out" in the result. User can say the whole query in one breath. */
+   * and watch for "hey jarvis" in the result. User can say the whole query in one breath. */
   wakeBtn.addEventListener("click", async () => {
     if (passive) {
       stopPassive();

@@ -137,6 +137,11 @@ export function setMood(mood) {
 export function setMicLevel(v) { state.micLevel = clamp01(v); }
 export function setTtsLevel(v) { state.ttsLevel = clamp01(v); }
 export function setProgress(v) { state.progress = clamp01(v); }
+/* Why: the voice-waveform centerpiece needs a unified amplitude reading —
+ * mic RMS during listening, TTS amplitude during speaking, max of both
+ * otherwise. Exposed as a getter so the wave RAF loop doesn't have to
+ * track speaker state itself. */
+export function getLevel() { return Math.max(state.micLevel, state.ttsLevel); }
 
 /** One-shot mood — auto-reverts after `flashDuration[name]` ms. */
 export function flash(name) {

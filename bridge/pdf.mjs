@@ -18,16 +18,16 @@ const PROJECT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname)
 const ASSET_DIR = path.join(PROJECT_DIR, "assets");
 const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
-const FOM_RED = "#E10600";
-const FOM_DEEP = "#8F0003";
+const ACCENT_CYAN = "#00d4ff";
+const ACCENT_DEEP = "#0077a8";
 
-/* Why: read the FOM logos as base64 so they embed in the PDF without disk path dependencies. */
+/* Why: read the agent logos as base64 so they embed in the PDF without disk path dependencies. */
 let logoCache = null;
 function getLogos() {
   if (logoCache) return logoCache;
   try {
-    const wordmark = readFileSync(path.join(ASSET_DIR, "fom-wordmark.png")).toString("base64");
-    const dial = readFileSync(path.join(ASSET_DIR, "fom-dial.png")).toString("base64");
+    const wordmark = readFileSync(path.join(ASSET_DIR, "jarvis-wordmark.png")).toString("base64");
+    const dial = readFileSync(path.join(ASSET_DIR, "jarvis-dial.png")).toString("base64");
     logoCache = { wordmark: `data:image/png;base64,${wordmark}`, dial: `data:image/png;base64,${dial}` };
   } catch { logoCache = { wordmark: "", dial: "" }; }
   return logoCache;
@@ -46,43 +46,43 @@ function escHtml(s) {
 function tmplBase(bodyHtml, opts = {}) {
   const { dial, wordmark } = getLogos();
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>${escHtml(opts.title || "Flat-Out Media")}</title>
+<html><head><meta charset="utf-8"><title>${escHtml(opts.title || "Jarvis AI")}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;600;700&family=Rubik:wght@300;400;500;600&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Rubik', sans-serif; color: #1a1a1a; padding: 0; }
   .page { padding: 60px 64px; min-height: 100vh; position: relative; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 24px; border-bottom: 2px solid ${FOM_RED}; margin-bottom: 40px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 24px; border-bottom: 2px solid ${ACCENT_CYAN}; margin-bottom: 40px; }
   .header img.wordmark { height: 56px; filter: invert(1); }
-  .header__meta { font-family: 'Oswald', sans-serif; font-size: 11px; letter-spacing: 0.3em; color: ${FOM_RED}; text-align: right; text-transform: uppercase; }
+  .header__meta { font-family: 'Oswald', sans-serif; font-size: 11px; letter-spacing: 0.3em; color: ${ACCENT_CYAN}; text-align: right; text-transform: uppercase; }
   h1 { font-family: 'Oswald', sans-serif; font-weight: 700; font-size: 42px; letter-spacing: 0.02em; line-height: 1.1; margin-bottom: 8px; text-transform: uppercase; }
-  h2 { font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 16px; letter-spacing: 0.25em; color: ${FOM_RED}; margin: 32px 0 12px; text-transform: uppercase; }
+  h2 { font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 16px; letter-spacing: 0.25em; color: ${ACCENT_CYAN}; margin: 32px 0 12px; text-transform: uppercase; }
   p, li { font-size: 13px; line-height: 1.6; margin-bottom: 8px; }
   ul, ol { padding-left: 22px; margin: 8px 0 16px; }
   table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
   th, td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; text-align: left; vertical-align: top; }
-  th { font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; color: ${FOM_RED}; }
-  tr.total td { font-weight: 700; border-top: 2px solid ${FOM_RED}; border-bottom: none; padding-top: 14px; }
+  th { font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase; color: ${ACCENT_CYAN}; }
+  tr.total td { font-weight: 700; border-top: 2px solid ${ACCENT_CYAN}; border-bottom: none; padding-top: 14px; }
   .key-value { display: grid; grid-template-columns: 180px 1fr; gap: 8px 24px; margin: 16px 0; font-size: 13px; }
-  .key-value .k { font-family: 'Oswald', sans-serif; font-size: 11px; letter-spacing: 0.25em; color: ${FOM_RED}; padding-top: 2px; text-transform: uppercase; }
+  .key-value .k { font-family: 'Oswald', sans-serif; font-size: 11px; letter-spacing: 0.25em; color: ${ACCENT_CYAN}; padding-top: 2px; text-transform: uppercase; }
   .footer { position: absolute; bottom: 36px; left: 64px; right: 64px; padding-top: 16px; border-top: 1px solid #e0e0e0; font-family: 'Oswald', sans-serif; font-size: 10px; letter-spacing: 0.25em; color: #999; display: flex; justify-content: space-between; text-transform: uppercase; }
-  .accent-bar { height: 4px; background: ${FOM_RED}; margin-bottom: 32px; }
+  .accent-bar { height: 4px; background: ${ACCENT_CYAN}; margin-bottom: 32px; }
   .blade { position: absolute; bottom: 60px; right: 60px; width: 200px; height: 200px; opacity: 0.06; background: url('${dial}') center/contain no-repeat; pointer-events: none; }
-  blockquote { border-left: 3px solid ${FOM_RED}; padding-left: 18px; margin: 16px 0; font-style: italic; color: #555; }
+  blockquote { border-left: 3px solid ${ACCENT_CYAN}; padding-left: 18px; margin: 16px 0; font-style: italic; color: #555; }
 </style>
 </head><body>
 <div class="page">
   <div class="header">
-    <img class="wordmark" src="${wordmark}" alt="Flat-Out Media" />
+    <img class="wordmark" src="${wordmark}" alt="Jarvis AI" />
     <div class="header__meta">${escHtml(opts.docType || "DOCUMENT")}<br/>${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}</div>
   </div>
   <div class="accent-bar"></div>
   ${bodyHtml}
   <div class="blade"></div>
   <div class="footer">
-    <span>FLAT-OUT MEDIA AGENCY</span>
+    <span>JARVIS AI</span>
     <span>WE LIVE AND BREATHE AUTOMOTIVE</span>
-    <span>@FLATOUTMEDIAUK</span>
+    <span></span>
   </div>
 </div>
 </body></html>`;
@@ -98,7 +98,7 @@ function templateQuote(d) {
     <h1>${escHtml(d.title || "Quote")}</h1>
     <p>For ${escHtml(d.client || "—")}</p>
     <div class="key-value">
-      <div class="k">Quote No.</div><div>${escHtml(d.quoteNumber || `FOM-${Date.now().toString().slice(-6)}`)}</div>
+      <div class="k">Quote No.</div><div>${escHtml(d.quoteNumber || `JV-${Date.now().toString().slice(-6)}`)}</div>
       <div class="k">Project</div><div>${escHtml(d.project || "—")}</div>
       <div class="k">Valid Until</div><div>${escHtml(d.validUntil || "30 days from issue")}</div>
       ${d.shootDates ? `<div class="k">Shoot Dates</div><div>${escHtml(d.shootDates)}</div>` : ""}
@@ -157,7 +157,7 @@ function templateShootReport(d) {
 function templatePressRelease(d) {
   return tmplBase(`
     <h1>${escHtml(d.headline || "Press Release")}</h1>
-    <p style="color:${FOM_RED};font-family:'Oswald',sans-serif;letter-spacing:0.3em;font-size:11px;text-transform:uppercase">FOR IMMEDIATE RELEASE — ${escHtml(d.releaseDate || new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" }).toUpperCase())}</p>
+    <p style="color:${ACCENT_CYAN};font-family:'Oswald',sans-serif;letter-spacing:0.3em;font-size:11px;text-transform:uppercase">FOR IMMEDIATE RELEASE — ${escHtml(d.releaseDate || new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" }).toUpperCase())}</p>
     ${d.subhead ? `<h2 style="color:#1a1a1a;letter-spacing:0">${escHtml(d.subhead)}</h2>` : ""}
     ${d.dateline ? `<p><strong>${escHtml(d.dateline)}</strong> — ${escHtml(d.lead || "")}</p>` : (d.lead ? `<p>${escHtml(d.lead)}</p>` : "")}
     ${d.body ? `<div>${String(d.body).split(/\n+/).filter(Boolean).map(p => `<p>${escHtml(p)}</p>`).join("")}</div>` : ""}
@@ -201,18 +201,18 @@ function templateOutreachPack(d) {
       .lead { break-inside: avoid; padding: 14px 0; border-bottom: 1px solid #e0e0e0; }
       .lead:last-child { border-bottom: none; }
       .lead__head { display: flex; align-items: center; gap: 14px; }
-      .lead__num { font-family: 'Oswald', sans-serif; font-weight: 600; color: ${FOM_RED}; font-size: 18px; min-width: 32px; }
+      .lead__num { font-family: 'Oswald', sans-serif; font-weight: 600; color: ${ACCENT_CYAN}; font-size: 18px; min-width: 32px; }
       .lead__primary { flex: 1; }
       .lead__name { font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 13pt; color: #111; }
       .lead__role { font-size: 9.5pt; color: #555; margin-top: 1px; }
       .lead__email { display: flex; align-items: center; gap: 6px; font-size: 9.5pt; }
-      .lead__email a { color: ${FOM_RED}; text-decoration: none; }
+      .lead__email a { color: ${ACCENT_CYAN}; text-decoration: none; }
       .lead__dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
       .lead__hook { font-size: 9pt; color: #444; margin-top: 6px; }
-      .lead__opener { font-size: 10pt; color: #1a1a1a; margin-top: 8px; padding: 8px 12px; background: #f7f7f7; border-left: 3px solid ${FOM_RED}; line-height: 1.45; }
+      .lead__opener { font-size: 10pt; color: #1a1a1a; margin-top: 8px; padding: 8px 12px; background: #f7f7f7; border-left: 3px solid ${ACCENT_CYAN}; line-height: 1.45; }
       .lead__source { font-size: 8pt; color: #999; margin-top: 4px; }
       .lead__source a { color: #999; text-decoration: none; }
-      .pack-summary { font-size: 10pt; color: #444; margin-bottom: 14px; padding: 10px 14px; background: #faf3f3; border-left: 3px solid ${FOM_RED}; }
+      .pack-summary { font-size: 10pt; color: #444; margin-bottom: 14px; padding: 10px 14px; background: #faf3f3; border-left: 3px solid ${ACCENT_CYAN}; }
       .pack-legend { font-size: 8pt; color: #888; margin-top: 4px; letter-spacing: 0.06em; }
     </style>
     <h1>${escHtml(d.title || "Outreach Pack")}</h1>
@@ -230,7 +230,7 @@ function templateContactSheet(d) {
   const sheets = Array.isArray(d.sheets) ? d.sheets : [];
   const cards = sheets.map((s, i) => {
     const sourceLabel = s.source === "flagged" ? "OP. FLAGGED" : "AUTO PICK";
-    const sourceColor = s.source === "flagged" ? FOM_RED : "#666";
+    const sourceColor = s.source === "flagged" ? ACCENT_CYAN : "#666";
     return `
       <div class="thumb">
         <div class="thumb__num">${String(i + 1).padStart(2, "0")}</div>
@@ -249,12 +249,12 @@ function templateContactSheet(d) {
       .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 18px; }
       .thumb { break-inside: avoid; position: relative; border: 1px solid #e0e0e0; padding: 8px; background: #fafafa; }
       .thumb img { width: 100%; height: 140px; object-fit: cover; display: block; }
-      .thumb__num { position: absolute; top: 4px; left: 4px; background: ${FOM_RED}; color: #fff; font-family: 'Oswald', sans-serif; font-size: 10px; padding: 2px 6px; letter-spacing: 0.15em; z-index: 1; }
+      .thumb__num { position: absolute; top: 4px; left: 4px; background: ${ACCENT_CYAN}; color: #fff; font-family: 'Oswald', sans-serif; font-size: 10px; padding: 2px 6px; letter-spacing: 0.15em; z-index: 1; }
       .thumb__meta { display: flex; justify-content: space-between; align-items: baseline; padding-top: 8px; gap: 8px; }
       .thumb__file { font-family: 'Oswald', sans-serif; font-size: 9pt; letter-spacing: 0.06em; color: #222; word-break: break-all; flex: 1; }
       .thumb__src { font-family: 'Oswald', sans-serif; font-size: 7pt; letter-spacing: 0.18em; }
       .thumb__caption { font-size: 8pt; color: #555; line-height: 1.35; padding-top: 4px; }
-      .sheet-summary { font-size: 10pt; color: #444; margin-top: 6px; padding: 10px 14px; background: #f7f7f7; border-left: 3px solid ${FOM_RED}; }
+      .sheet-summary { font-size: 10pt; color: #444; margin-top: 6px; padding: 10px 14px; background: #f7f7f7; border-left: 3px solid ${ACCENT_CYAN}; }
     </style>
     <h1>${escHtml(d.title || "Hero Selects")}</h1>
     <p>${escHtml(d.client || "")}${d.subject ? " — " + escHtml(d.subject) : ""}</p>

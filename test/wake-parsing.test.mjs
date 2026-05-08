@@ -3,17 +3,17 @@
  *  WakeParse is on the hot path of every passive cycle: Whisper transcribes,
  *  containsWake() decides whether the operator triggered Jarvis. A regex
  *  drift here means either every utterance triggers (false positive
- *  paranoia) or nothing triggers (Adam said "hey flat-out" all night and
+ *  paranoia) or nothing triggers (operator said "hey jarvis" all night and
  *  nothing happened — exactly the bug we hit when WHISPER_URL was missing).
  *
  *  Tests pin:
  *    - canonical wake-phrase forms (with + without hyphen, all-lower, mixed case)
- *    - common Whisper mishearings caught by FLATOUT_FUZZY_PATTERNS
+ *    - common Whisper mishearings caught by JARVIS_FUZZY_PATTERNS
  *    - extractQuery strip of wake + leading filler
  *    - quickExtractSubject for "of/from the X" phrasings
  *    - isAffirmative / isDismissal helpers used by the inbox + conversation
  *      follow-up paths
- *    - setBrand() with non-Flat-Out agent names — fuzzy patterns must NOT
+ *    - setBrand() with non-Jarvis agent names — fuzzy patterns must NOT
  *      apply when the brand is something else
  */
 
@@ -21,24 +21,23 @@ import { describe, expect, it, beforeEach } from "vitest";
 import * as WakeParse from "../wake-parsing.js";
 
 beforeEach(() => {
-  /* Each test starts with the default Flat-Out brand state. setBrand is
+  /* Each test starts with the default Jarvis brand state. setBrand is
    * idempotent so repeated calls reset cleanly. */
   WakeParse.setBrand({
-    agentName: "Flat-Out",
-    wakeVariants: ["flat-out", "flat out", "flatout", "flatten out"],
+    agentName: "Jarvis",
+    wakeVariants: ["jarvis", "hey jarvis", "jervis", "jarviz"],
   });
 });
 
 describe("WakeParse.containsWake — canonical forms", () => {
   const positives = [
-    "hey flat-out",
-    "Hey Flat-Out",
-    "hey flat out",
-    "hey flatout",
-    "HEY FLATOUT",
-    "flat-out, what's the time?",
-    "ok flat-out are you there",
-    "hi flat-out can you help",
+    "hey jarvis",
+    "Hey Jarvis",
+    "HEY JARVIS",
+    "jarvis, what's the time?",
+    "ok jarvis are you there",
+    "hi jarvis can you help",
+    "jarvis",
   ];
   for (const text of positives) {
     it(`matches "${text}"`, () => {
@@ -48,18 +47,17 @@ describe("WakeParse.containsWake — canonical forms", () => {
 });
 
 describe("WakeParse.containsWake — fuzzy mishearings (Whisper)", () => {
-  /* Real shapes Whisper has produced for "hey flat-out" on quiet / accented
-   * speech. FLATOUT_FUZZY_PATTERNS exists specifically for this — drift
-   * here means Adam shouts at the kiosk and nothing answers. */
+  /* Real shapes Whisper has produced for "hey jarvis" on quiet / accented
+   * speech. JARVIS_FUZZY_PATTERNS exists specifically for this — drift
+   * here means the operator shouts at the kiosk and nothing answers. */
   const positives = [
-    "hey flap out",
-    "hey flag out",
-    "hey flat ow",
-    "hi flap",
-    "hey, flat owt",
-    "ay flat-out",
-    "yo flat out",
-    "flatout",
+    "hey jervis",
+    "hey jarviz",
+    "hey jarves",
+    "ay jarvis",
+    "hi jarvis",
+    "ok jervis",
+    "yo jarvis",
   ];
   for (const text of positives) {
     it(`fuzzy-matches "${text}"`, () => {
@@ -70,12 +68,12 @@ describe("WakeParse.containsWake — fuzzy mishearings (Whisper)", () => {
 
 describe("WakeParse.containsWake — negatives", () => {
   /* Phrases that should NOT trigger wake. False-positives mean Jarvis
-   * jumps in mid-conversation (Adam's on a phone call etc) — terrible UX. */
+   * jumps in mid-conversation (operator's on a phone call etc) — terrible UX. */
   const negatives = [
     "",
     "the weather is nice today",
     "what time is the meeting",
-    "looking at flat surfaces",       // contains 'flat' but not the wake
+    "looking at flat surfaces",
     "I had an out-of-office reply",
     "thanks for the update",
   ];
@@ -86,29 +84,29 @@ describe("WakeParse.containsWake — negatives", () => {
   }
 });
 
-describe("WakeParse.containsWake — non-Flat-Out brand", () => {
-  it("uses only configured wakeVariants when agent isn't Flat-Out", () => {
+describe("WakeParse.containsWake — non-Jarvis brand", () => {
+  it("uses only configured wakeVariants when agent isn't Jarvis", () => {
     WakeParse.setBrand({ agentName: "Astro", wakeVariants: ["hey astro", "astro"] });
     expect(WakeParse.containsWake("hey astro")).toBe(true);
     expect(WakeParse.containsWake("astro, what's the time?")).toBe(true);
-    /* The Flat-Out fuzzy patterns must NOT apply to other brands. */
-    expect(WakeParse.containsWake("hey flap out")).toBe(false);
-    expect(WakeParse.containsWake("hey flat out")).toBe(false);
+    /* The Jarvis fuzzy patterns must NOT apply to other brands. */
+    expect(WakeParse.containsWake("hey jervis")).toBe(false);
+    expect(WakeParse.containsWake("hey jarviz")).toBe(false);
   });
 });
 
 describe("WakeParse.extractQuery", () => {
   it("strips wake + leading filler", () => {
-    expect(WakeParse.extractQuery("hey flat-out what's the time")).toBe("what's the time");
-    expect(WakeParse.extractQuery("Flat-Out please show me the diary")).toBe("show me the diary");
-    expect(WakeParse.extractQuery("flat out can you edit the shoot")).toBe("edit the shoot");
+    expect(WakeParse.extractQuery("hey jarvis what's the time")).toBe("what's the time");
+    expect(WakeParse.extractQuery("Jarvis please show me the diary")).toBe("show me the diary");
+    expect(WakeParse.extractQuery("jarvis can you check the weather")).toBe("check the weather");
   });
   it("handles trailing punctuation in wake variants", () => {
-    expect(WakeParse.extractQuery("hey flat-out, what's the weather")).toBe(", what's the weather");
+    expect(WakeParse.extractQuery("hey jarvis, what's the weather")).toBe(", what's the weather");
   });
   it("returns empty when input is just the wake word", () => {
-    expect(WakeParse.extractQuery("flat-out")).toBe("");
-    expect(WakeParse.extractQuery("hey flat-out")).toBe("");
+    expect(WakeParse.extractQuery("jarvis")).toBe("");
+    expect(WakeParse.extractQuery("hey jarvis")).toBe("");
   });
   it("safe on empty / null / undefined", () => {
     expect(WakeParse.extractQuery("")).toBe("");
@@ -162,7 +160,7 @@ describe("WakeParse.isDismissal", () => {
     "no more questions",
     "goodbye",
     "bye",
-    "bye flat-out",
+    "bye jarvis",
     "stop listening",
     "quit listening",
   ];
@@ -182,8 +180,8 @@ describe("WakeParse.isDismissal", () => {
 describe("WakeParse.brandState diagnostic", () => {
   it("exposes the loaded agent name + wake variants", () => {
     const s = WakeParse.brandState();
-    expect(s.agentName).toBe("Flat-Out");
-    expect(s.wakeVariants).toEqual(expect.arrayContaining(["flat-out", "flat out", "flatout"]));
+    expect(s.agentName).toBe("Jarvis");
+    expect(s.wakeVariants).toEqual(expect.arrayContaining(["jarvis", "hey jarvis"]));
   });
   it("returns a copy, not the live array", () => {
     const s = WakeParse.brandState();

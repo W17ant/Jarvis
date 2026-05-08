@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-daemon.sh - Register Flat-Out HUD as a launchd LaunchAgent.
+# install-daemon.sh - Register Jarvis HUD as a launchd LaunchAgent.
 # After this runs, the kiosk's services start at every login + survive crashes.
 #
 # Usage:
@@ -8,7 +8,7 @@
 #
 # What this DOES:
 #   - Substitutes {{PROJECT_DIR}} into the plist template
-#   - Copies it to ~/Library/LaunchAgents/com.flatoutmedia.hud.plist
+#   - Copies it to ~/Library/LaunchAgents/com.jarvis.hud.plist
 #   - launchctl bootstrap-loads the agent
 #
 # What this does NOT do:
@@ -17,9 +17,9 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-TEMPLATE="$HERE/tools/launchd/com.flatoutmedia.hud.plist.template"
-TARGET="$HOME/Library/LaunchAgents/com.flatoutmedia.hud.plist"
-LABEL="com.flatoutmedia.hud"
+TEMPLATE="$HERE/tools/launchd/com.jarvis.hud.plist.template"
+TARGET="$HOME/Library/LaunchAgents/com.jarvis.hud.plist"
+LABEL="com.jarvis.hud"
 
 if [[ ! -f "$TEMPLATE" ]]; then
   echo "✗ template missing: $TEMPLATE" >&2
@@ -44,7 +44,7 @@ if [[ "${1:-}" != "--no-start" ]]; then
   echo "✓ loaded $LABEL — services start now and on every login"
   echo ""
   echo "Tail logs:"
-  echo "  tail -f /tmp/flat-out-daemon.log /tmp/flat-out-{static,bridge,kokoro,whisper}.log"
+  echo "  tail -f /tmp/jarvis-daemon.log /tmp/jarvis-{static,bridge,kokoro,whisper}.log"
   echo ""
   echo "Disable temporarily:  launchctl bootout gui/$UID/$LABEL"
   echo "Re-enable:            launchctl bootstrap gui/$UID $TARGET"

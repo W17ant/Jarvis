@@ -74,7 +74,7 @@ export function handleTaskEvent(m) {
 export function handleVideoEditComplete(m) {
   if (!m.data?.finalUrl) return;
   const url = `http://localhost:8766${m.data.finalUrl}`;
-  console.log(`[Flat-Out] video edit complete: ${m.data.subject} (${m.data.durationSec}s build)`);
+  console.log(`[Jarvis] video edit complete: ${m.data.subject} (${m.data.durationSec}s build)`);
   _queueModal(() => _modal?.showVideo(url, { subject: m.data.subject, runId: m.data.runId }),
               `Your ${m.data.subject || "shoot"} teaser is ready.`);
 }
@@ -84,14 +84,14 @@ export function handleVideoEditError(m) {
    * on { data: { error } }. Read both for compatibility while older code
    * paths exist. */
   const err = m.data?.error || m.error || "(no detail)";
-  console.warn("[Flat-Out] video edit failed:", err);
+  console.warn("[Jarvis] video edit failed:", err);
   _speak("The edit pipeline ran into a problem. Check the bridge logs.");
 }
 
 export function handlePdfComplete(m) {
   if (!m.data?.url) return;
   const url = `http://localhost:8766${m.data.url}`;
-  console.log(`[Flat-Out] pdf ready: ${m.data.template} (${m.data.sizeKB}KB)`);
+  console.log(`[Jarvis] pdf ready: ${m.data.template} (${m.data.sizeKB}KB)`);
   _queueModal(() => _modal?.showPdf(url, { template: m.data.template, title: m.data.title }), null);
 }
 
@@ -102,7 +102,7 @@ export function handleThumbnailComplete(m) {
    * don't need a progress spinner — by the time Daniel finishes saying
    * "thumbnail ready" the image is up. */
   const url = `http://localhost:8766${m.data.url}`;
-  console.log(`[Flat-Out] thumbnail ready: ${m.data.headline} (${m.data.sizeKB}KB)`);
+  console.log(`[Jarvis] thumbnail ready: ${m.data.headline} (${m.data.sizeKB}KB)`);
   _queueModal(() => _modal?.showThumbnail(url, { headline: m.data.headline, subhead: m.data.subhead }), null);
 }
 
@@ -112,7 +112,7 @@ export function handleInboxDropped(m) {
    * file lands. Speak a short prompt offering the relevant action —
    * operator can ignore (no answer = no action) or say yes to trigger
    * the appropriate tool. */
-  console.log(`[Flat-Out] inbox: ${m.data.name} (${m.data.kind}, ${m.data.sizeKB}KB)`);
+  console.log(`[Jarvis] inbox: ${m.data.name} (${m.data.kind}, ${m.data.sizeKB}KB)`);
   const verb = m.data.kind === "image" ? "describe it"
              : m.data.kind === "video" ? "score it for the trailer"
              : m.data.kind === "pdf"   ? "summarise it"

@@ -101,7 +101,7 @@ async function handleTimerFire(msg) {
   try {
     const r = await fetch("http://localhost:8767/tts", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text: `Timer up — ${label || "kitchen timer"}`, voice: localStorage.getItem("flatout.voice") || "bm_daniel" }),
+      body: JSON.stringify({ text: `Timer up — ${label || "kitchen timer"}`, voice: localStorage.getItem("jarvis.voice") || "bm_daniel" }),
     });
     if (r.ok) {
       const wav = await r.arrayBuffer();
@@ -112,7 +112,7 @@ async function handleTimerFire(msg) {
       src.connect(ctx.destination); src.start(0);
     }
   } catch (e) {
-    console.warn("[Flat-Out] timer TTS failed:", e.message);
+    console.warn("[Jarvis] timer TTS failed:", e.message);
   }
 }
 

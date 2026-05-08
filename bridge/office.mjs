@@ -1,6 +1,6 @@
 /** office.mjs - Microsoft Office document generators (pptx / docx / xlsx).
  *
- *  Closes the FOM workflow gap where the kiosk could generate rich PDFs
+ *  Closes the workflow gap where the kiosk could generate rich PDFs
  *  but couldn't ship a client deck or shoot log in the formats the
  *  operator's clients actually expect. Each generator produces a real
  *  Office file (Office Open XML under the hood) — no PDFs-with-Office-
@@ -16,7 +16,7 @@
  *  + filename so the LLM can speak it back or hand off to other tools.
  *
  *  Brand colours come from config/brand.json so the visual identity
- *  stays consistent with the HUD's accent. Falls back to FOM red if
+ *  stays consistent with the HUD's accent. Falls back to default cyan if
  *  the brand isn't loaded.
  */
 
@@ -35,12 +35,12 @@ const DOCX_DIR = path.join(PROJECT_DIR, "output", "docx");
 const XLSX_DIR = path.join(PROJECT_DIR, "output", "xlsx");
 
 /** Read the operator's brand colour from config/brand.json. Falls back to
- *  FOM red on any read error so generators never block on a missing config. */
+ *  Default cyan on any read error so generators never block on a missing config. */
 async function brandHex() {
   try {
     const raw = await fsp.readFile(path.join(PROJECT_DIR, "config", "brand.json"), "utf8");
     const j = JSON.parse(raw);
-    return (j.agency?.redHex || "#E10600").replace(/^#/, "");
+    return (j.agency?.redHex || "#00d4ff").replace(/^#/, "");
   } catch {
     return "E10600";
   }
@@ -53,11 +53,11 @@ async function brandMeta() {
     const raw = await fsp.readFile(path.join(PROJECT_DIR, "config", "brand.json"), "utf8");
     const j = JSON.parse(raw);
     return {
-      agency:  j.agency?.name || "Flat-Out Media",
+      agency:  j.agency?.name || "Jarvis AI",
       tagline: j.agency?.tagline || "we live and breathe automotive",
     };
   } catch {
-    return { agency: "Flat-Out Media", tagline: "we live and breathe automotive" };
+    return { agency: "Jarvis AI", tagline: "we live and breathe automotive" };
   }
 }
 

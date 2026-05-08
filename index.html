@@ -7,24 +7,24 @@
   <title>HUD</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- Default fonts: Oswald + Rubik for body/UI, Anton for the heavy "FLAT-OUT" wordmark
+  <!-- Default fonts: Oswald + Rubik for body/UI, Anton for the display wordmark
        so it matches the marketing logo's black-condensed treatment. JetBrains Mono for tickers. -->
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <!-- Versioned to bust Chrome's CSS cache when styles.css changes. Bump on each release. -->
-  <link rel="stylesheet" href="styles.css?v=20260504" />
+  <link rel="stylesheet" href="styles.css?v=20260508q" />
   <script>
   /* Why: brand-bootstrap runs before main scripts so colours, agent name, fonts, and logos
-   * are applied before the user sees the first paint. Falls back to embedded Flat-Out
+   * are applied before the user sees the first paint. Falls back to embedded Jarvis
    * defaults if the bridge isn't up yet. */
   (async () => {
     const apply = (b) => {
       const c = b?.colors || {};
       const f = b?.fonts || {};
       const root = document.documentElement;
-      if (c.primary)      root.style.setProperty("--fom-red", c.primary);
-      if (c.primaryDeep)  root.style.setProperty("--fom-red-deep", c.primaryDeep);
-      if (c.primaryGlow)  root.style.setProperty("--fom-red-glow", c.primaryGlow);
-      if (c.primaryTint)  root.style.setProperty("--fom-red-tint", c.primaryTint);
+      if (c.primary)      root.style.setProperty("--accent", c.primary);
+      if (c.primaryDeep)  root.style.setProperty("--accent-deep", c.primaryDeep);
+      if (c.primaryGlow)  root.style.setProperty("--accent-glow", c.primaryGlow);
+      if (c.primaryTint)  root.style.setProperty("--accent-tint", c.primaryTint);
       if (c.ink0)         root.style.setProperty("--ink-0", c.ink0);
       if (c.ink1)         root.style.setProperty("--ink-1", c.ink1);
       if (c.ink2)         root.style.setProperty("--ink-2", c.ink2);
@@ -33,15 +33,20 @@
       if (f.display)      root.style.setProperty("--font-display", `"${f.display}", "Arial Narrow", system-ui, sans-serif`);
       if (f.body)         root.style.setProperty("--font-body", `"${f.body}", system-ui, sans-serif`);
       if (f.mono)         root.style.setProperty("--font-mono", `"${f.mono}", ui-monospace, monospace`);
-      const name = b?.agent?.name || "Flat-Out";
-      const agency = b?.agency?.name || "Flat-Out Media";
-      const tagline = b?.agency?.tagline || "we live and breathe automotive";
+      const name = b?.agent?.name || "Jarvis";
+      /* Agent label drives any CSS pseudo-element that prints the agent name
+       * (transcript role badge, etc.). Quoted because CSS `content: var(...)`
+       * needs the variable to already include the string quotes. */
+      document.documentElement.style.setProperty("--agent-label", `"${name.toUpperCase()}"`);
+      const agency = b?.agency?.name || "Jarvis AI";
+      const tagline = b?.agency?.tagline || "your voice-first AI assistant";
       document.title = `${name} // HUD`;
       document.querySelectorAll("[data-brand-agent]").forEach(el => el.textContent = name);
       document.querySelectorAll("[data-brand-agency]").forEach(el => { el.textContent = agency; el.setAttribute("alt", agency); });
       document.querySelectorAll("[data-brand-tagline]").forEach(el => el.textContent = tagline);
+      document.querySelectorAll("[data-brand-tagline-big]").forEach(el => el.textContent = tagline.toUpperCase());
       /* Two-line wordmark: split the agency name at the LAST space.
-       * "Flat-Out Media" → "FLAT-OUT" / "MEDIA"
+       * "Jarvis AI" → "JARVIS" / "AI"
        * "Acme Studios"   → "ACME" / "STUDIOS"
        * Single-word names render as primary only with no suffix. */
       const lastSpace = agency.lastIndexOf(" ");
@@ -52,8 +57,11 @@
         el.textContent = suffix.toUpperCase();
         el.style.display = suffix ? "" : "none";
       });
-      const logo = b?.logo?.wordmarkPng || "assets/fom-wordmark.png";
-      document.querySelectorAll("img[data-brand-logo]").forEach(el => el.src = logo);
+      const logo = b?.logo?.wordmarkPng || null;
+      document.querySelectorAll("img[data-brand-logo]").forEach(el => {
+        if (logo) { el.src = logo; el.hidden = false; }
+        else { el.removeAttribute("src"); el.hidden = true; }
+      });
       const wakeLabel = document.getElementById("wakeBtnLabel");
       const wake = (b?.agent?.wakePhrase || `hey ${name.toLowerCase()}`).toUpperCase();
       if (wakeLabel) wakeLabel.textContent = `TAP / SAY "${wake}"`;
@@ -71,8 +79,8 @@
      * configuration. Reads the active profile's accentColor from localStorage
      * (Storage namespace prefix), derives deep/glow/tint, applies as CSS vars. */
     try {
-      const activeProfile = localStorage.getItem("flatout.activeProfile") || "default";
-      const hex = localStorage.getItem(`flatout.${activeProfile}.accentColor`);
+      const activeProfile = localStorage.getItem("jarvis.activeProfile") || "default";
+      const hex = localStorage.getItem(`jarvis.${activeProfile}.accentColor`);
       if (hex && /^#[0-9a-f]{6}$/i.test(hex)) {
         const root = document.documentElement;
         const r2 = parseInt(hex.slice(1, 3), 16);
@@ -83,10 +91,10 @@
           const toHex = (c) => c.toString(16).padStart(2, "0").toUpperCase();
           return "#" + toHex(adj(r2)) + toHex(adj(g2)) + toHex(adj(b2));
         };
-        root.style.setProperty("--fom-red", hex.toUpperCase());
-        root.style.setProperty("--fom-red-deep", shade(-0.45));
-        root.style.setProperty("--fom-red-glow", `rgba(${r2},${g2},${b2},0.55)`);
-        root.style.setProperty("--fom-red-tint", `rgba(${r2},${g2},${b2},0.06)`);
+        root.style.setProperty("--accent", hex.toUpperCase());
+        root.style.setProperty("--accent-deep", shade(-0.45));
+        root.style.setProperty("--accent-glow", `rgba(${r2},${g2},${b2},0.55)`);
+        root.style.setProperty("--accent-tint", `rgba(${r2},${g2},${b2},0.06)`);
       }
     } catch {}
   })();
@@ -107,15 +115,15 @@
     <header class="calendar" aria-label="Calendar">
       <div class="calendar__days" id="calendarDays"></div>
       <div class="calendar__brand">
-        <!-- Why: replaces the legacy fom-wordmark.png (white text on transparent → too thin
+        <!-- Why: replaces the legacy wordmark.png (white text on transparent → too thin
              on the HUD's black backdrop). Renders the marketing logo's heavy black-condensed
-             "FLAT-OUT" + red "MEDIA" treatment via Anton + Oswald so it carries the same
+             wordmark treatment via Anton + Oswald so it carries the same
              visual weight at any zoom. The brand bootstrap rewrites these spans on white-label installs. -->
         <div class="calendar__brand-text" data-brand-agency-block>
-          <span class="calendar__brand-text-primary" data-brand-agency-primary>FLAT-OUT</span>
-          <span class="calendar__brand-text-suffix" data-brand-agency-suffix>MEDIA</span>
+          <span class="calendar__brand-text-primary" data-brand-agency-primary>JARVIS</span>
+          <span class="calendar__brand-text-suffix" data-brand-agency-suffix>AI</span>
         </div>
-        <span class="calendar__brand-tag" data-brand-tagline>we live and breathe automotive</span>
+        <span class="calendar__brand-tag" data-brand-tagline>your voice-first AI assistant</span>
       </div>
       <!-- Service health pips: bridge / ollama / kokoro / whisper. Polled every 15s.
            Green = up, amber = slow/unreachable, dim = unknown. Read-only at-a-glance. -->
@@ -166,75 +174,141 @@
       </div>
     </div>
 
-    <!-- TOP-LEFT: month + big day -->
-    <section class="panel panel--month" data-widget-id="month" aria-label="Date">
-      <div class="ring ring--month">
-        <svg viewBox="0 0 200 200" class="ring__svg">
-          <circle class="ring__track" cx="100" cy="100" r="92" />
-          <circle class="ring__fill ring__fill--month" cx="100" cy="100" r="92" />
-        </svg>
-        <div class="ring__inner">
-          <div class="ring__label" id="monthName">MAY</div>
-          <div class="ring__value ring__value--xl" id="dayNumber">01</div>
-        </div>
-      </div>
-    </section>
+    <!-- (panel--month removed in white-label cleanup — the date was already
+         visible in the calendar strip + clock panel + ghosted backdrop, three
+         places was redundant. CORE TELEMETRY now claims the full left rail
+         from row 2 to row 4.) -->
 
-    <!-- LEFT-MID: CPU / GPU / RAM as three round car-pod dials in a horizontal row.
-         Why: half-arcs were stacking and pushing the rest of the column out of bounds.
-         Round dials are smaller, evoke a dashboard instrument cluster, and read as a
-         tight matched set. Each circle uses stroke-dasharray to animate the fill. -->
+    <!-- LEFT-MID/BOT: CORE TELEMETRY spanning rows 3-4. Six round dials in
+         three rows of two pairs: CPU usage / CPU °C, GPU usage / GPU thermal,
+         RAM / VRAM. Three sparklines below. Stat row at the bottom.
+         CPU °C requires `osx-cpu-temp` (Intel) or iStats CLI on Apple Silicon
+         — falls back to "—°" when unreachable. GPU °C isn't exposed without
+         root, so the GPU pair shows pmset thermal pressure level instead. -->
     <section class="panel panel--system" data-widget-id="system" aria-label="System">
-      <div class="syspods">
+      <div class="panel__title">CORE TELEMETRY</div>
+      <!-- Three pairs in 3 rows × 2 cols. Each pair is metric + matching
+           thermal/secondary so the operator reads "what's loaded + how hot". -->
+      <div class="syspods syspods--pairs">
+        <!-- Row 1: CPU usage + CPU °C -->
         <div class="syspod">
           <svg viewBox="0 0 100 100" class="syspod__svg">
             <circle cx="50" cy="50" r="42" class="syspod__track" />
             <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--cpu" id="cpuArc" />
           </svg>
           <div class="syspod__readout">
-            <div class="syspod__value" id="cpuValue">— %</div>
+            <div class="syspod__value" id="cpuValue">—%</div>
             <div class="syspod__label">CPU</div>
           </div>
         </div>
+        <div class="syspod" title="CPU temperature — install osx-cpu-temp (Intel) or iStats CLI to enable on Apple Silicon">
+          <svg viewBox="0 0 100 100" class="syspod__svg">
+            <circle cx="50" cy="50" r="42" class="syspod__track" />
+            <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--cputemp" id="cpuTempArc" />
+          </svg>
+          <div class="syspod__readout">
+            <div class="syspod__value" id="cpuTempVal">—°</div>
+            <div class="syspod__label">CPU °C</div>
+          </div>
+        </div>
+
+        <!-- Row 2: GPU usage + GPU thermal level (pmset pressure → text + dial) -->
         <div class="syspod">
           <svg viewBox="0 0 100 100" class="syspod__svg">
             <circle cx="50" cy="50" r="42" class="syspod__track" />
             <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--gpu" id="gpuArc" />
           </svg>
           <div class="syspod__readout">
-            <div class="syspod__value" id="gpuValue">— %</div>
+            <div class="syspod__value" id="gpuValue">—%</div>
             <div class="syspod__label">GPU</div>
-            <div class="syspod__sub" id="gpuTherm">—</div>
           </div>
         </div>
+        <div class="syspod" title="GPU temperature via macmon (sudoless Apple Silicon SMC reader)">
+          <svg viewBox="0 0 100 100" class="syspod__svg">
+            <circle cx="50" cy="50" r="42" class="syspod__track" />
+            <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--gputemp" id="gpuTempArc" />
+          </svg>
+          <div class="syspod__readout">
+            <div class="syspod__value" id="gpuTempVal">—°</div>
+            <div class="syspod__label">GPU °C</div>
+          </div>
+        </div>
+
+        <!-- Row 3: RAM + VRAM (in-use against allocated) -->
         <div class="syspod">
           <svg viewBox="0 0 100 100" class="syspod__svg">
             <circle cx="50" cy="50" r="42" class="syspod__track" />
             <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--ram" id="ramArc" />
           </svg>
           <div class="syspod__readout">
-            <div class="syspod__value" id="ramValue">— GB</div>
+            <div class="syspod__value" id="ramValue">—%</div>
             <div class="syspod__label">RAM</div>
           </div>
         </div>
+        <div class="syspod" title="GPU memory in use against allocated">
+          <svg viewBox="0 0 100 100" class="syspod__svg">
+            <circle cx="50" cy="50" r="42" class="syspod__track" />
+            <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--vram" id="vramArc" />
+          </svg>
+          <div class="syspod__readout">
+            <div class="syspod__value" id="vramVal">—</div>
+            <div class="syspod__label">VRAM</div>
+          </div>
+        </div>
+
+        <!-- Row 4: NET DOWN + NET UP throughput. Dial scaled 0..10 MB/s
+             where 10MB/s reads ~100% — anything above clips. Readout shows
+             the live KB/s or MB/s value via the bridge stats payload. -->
+        <div class="syspod" title="Network download throughput (10 MB/s = 100%)">
+          <svg viewBox="0 0 100 100" class="syspod__svg">
+            <circle cx="50" cy="50" r="42" class="syspod__track" />
+            <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--netdn" id="netDnArc" />
+          </svg>
+          <div class="syspod__readout">
+            <div class="syspod__value syspod__value--small" id="netDnVal">—</div>
+            <div class="syspod__label">NET ↓</div>
+          </div>
+        </div>
+        <div class="syspod" title="Network upload throughput (10 MB/s = 100%)">
+          <svg viewBox="0 0 100 100" class="syspod__svg">
+            <circle cx="50" cy="50" r="42" class="syspod__track" />
+            <circle cx="50" cy="50" r="42" class="syspod__fill syspod__fill--netup" id="netUpArc" />
+          </svg>
+          <div class="syspod__readout">
+            <div class="syspod__value syspod__value--small" id="netUpVal">—</div>
+            <div class="syspod__label">NET ↑</div>
+          </div>
+        </div>
       </div>
+
+      <!-- 60-second sparkline history. Three rows: CPU, GPU, RAM. -->
+      <div class="sparkrows">
+        <div class="sparkrow">
+          <span class="sparkrow__k">CPU</span>
+          <canvas class="sparkrow__canvas" id="cpuSpark" width="220" height="24" data-metric="cpu"></canvas>
+          <span class="sparkrow__v" id="cpuSparkV">—</span>
+        </div>
+        <div class="sparkrow">
+          <span class="sparkrow__k">GPU</span>
+          <canvas class="sparkrow__canvas" id="gpuSpark" width="220" height="24" data-metric="gpu"></canvas>
+          <span class="sparkrow__v" id="gpuSparkV">—</span>
+        </div>
+        <div class="sparkrow">
+          <span class="sparkrow__k">RAM</span>
+          <canvas class="sparkrow__canvas" id="ramSpark" width="220" height="24" data-metric="ram"></canvas>
+          <span class="sparkrow__v" id="ramSparkV">—</span>
+        </div>
+      </div>
+
       <div class="stat-row">
         <div class="stat"><span class="stat__k">NET</span><span class="stat__v" id="netValue">—</span></div>
-        <div class="stat"><span class="stat__k">DSK</span><span class="stat__v" id="dskValue">— TB</span></div>
-        <div class="stat"><span class="stat__k">GPU MEM</span><span class="stat__v" id="gpuMemValue">—</span></div>
+        <div class="stat"><span class="stat__k">DSK</span><span class="stat__v" id="dskValue">—</span></div>
+        <div class="stat"><span class="stat__k">LOAD</span><span class="stat__v" id="loadVal">—</span></div>
       </div>
     </section>
 
-    <!-- LEFT-BOTTOM: comms / news strip -->
-    <section class="panel panel--comms" data-widget-id="comms" aria-label="Communications">
-      <div class="panel__title">COMMS</div>
-      <ul class="comms" id="commsList">
-        <li>3 unread // editorial inbox</li>
-        <li>shoot brief // the SUV</li>
-        <li>retouch queue // 14 files</li>
-        <li>social schedule // 06 pending</li>
-      </ul>
-    </section>
+    <!-- (COMMS panel removed in white-label rebrand — was hardcoded fixtures.
+         The system panel now claims rows 3-4 to host the expanded telemetry.) -->
 
     <!-- CENTER: speedometer + voice state. The signature element. -->
     <section class="panel panel--core" aria-label="Core">
@@ -252,55 +326,123 @@
       </div>
 
       <div class="speedo" id="speedo">
-        <!-- FOM brand blade layered behind animated overlays -->
+        <!-- Instrument-cluster centerpiece — six layers reading outside-in:
+             1. dotted calibration ring with tick marks every 9°
+             2. per-core CPU capsules (populated by hud.js)
+             3. heavy outer ring BROKEN at 4 cardinal points where labels sit
+             4. dashed mid ring (slow CCW)
+             5. bright inner ring
+             6. central voice waveform (radial spokes, mic-RMS / TTS amplitude)
+             Plus: asymmetric anchor tag on the LEFT, cardinal compass markers,
+             scan line sweeping the right hemisphere only.
+             Operating vocabulary, not decoration. -->
         <div class="speedo__brand-mark" aria-hidden="true"></div>
-        <!-- Outer rotating ring -->
-        <svg viewBox="0 0 600 600" class="speedo__svg">
+        <svg viewBox="0 0 600 600" class="speedo__svg" preserveAspectRatio="xMidYMid meet">
           <defs>
-            <linearGradient id="redGrad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#ff1a1a" />
-              <stop offset="100%" stop-color="#a30000" />
-            </linearGradient>
-            <filter id="glow"><feGaussianBlur stdDeviation="4" /></filter>
+            <radialGradient id="reactorCore" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"  stop-color="#ffffff" stop-opacity="1" />
+              <stop offset="35%" stop-color="#00d4ff" stop-opacity="0.9" />
+              <stop offset="100%" stop-color="#0077a8" stop-opacity="0" />
+            </radialGradient>
+            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="4" />
+            </filter>
+            <filter id="coreGlow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="14" />
+            </filter>
           </defs>
 
-          <!-- Tick marks around the dial -->
+          <!-- Backwards-compat anchors used by hud.js (no visual content) -->
           <g id="speedoTicks"></g>
-
-          <!-- Concentric rings -->
-          <circle cx="300" cy="300" r="270" class="speedo__ring speedo__ring--outer" />
-          <circle cx="300" cy="300" r="240" class="speedo__ring speedo__ring--mid" />
-          <circle cx="300" cy="300" r="210" class="speedo__ring speedo__ring--inner" />
-
-          <!-- Animated arc segments (state-driven) -->
-          <circle cx="300" cy="300" r="255" class="speedo__arc speedo__arc--a" />
-          <circle cx="300" cy="300" r="225" class="speedo__arc speedo__arc--b" />
-
-          <!-- Numerals 0-200 around the lower hemisphere -->
           <g id="speedoNumerals"></g>
 
-          <!-- Needle: shaped like the FOM blade — tapered curved wedge, brand red, glowing -->
-          <g id="needle" transform="rotate(-120 300 300)">
-            <!-- Why: two cubic curves form a leaf/blade shape: 14px wide at base, tapering to a sharp tip,
-                 with a subtle outward curve on the trailing edge to match the FOM mark's swoosh. -->
-            <path d="M 287 300
-                     C 290 230, 294 150, 299 78
-                     L 301 78
-                     C 308 150, 313 230, 316 300
-                     Z"
-                  class="speedo__needle-blade" />
-            <circle cx="300" cy="300" r="14" class="speedo__hub" />
-            <circle cx="300" cy="300" r="6" class="speedo__hub-inner" />
+          <!-- ─── Layer 1: dotted calibration ring + tick marks ───
+               Outermost ring, finely dotted, with tick marks every 9° (40 ticks
+               total). Reads as "calibration scale" — the technical-instrument
+               cue. Static. -->
+          <circle cx="300" cy="300" r="288" class="ic-cal-ring" />
+          <g id="icCalTicks" class="ic-cal-ticks"></g>
+
+          <!-- ─── Layer 2: per-core CPU capsules ───
+               Populated by hud.js once first stats payload lands — one short
+               capsule per CPU core, fill proportional to that core's load. -->
+          <g id="rxCoreArcs"></g>
+
+          <!-- ─── Layer 3: heavy outer ring BROKEN at cardinal positions ───
+               Centre (300,300), radius 255. Chip positions in SVG-angle space
+               (0°=east, CW): NW=225°, NE=315°, SE=45°, SW=135°. Each chip gets
+               a ±7° gap → 14° break. The 4 segments run CW between chips:
+                 top    (NW+7° → NE-7°  i.e. 232° → 308°, through N)
+                 right  (NE+7° → SE-7°  i.e. 322° → 38°, through E)
+                 bottom (SE+7° → SW-7°  i.e. 52° → 128°, through S)
+                 left   (SW+7° → NW-7° i.e. 142° → 218°, through W)
+               All arcs span <180° so large-arc-flag=0; CW so sweep-flag=1. -->
+          <g class="ic-outer-ring">
+            <path class="ic-ring-seg" d="M 143 99 A 255 255 0 0 1 457 99" />
+            <path class="ic-ring-seg" d="M 501 143 A 255 255 0 0 1 501 457" />
+            <path class="ic-ring-seg" d="M 457 501 A 255 255 0 0 1 143 501" />
+            <path class="ic-ring-seg" d="M 99 457 A 255 255 0 0 1 99 143" />
           </g>
 
-          <!-- Center reactor / FOM mark -->
-          <circle cx="300" cy="300" r="50" class="speedo__core" />
-          <circle cx="300" cy="300" r="50" class="speedo__core-glow" filter="url(#glow)" />
-          <!-- Why: tightened the FLAT/OUT stack — bumped FLAT and brought OUT up so the
-               two lines fill the central reactor circle instead of leaving an empty gap. -->
-          <text x="300" y="298" text-anchor="middle" class="speedo__mark">FLAT</text>
-          <text x="300" y="319" text-anchor="middle" class="speedo__mark speedo__mark--small">OUT</text>
+          <!-- ─── Layer 4: dashed mid ring (slow CCW rotation) ─── -->
+          <circle cx="300" cy="300" r="220" class="ic-mid-ring" />
+
+          <!-- ─── Layer 5: bright inner ring ─── -->
+          <circle cx="300" cy="300" r="180" class="ic-inner-ring" />
+
+          <!-- ─── Layer 6: central voice waveform ───
+               64 radial spokes from (300,300), length-modulated by mic RMS or
+               TTS amplitude. Built once by hud.js, lengths animate via stroke-
+               dasharray on each tick. The "alive anchor" of the centerpiece. -->
+          <g id="icVoiceWave"></g>
+
+          <!-- Bright pin at the centre — TTS amplitude target. -->
+          <circle cx="300" cy="300" r="60" class="rx-core-halo" filter="url(#coreGlow)" />
+          <circle cx="300" cy="300" r="11" class="reactor-bright rx-core-spark" />
+
+          <!-- ─── Cardinal compass markers (▲▼◀▶) at N/S/E/W ─── -->
+          <g class="ic-compass" font-family="JetBrains Mono, monospace" font-size="10" fill="#7be7ff" letter-spacing="0.1em">
+            <text x="300" y="32" text-anchor="middle">▲ N</text>
+            <text x="300" y="582" text-anchor="middle">▼ S</text>
+            <text x="32" y="304" text-anchor="middle">◀ W</text>
+            <text x="568" y="304" text-anchor="middle">▶ E</text>
+          </g>
+
+          <!-- ─── Asymmetric anchor tag (LEFT side) ───
+               A clipped tag protruding off the outer ring on the left, reading
+               "CORE-01 // ACTIVE". Breaks the perfect symmetry — gives the eye
+               somewhere specific to land. -->
+          <g class="ic-anchor-tag" transform="translate(70 270)">
+            <path class="ic-anchor-bg" d="M 0 0 L 130 0 L 142 12 L 142 36 L 130 48 L 0 48 Z" />
+            <text x="68" y="18" text-anchor="middle" font-family="Oswald, sans-serif" font-size="11" font-weight="600" fill="#00d4ff" letter-spacing="0.18em">CORE-01</text>
+            <text x="68" y="38" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#e8f4ff" letter-spacing="0.16em" id="icAnchorState">// ACTIVE</text>
+          </g>
+
+          <!-- ─── Right-hemisphere scan line ───
+               A single radial line that sweeps the RIGHT half only (90° to
+               270° going CW through 0°). Asymmetric motion — eye reads it as
+               an "active scanner" not a decorative spinner. -->
+          <g class="ic-scan-r" transform="translate(300 300)">
+            <line x1="0" y1="0" x2="0" y2="-258" class="ic-scan-line" />
+          </g>
+
+          <!-- Backwards-compat hidden needle — hud.js may rotate it. -->
+          <g id="needle" transform="rotate(0 300 300)" style="display:none"></g>
+
+          <!-- Backwards-compat hidden core (legacy CSS still references). -->
+          <circle cx="300" cy="300" r="46" class="speedo__core" style="display:none" />
+          <circle cx="300" cy="300" r="46" class="speedo__core-glow" filter="url(#glow)" style="display:none" />
         </svg>
+
+        <!-- ─── Rim chips (HTML overlay so they can use webfonts cleanly) ───
+             Four chamfered chips at the cardinal break-points, with leader
+             lines drawn via CSS borders. Live values written by hud.js. -->
+        <div class="ic-chips" aria-hidden="true">
+          <div class="ic-chip ic-chip--nw"><span class="ic-chip__k">CORE</span><span class="ic-chip__v" id="icChipCore">—%</span></div>
+          <div class="ic-chip ic-chip--ne"><span class="ic-chip__k">SYS-DIAG</span><span class="ic-chip__v" id="icChipSys">—%</span></div>
+          <div class="ic-chip ic-chip--se"><span class="ic-chip__k">AUDIO</span><span class="ic-chip__v" id="icChipAudio">STBY</span></div>
+          <div class="ic-chip ic-chip--sw"><span class="ic-chip__k">NET-IO</span><span class="ic-chip__v" id="icChipNet">— KB/s</span></div>
+        </div>
 
         <!-- State readout below dial -->
         <div class="speedo__state" id="stateReadout">
@@ -319,7 +461,7 @@
         <span class="settings-btn__bracket settings-btn__bracket--tr"></span>
         <span class="settings-btn__bracket settings-btn__bracket--bl"></span>
         <span class="settings-btn__bracket settings-btn__bracket--br"></span>
-        <span class="settings-btn__label">TUNE</span>
+        <span class="settings-btn__label">SETTINGS</span>
       </button>
     </section>
 
@@ -330,7 +472,7 @@
         <div class="weather__loc" id="weatherLoc">MANCHESTER, UK</div>
         <div class="weather__now">
           <img class="weather__icon" id="weatherIcon" src="assets/weather-icons/partly-cloudy-day.svg" alt="" aria-hidden="true"
-               onerror="this.onerror=null; console.warn('[Flat-Out] today weather icon failed to load:', this.src); this.src='assets/weather-icons/cloudy.svg';" />
+               onerror="this.onerror=null; console.warn('[Jarvis] today weather icon failed to load:', this.src); this.src='assets/weather-icons/cloudy.svg';" />
           <div class="weather__readout">
             <span class="weather__temp" id="weatherTemp">14°</span>
             <span class="weather__cond" id="weatherCond">PARTLY CLOUDED</span>
@@ -344,8 +486,9 @@
     <section class="panel panel--clock" data-widget-id="clock" aria-label="Time">
       <div class="clock-split">
         <div class="clock-split__time">
-          <div class="clock" id="clock">00:00</div>
-          <div class="clock__sec" id="clockSec">:00</div>
+          <div class="clock-line">
+            <span class="clock" id="clock">00:00</span><span class="clock__sec" id="clockSec">:00</span>
+          </div>
           <div class="clock__date" id="clockDate">— — —</div>
         </div>
         <div class="clock-split__diary" aria-label="Today's diary">
@@ -363,7 +506,7 @@
     <!-- BOTTOM: audio waveform / network telemetry. The ghosted tagline sits behind the
          waveform canvas so the FOM phrase reads as a faint watermark across the bottom. -->
     <section class="panel panel--telemetry" aria-label="Telemetry">
-      <div class="telemetry__tagline" data-brand-tagline-big>STEPPING YOUR AUTOMOTIVE BUSINESS UP A GEAR</div>
+      <div class="telemetry__tagline" data-brand-tagline-big>YOUR VOICE-FIRST AI ASSISTANT</div>
       <canvas id="waveform" class="waveform" width="1200" height="80"></canvas>
       <!-- Task strip: covers the waveform when long-running work is in flight.
            One row per active task with progress bar + ETA. Hidden when empty. -->
@@ -386,7 +529,7 @@
     <div class="setup" id="setupModal" hidden role="dialog" aria-modal="true" aria-label="First-run setup">
       <div class="setup__panel">
         <div class="setup__brand">
-          <img src="assets/fom-wordmark.png" alt="Flat-Out Media" class="setup__logo" data-brand-logo data-brand-agency />
+          <img alt="Jarvis AI" class="setup__logo" data-brand-logo data-brand-agency hidden />
           <div class="setup__sub">FIRST-RUN SETUP</div>
         </div>
         <div class="setup__welcome">
@@ -436,7 +579,7 @@
 
         <div class="setup__field">
           <label>Agency name (shown in voice persona)</label>
-          <input id="setupAgency" type="text" placeholder="Flat-Out Media" />
+          <input id="setupAgency" type="text" placeholder="Jarvis AI" />
         </div>
 
         <button class="setup__submit" id="setupSubmit" type="button">GET STARTED</button>
@@ -549,42 +692,24 @@
           <small>Default off for privacy; switch on when demoing or you want the operator inlay</small>
         </div>
 
-        <!-- Social handles — per-platform fields. Replaces the old "Social handle"
-             single string. Each platform is optional; blank = "we don't post there".
-             Saved to brand.json as agency.socials.{platform}; the watermark + agency
-             boilerplate code picks Instagram → X → TikTok → Facebook as the primary. -->
-        <div class="settings-modal__field">
-          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Social handles</label>
-          <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">Instagram</span>
-            <input id="settingsSocialInstagram" type="text" placeholder="@flatoutmediauk" autocomplete="off" />
-          </div>
-          <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">Facebook</span>
-            <input id="settingsSocialFacebook" type="text" placeholder="flatoutmedia (page slug)" autocomplete="off" />
-          </div>
-          <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">X</span>
-            <input id="settingsSocialX" type="text" placeholder="@flatoutmediauk" autocomplete="off" />
-          </div>
-          <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">TikTok</span>
-            <input id="settingsSocialTiktok" type="text" placeholder="@flatoutmedia" autocomplete="off" />
-          </div>
-          <small>Used in watermark credit lines, contact-sheet footers, and agency boilerplate. Skip any platform you don't use.</small>
-        </div>
+        <!-- (Social handles section removed in white-label cleanup — was
+             FOM agency-specific brand-asset metadata. Generic Jarvis users
+             don't need it; agency-specific forks can re-add a custom field.) -->
 
+        <!-- Folder roots — where Jarvis reads source material from + writes
+             generated artefacts to. Generic vocabulary so the kiosk works
+             for any operator workflow (not just the photo-agency one). -->
         <div class="settings-modal__field">
-          <label><img src="assets/icons/folder.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Folders</label>
+          <label><img src="assets/icons/folder.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Folder roots</label>
           <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">Shoots in</span>
-            <input id="settingsShootsDir" type="text" placeholder="Shoots root — e.g. /Volumes/Workdrive/Shoots or shoots" autocomplete="off" />
+            <span class="settings-modal__folder-label">Working files in</span>
+            <input id="settingsShootsDir" type="text" placeholder="Source files root — e.g. ~/Documents/Jarvis or workdir" autocomplete="off" />
           </div>
           <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">Output to</span>
-            <input id="settingsOutputDir" type="text" placeholder="Output root — e.g. /Volumes/Workdrive/Output or output" autocomplete="off" />
+            <span class="settings-modal__folder-label">Generated artefacts to</span>
+            <input id="settingsOutputDir" type="text" placeholder="Output root — e.g. ~/Documents/Jarvis/output" autocomplete="off" />
           </div>
-          <small id="settingsFoldersHint">Output auto-organises into <code>youtube/thumbnails</code>, <code>youtube/shorts</code>, <code>instagram/reels</code>, <code>instagram/posts</code>, <code>tiktok</code>, <code>brand-packs</code>, <code>pdf</code>, <code>watermarked</code>, <code>aspects</code>, <code>portraits</code>, <code>contactsheets</code>, <code>premiere-renders</code>, <code>videos</code>. Absolute paths or paths relative to the project.</small>
+          <small id="settingsFoldersHint">Generated files auto-organise into subfolders by type (<code>pdf</code>, <code>docx</code>, <code>xlsx</code>, <code>pptx</code>, <code>youtube</code>, <code>brand-packs</code>, <code>videos</code>, etc). Absolute paths or paths relative to the project root.</small>
         </div>
 
         <!-- Creative style guide — operator's CLAUDE.md equivalent. A markdown
@@ -597,7 +722,7 @@
           <textarea id="settingsCreativeStyle"
                     class="settings-modal__textarea"
                     spellcheck="false"
-                    placeholder="# Editorial voice&#10;&#10;Tone, sentence length, words you use vs avoid, edit pacing… the rules every generated draft should follow.&#10;&#10;Click LOAD TEMPLATE below to start from the Flat-Out example, or type your own."></textarea>
+                    placeholder="# Editorial voice&#10;&#10;Tone, sentence length, words you use vs avoid, edit pacing… the rules every generated draft should follow.&#10;&#10;Click LOAD TEMPLATE below to start from the Jarvis example, or type your own."></textarea>
           <div class="settings-modal__row settings-modal__row--style-actions">
             <button id="settingsStyleLoadTemplate" type="button" class="settings-modal__link">↻ LOAD TEMPLATE</button>
             <span id="settingsStyleStatus" class="settings-modal__hint"></span>
@@ -605,30 +730,111 @@
           <small>Applied to every generated draft. Saved to <code>config/creative-style.md</code>; takes effect on the next message — no restart.</small>
         </div>
 
-        <!-- External API keys — Frame.io / SerpAPI / Hunter.io. Operators
-             frequently sign up for these AFTER the wizard has run, so we
-             surface editable inputs here. Saved to .env via /api-keys POST;
-             bridge picks them up immediately via process.env.{FRAMEIO_TOKEN,
-             SERPAPI_KEY, HUNTER_API_KEY}. type=password masks the values;
-             show/hide toggle on each row. -->
+        <!-- ─── BRAND IDENTITY ───
+             White-label re-skin: change agent name + wake phrase + agency name
+             without re-running the setup wizard. Save → POST /brand which
+             writes config/brand.json + invalidates the cache + broadcasts
+             "brand.updated" so the HUD live-reloads colours, wordmark, and
+             wake variants. -->
         <div class="settings-modal__field">
-          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>External API keys</label>
+          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Brand identity</label>
           <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">Frame.io</span>
-            <input id="settingsKeyFrameio" type="password" placeholder="FRAMEIO_TOKEN — developer.frame.io/app" autocomplete="off" />
-            <button class="settings-modal__key-toggle" data-target="settingsKeyFrameio" type="button" title="Show / hide">👁</button>
+            <span class="settings-modal__folder-label">Agent name</span>
+            <input id="settingsBrandAgent" type="text" placeholder="e.g. Jarvis, Watson, Aria" autocomplete="off" />
           </div>
           <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">SerpAPI</span>
-            <input id="settingsKeySerpapi" type="password" placeholder="SERPAPI_KEY — serpapi.com/dashboard" autocomplete="off" />
-            <button class="settings-modal__key-toggle" data-target="settingsKeySerpapi" type="button" title="Show / hide">👁</button>
+            <span class="settings-modal__folder-label">Wake phrase</span>
+            <input id="settingsBrandWake" type="text" placeholder="e.g. hey jarvis" autocomplete="off" />
           </div>
           <div class="settings-modal__row settings-modal__row--folder">
-            <span class="settings-modal__folder-label">Hunter.io</span>
-            <input id="settingsKeyHunter" type="password" placeholder="HUNTER_API_KEY — hunter.io/api-keys" autocomplete="off" />
-            <button class="settings-modal__key-toggle" data-target="settingsKeyHunter" type="button" title="Show / hide">👁</button>
+            <span class="settings-modal__folder-label">Mishears</span>
+            <input id="settingsBrandWakeMishears" type="text" placeholder="comma-separated alternates: jervis, jarviz, hi jarvis" autocomplete="off" />
           </div>
-          <small>Frame.io powers voice review of pending cuts. SerpAPI + Hunter.io power the press-radar + outreach features. All optional — leave blank to disable. Saved to <code>.env</code>; takes effect on next bridge restart.</small>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Agency name</span>
+            <input id="settingsBrandAgency" type="text" placeholder="e.g. Jarvis AI" autocomplete="off" />
+          </div>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Tagline</span>
+            <input id="settingsBrandTagline" type="text" placeholder="e.g. your voice-first AI assistant" autocomplete="off" />
+          </div>
+          <small>Saved to <code>config/brand.json</code>. Live-reloads on save — no restart. Wake-phrase mishears help recognition with accents / quiet rooms.</small>
+        </div>
+
+        <!-- ─── LLM PROVIDER ROUTING ───
+             Per-workload routing: chat / vision / high-stakes. Each can pick
+             Ollama (local), Anthropic, or OpenAI. Provider keys live in the
+             API keys section below. Surfaces existing model-router state. -->
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/cpu.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>LLM provider routing</label>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Chat</span>
+            <select id="settingsLlmChat">
+              <option value="ollama">Ollama (local)</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </div>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Vision</span>
+            <select id="settingsLlmVision">
+              <option value="ollama">Ollama (local)</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </div>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">High-stakes</span>
+            <select id="settingsLlmHighStakes">
+              <option value="ollama">Ollama (local)</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </div>
+          <small>"High-stakes" = drafting client emails, press releases, anything where a wrong word costs money. Default routes everything to Ollama (private + free); pick Anthropic / OpenAI per workload if you've added API keys below.</small>
+        </div>
+
+        <!-- ─── API KEYS (generic NAME=VALUE) ───
+             Replaces the legacy FRAMEIO/SERPAPI/HUNTER pre-named inputs.
+             Operator can add ANY env-var-style key; bridge writes them to
+             .env and any tool that reads process.env.<NAME> picks it up.
+             "Ask Jarvis to wire this into a tool" — code agent can read
+             the .env then write a new tool against the new endpoint. -->
+        <div class="settings-modal__field" id="settingsApiKeysField">
+          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>API keys (.env)</label>
+          <div id="settingsApiKeysList" class="settings-modal__keylist"></div>
+          <div class="settings-modal__row settings-modal__row--style-actions">
+            <button id="settingsApiKeyAdd" type="button" class="settings-modal__link">+ ADD KEY</button>
+            <span id="settingsApiKeysStatus" class="settings-modal__hint"></span>
+          </div>
+          <small>
+            Each row is one <code>NAME=VALUE</code> pair written to <code>.env</code>.
+            Add <code>ANTHROPIC_API_KEY</code> or <code>OPENAI_API_KEY</code> to enable
+            the routing options above. For other services (Stripe, Twilio, OpenWeather…),
+            add the key here and ask Jarvis to wire it into a tool —
+            <em>"Jarvis, write me a tool that uses MY_NEW_API_KEY to fetch X."</em>
+          </small>
+        </div>
+
+        <!-- ─── MIC / VAD CALIBRATION ───
+             Wake-word RMS threshold slider with live mic-level meter. Higher
+             threshold = fewer false positives (good for noisy rooms), lower =
+             more sensitive (good for quiet kiosks across a room). -->
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/microphone.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Mic sensitivity (VAD)</label>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Threshold</span>
+            <input id="settingsVadThreshold" type="range" min="0.005" max="0.08" step="0.005" value="0.02" />
+            <span id="settingsVadValue" class="settings-modal__hint" style="min-width:48px;text-align:right;">0.020</span>
+          </div>
+          <div class="settings-modal__row settings-modal__row--folder">
+            <span class="settings-modal__folder-label">Live level</span>
+            <div class="settings-modal__vad-meter">
+              <div class="settings-modal__vad-meter-fill" id="settingsVadMeter"></div>
+              <div class="settings-modal__vad-meter-mark" id="settingsVadMeterMark"></div>
+            </div>
+          </div>
+          <small>Lower = more sensitive (kiosk picks up wake word from across a room but false-positives more). Higher = stricter (cuts through office chatter, may miss soft wake words). Adjust until the LIVE LEVEL bar is just under the threshold mark when nobody's talking.</small>
         </div>
 
         <!-- Remote access (Tailscale) — read-only status + a launch button.
@@ -667,7 +873,7 @@
             <input id="settingsImessageSenders" type="text" placeholder="Allowed senders (comma-separated phones / emails)" autocomplete="off" />
           </div>
           <div class="settings-modal__row settings-modal__row--inline">
-            <input id="settingsImessageTrigger" type="text" placeholder="Trigger phrase — e.g. hey flat-out" autocomplete="off" />
+            <input id="settingsImessageTrigger" type="text" placeholder="Trigger phrase — e.g. hey jarvis" autocomplete="off" />
             <input id="settingsImessagePoll" type="number" min="1" max="60" placeholder="Poll (s)" />
           </div>
           <small>Text Jarvis from your phone. Only allow-listed senders can trigger; only messages starting with the trigger phrase forward to the LLM. Replies skip the voice-confirmation gate (your inbound message IS the consent). Requires Full Disk Access in <a href="x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" target="_blank">System Settings → Privacy</a>.</small>
@@ -722,7 +928,7 @@
 
     <!-- Wake-button: tap or wake word activates listening. Label is rewritten by brand bootstrap. -->
     <button class="wake" id="wakeBtn" type="button" aria-label="Activate assistant">
-      <span class="wake__inner" id="wakeBtnLabel">TAP / SAY "HEY FLAT-OUT"</span>
+      <span class="wake__inner" id="wakeBtnLabel">TAP / SAY "HEY JARVIS"</span>
     </button>
 
     <!-- Idle command-discovery nudge. Sits above the wake button when shown.

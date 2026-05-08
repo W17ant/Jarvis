@@ -149,7 +149,7 @@ export async function pickAsync(query, { signal, timeoutMs = 600 } = {}) {
 }
 
 /** Tool-calling hops always use main. The fast model is tuned for chat, not
- *  for tool-call accuracy on the 70+ Flat-Out tools. Keeping tool dispatches on
+ *  for tool-call accuracy on the 70+ Jarvis tools. Keeping tool dispatches on
  *  the main model trades a few hundred ms for far fewer wrong-tool calls. */
 export function pickForToolHop() {
   return getMainModelFn();

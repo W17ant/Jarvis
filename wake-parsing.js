@@ -21,8 +21,8 @@
  *  (Crew.setToolDispatch, IMessageListener.start, etc).
  */
 
-let _wakeVariants = ["flat-out", "flat out", "flatout", "flatten out"];
-let _agentName = "Flat-Out";
+let _wakeVariants = ["jarvis", "hey jarvis", "jervis", "jarviz"];
+let _agentName = "Jarvis";
 
 /** Update brand state. Called once after loadBrandIntoVoice() reads
  *  config/brand.json. Subsequent calls update in place — useful when
@@ -45,17 +45,16 @@ export function brandState() {
   return { agentName: _agentName, wakeVariants: _wakeVariants.slice() };
 }
 
-/* Why: legacy fuzzy patterns tuned for Whisper mishearings of "Flat-Out".
- * Only used when the active brand IS Flat-Out — for other agent names
+/* Why: fuzzy patterns tuned for common Whisper mishearings of "Jarvis".
+ * Only used when the active brand IS Jarvis — for other agent names
  * the brand.wakeMishears list is the authoritative match set. Adding new
  * fuzzy regexes per client is a setup-wizard step, not something we
  * infer here. */
-const FLATOUT_FUZZY_PATTERNS = [
-  /\b(hey|ay|hi|yo)[,!.\s]*(flat|flap|flag|flank)[\s-]*(out|ow|hour|owt|art|ott)\b/i,
-  /\b(hey|ay|hi|yo)[,!.\s]+(flat|flap)\b/i,
-  /\bflat[\s-]*out\b/i,
-  /\bflat[\s-]*ow\b/i,
-  /\bflatout\b/i,
+const JARVIS_FUZZY_PATTERNS = [
+  /\b(hey|ay|hi|yo|ok)[,!.\s]+(jarvis|jervis|jarviz|jarves|jervice|charlie\s*us)\b/i,
+  /\bjar[\s-]*vis\b/i,
+  /\bjarvis\b/i,
+  /\bjervis\b/i,
 ];
 
 /** Strip wake word + leading filler from heard text → real query. */
@@ -63,7 +62,7 @@ export function extractQuery(text) {
   let q = String(text || "").toLowerCase();
   for (const v of _wakeVariants) q = q.replaceAll(v, " ");
   q = q.replace(/\s+/g, " ").trim();
-  /* Why the trailing alternation: when input is "hey flat-out" alone, after
+  /* Why the trailing alternation: when input is "hey jarvis" alone, after
    * stripping the wake variant we have just "hey" — no whitespace tail. The
    * original regex required \s+ after, so "hey" survived as a dangling
    * pseudo-query. Now matches \s+ OR end-of-string so bare wake phrases
@@ -73,13 +72,13 @@ export function extractQuery(text) {
 }
 
 /** Does the heard text contain the wake phrase? Two passes: exact
- *  variant match + (Flat-Out only) fuzzy regex match for Whisper
+ *  variant match + (Jarvis only) fuzzy regex match for Whisper
  *  mishearings. Returns boolean. */
 export function containsWake(text) {
   const t = String(text || "").toLowerCase();
   if (_wakeVariants.some((v) => t.includes(v))) return true;
-  if (_agentName.toLowerCase() === "flat-out") {
-    return FLATOUT_FUZZY_PATTERNS.some((re) => re.test(t));
+  if (_agentName.toLowerCase() === "jarvis") {
+    return JARVIS_FUZZY_PATTERNS.some((re) => re.test(t));
   }
   return false;
 }
@@ -116,7 +115,7 @@ const DISMISS_PATTERNS = [
   /\b(thanks?|thank you|cheers)[,.\s]*(that(?:'s|s)?|thats)?\s*(all|enough|it|fine)\b/i,
   /\bno more questions\b/i,
   /\bgoodbye\b/i,
-  /\bbye\s*(flat[\s-]*out)?\b/i,
+  /\bbye\s*(jarvis)?\b/i,
   /\b(stop|quit|exit)\s+listening\b/i,
 ];
 

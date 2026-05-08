@@ -55,7 +55,7 @@ const DEFAULT_CONFIG = {
   _comment: "Inbound iMessage adapter. Disabled by default — flip enabled:true and add at least one phone/email to allowedSenders to opt in. The bridge polls chat.db every pollIntervalMs and forwards any message from an allowlisted sender that starts with `trigger` to the LLM. Full Disk Access permission required (macOS prompts on first read).",
   enabled: false,
   allowedSenders: [],
-  trigger: "hey flat-out",
+  trigger: "hey jarvis",
   pollIntervalMs: 5000,
 };
 
@@ -218,7 +218,7 @@ async function pollOnce() {
     if (!senderIsAllowed(sender, config.allowedSenders)) continue;
     const body = String(row.text || "").trim();
     if (!body.toLowerCase().startsWith(config.trigger)) continue;
-    /* Strip the trigger prefix before forwarding. e.g. "hey flat-out what's
+    /* Strip the trigger prefix before forwarding. e.g. "hey jarvis what's
      * the time" → "what's the time". */
     const stripped = body.slice(config.trigger.length).replace(/^[\s,:.-]+/, "").trim();
     if (!stripped) continue;

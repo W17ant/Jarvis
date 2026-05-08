@@ -115,7 +115,7 @@ function showSetupRequired() {
   dismiss.type = "button";
   dismiss.textContent = "DISMISS · KEEP USING DEFAULTS";
   /* "Dismiss" lets the operator close the overlay without running the wizard —
-   * useful if they want to demo the kiosk first with the fallback Flat-Out brand
+   * useful if they want to demo the kiosk first with the fallback Jarvis brand
    * before committing to their own. The flag is per-session (sessionStorage) so
    * it re-prompts on the next browser launch. */
   dismiss.addEventListener("click", () => {

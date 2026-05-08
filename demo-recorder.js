@@ -83,7 +83,7 @@ export async function toggleDemoRecording() {
       audio: false,   // mix audio ourselves for reliability
     });
   } catch (e) {
-    console.warn("[Flat-Out] screen capture cancelled:", e.message);
+    console.warn("[Jarvis] screen capture cancelled:", e.message);
     return;
   }
 
@@ -99,7 +99,7 @@ export async function toggleDemoRecording() {
   }
 
   if (!recDestination) {
-    console.warn("[Flat-Out] demo: no audio context — recording video only");
+    console.warn("[Jarvis] demo: no audio context — recording video only");
   }
   const audioTracks = recDestination ? recDestination.stream.getAudioTracks() : [];
   const combined = new MediaStream([
@@ -119,10 +119,10 @@ export async function toggleDemoRecording() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `flat-out-demo-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.webm`;
+    a.download = `jarvis-demo-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.webm`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    console.log(`[Flat-Out] demo saved (${(blob.size / 1e6).toFixed(1)} MB)`);
+    console.log(`[Jarvis] demo saved (${(blob.size / 1e6).toFixed(1)} MB)`);
   };
   /* If the operator stops sharing via the browser bar, we stop the recording
    * too — otherwise demoRec keeps running on a dead video track. */

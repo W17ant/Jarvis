@@ -14,7 +14,7 @@
  *      each spanning rows 2-4 (3 cells per side, 6 cells total).
  *
  *  Each widget gets `data-widget-id="..."` in HTML. layout.js reads a per-profile
- *  layout from localStorage (`flatout.<profile>.layout`) and applies it via inline
+ *  layout from localStorage (`jarvis.<profile>.layout`) and applies it via inline
  *  grid-row + grid-column overrides. Sizes:
  *    - "small"  = 1 cell  (1 row tall)
  *    - "medium" = 2 cells (2 rows tall)
@@ -40,13 +40,14 @@ const ROWS_PER_SIDE = 3;          // rows 2..4 in the parent grid
 
 const DEFAULT_LAYOUT = {
   left: [
-    { id: "month",  size: "small" },
-    { id: "system", size: "small" },
-    { id: "comms",  size: "small" },
+    /* CORE TELEMETRY claims the full left rail (rows 2-4) — the month
+     * panel was retired in the white-label rebuild because the date was
+     * already visible in the calendar strip + clock panel. */
+    { id: "system", size: "large" },
   ],
   right: [
-    { id: "weather", size: "small" },
     { id: "clock",   size: "small" },
+    { id: "weather", size: "small" },
     { id: "launch",  size: "small" },
   ],
 };
@@ -61,15 +62,22 @@ let editing = false;
 
 /** Read the persisted layout. Returns the default if nothing's stored or the JSON
  *  parses badly. The shape is tolerant — widgets missing from storage fall back to
- *  their default position so adding a new widget in HTML doesn't require migration. */
+ *  their default position so adding a new widget in HTML doesn't require migration.
+ *  Why the "month" purge: the panel--month widget was retired in the white-label
+ *  rebuild but stale localStorage from prior runs still references it; if any
+ *  side carries it we discard the saved layout and reapply the new default so
+ *  CORE TELEMETRY can claim its full rail height. */
 function readLayout() {
   const raw = Storage.get(STORAGE_KEY);
   if (!raw) return cloneDefault();
   try {
     const parsed = JSON.parse(raw);
-    /* Validate shape: { left: [{id, size}], right: [{id, size}] }. Any deviation
-     * triggers a fall-back to defaults rather than rendering broken layout. */
     if (!parsed?.left || !parsed?.right) return cloneDefault();
+    const hasRetired = (slots) => Array.isArray(slots) && slots.some((s) => s?.id === "month" || s?.id === "comms");
+    if (hasRetired(parsed.left) || hasRetired(parsed.right)) {
+      Storage.remove(STORAGE_KEY);
+      return cloneDefault();
+    }
     return parsed;
   } catch {
     return cloneDefault();

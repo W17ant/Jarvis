@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#000000" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>Flat-Out Live Shoot</title>
+  <title>Jarvis Live Shoot</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Rubik:wght@400;500&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
@@ -16,8 +16,8 @@
      * one-handed phone use during a shoot: enormous mic button, generous tap targets,
      * minimal scrolling. */
     :root {
-      --fom-red: #E10600;
-      --fom-deep: #8F0003;
+      --accent: #00d4ff;
+      --accent-deep: #0077a8;
       --ink-0: #000;
       --ink-1: #0a0a0a;
       --ink-2: #141414;
@@ -54,7 +54,7 @@
       font-weight: 700;
       letter-spacing: 0.06em;
       font-size: 18px;
-      color: var(--fom-red);
+      color: var(--accent);
     }
     .header__sub {
       font-family: "JetBrains Mono", monospace;
@@ -118,7 +118,7 @@
       line-height: 1.4;
     }
     .feed__row--action .feed__text {
-      color: var(--fom-red);
+      color: var(--accent);
       font-family: "Oswald", sans-serif;
       letter-spacing: 0.04em;
       text-transform: uppercase;
@@ -145,8 +145,8 @@
       text-transform: uppercase;
       cursor: pointer;
     }
-    .actions button:active { background: var(--fom-red); border-color: var(--fom-red); }
-    .actions button.is-hero { color: var(--fom-red); border-color: var(--fom-red); }
+    .actions button:active { background: var(--accent); border-color: var(--accent); }
+    .actions button.is-hero { color: var(--accent); border-color: var(--accent); }
 
     .mic {
       flex: 0 0 auto;
@@ -161,9 +161,9 @@
       width: 96px;
       height: 96px;
       border-radius: 50%;
-      background: var(--fom-red);
+      background: var(--accent);
       border: 4px solid var(--ink-0);
-      box-shadow: 0 0 0 2px var(--fom-red), 0 0 24px rgba(225, 6, 0, 0.45);
+      box-shadow: 0 0 0 2px var(--accent), 0 0 24px rgba(0, 212, 255, 0.45);
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -172,13 +172,13 @@
     }
     .mic__btn:active { transform: scale(0.94); }
     .mic__btn.is-recording {
-      background: var(--fom-deep);
-      box-shadow: 0 0 0 2px var(--fom-red), 0 0 36px rgba(225, 6, 0, 0.8);
+      background: var(--accent-deep);
+      box-shadow: 0 0 0 2px var(--accent), 0 0 36px rgba(0, 212, 255, 0.8);
       animation: pulse 0.9s infinite;
     }
     @keyframes pulse {
-      0%, 100% { box-shadow: 0 0 0 2px var(--fom-red), 0 0 24px rgba(225, 6, 0, 0.5); }
-      50%      { box-shadow: 0 0 0 2px var(--fom-red), 0 0 44px rgba(225, 6, 0, 0.95); }
+      0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 24px rgba(0, 212, 255, 0.5); }
+      50%      { box-shadow: 0 0 0 2px var(--accent), 0 0 44px rgba(0, 212, 255, 0.95); }
     }
     .mic__btn svg { width: 36px; height: 36px; fill: white; }
     .mic__hint {
@@ -195,7 +195,7 @@
       text-transform: uppercase;
       color: var(--text);
     }
-    .mic__status.is-error { color: var(--fom-red); }
+    .mic__status.is-error { color: var(--accent); }
     .mic__status.is-ok { color: #00ff88; }
   </style>
 </head>

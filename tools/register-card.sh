@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # register-card.sh — One-time setup for Jarvis's pre-funded virtual debit card.
 #
-# Stores card details in macOS Keychain under service "flat-out-jarvis-card".
+# Stores card details in macOS Keychain under service "jarvis-jarvis-card".
 # Keychain is encrypted at rest, gated by your login password — the bridge can
 # read it via /usr/bin/security but the values never touch this repo.
 #
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ALIAS="${1:-default}"
-SERVICE="flat-out-jarvis-card"
+SERVICE="jarvis-jarvis-card"
 
 if [[ ! "$ALIAS" =~ ^[a-zA-Z0-9_-]{1,32}$ ]]; then
   echo "Alias must be [a-zA-Z0-9_-], max 32 chars. Got: $ALIAS" >&2

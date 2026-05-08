@@ -1,6 +1,6 @@
 /** mcp.mjs - Model Context Protocol server endpoint.
  *
- *  Why: every Flat-Out tool (caption_shoot_folder, draft_email, video_edit_from_shoot,
+ *  Why: every Jarvis tool (caption_shoot_folder, draft_email, video_edit_from_shoot,
  *  remember, get_contact, …) is already callable via the bridge's WebSocket. Exposing
  *  them through MCP means Claude Desktop, Claude Code, Cursor, Continue, and any other
  *  MCP host can drive the same kiosk capabilities — turning the bridge into a shared
@@ -21,7 +21,7 @@
  */
 
 const PROTOCOL_VERSION = "2024-11-05";
-const SERVER_INFO = { name: "flat-out-bridge", version: "1.0.0" };
+const SERVER_INFO = { name: "jarvis-bridge", version: "1.0.0" };
 
 /** Build the MCP-shaped tools list from the bridge's TOOLS array. The bridge stores
  *  tools as { type:"function", function:{ name, description, parameters } } (OpenAI
@@ -100,7 +100,7 @@ export async function handleMcpRpc(req, ctx) {
           serverInfo: SERVER_INFO,
           /* instructions: a one-liner the host shows to the LLM/operator so they know
            * what this server is for. Helps when multiple MCP servers are registered. */
-          instructions: "Flat-Out kiosk tools — automotive PR/content agency assistant. Provides shoot management, video editing, vision/captioning, calendar, mail, Frame.io, Premiere, Lightroom, and persistent memory operations against the operator's local Mac.",
+          instructions: "Jarvis kiosk tools — automotive PR/content agency assistant. Provides shoot management, video editing, vision/captioning, calendar, mail, Frame.io, Premiere, Lightroom, and persistent memory operations against the operator's local Mac.",
         });
       }
 

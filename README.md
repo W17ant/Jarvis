@@ -1,15 +1,16 @@
-# Jarvis · Flat-Out HUD
+# Jarvis — voice-first AI assistant
 
-> A fully-local, voice-driven AI kiosk built for an automotive PR & content agency. Wake it. Ask it. Watch it work.
+> Local. Private. Yours. Wake it. Ask it. Watch it work.
 
 ```
-                     FLAT-OUT
-                        MEDIA          we live and breathe automotive
+              ╦  ╔═╗ ╦═╗ ╦  ╦ ╦ ╔═╗
+              ║  ╠═╣ ╠╦╝ ╚╗╔╝ ║ ╚═╗
+              ╩  ╩ ╩ ╩╚═  ╚╝  ╩ ╚═╝
 ```
 
-**Built by [Antony O'Neill](https://www.linkedin.com/in/antonyoneilladl/) · [aoneill.co.uk](https://aoneill.co.uk) · [antony@aoneill.co.uk](mailto:antony@aoneill.co.uk)**
+**Built by [Antony O'Neill](https://www.linkedin.com/in/antonyoneilladl/) · [aoneill.co.uk](https://aoneill.co.uk)**
 
-A complete on-prem AI assistant: local Qwen brain, local Whisper STT, local Kokoro TTS, no cloud round-trip for inference, no client work leaving your machine. Stark-style HUD on a 27"+ display. 99 tools spanning vision, video editing, Premiere automation, Lightroom XMP, Frame.io review, Apple Mail / Calendar, persistent memory, MCP server, and a phone-as-mic live shoot mode.
+A complete on-prem AI assistant: local Qwen brain, local Whisper STT, local Kokoro TTS, no cloud round-trip for inference, no data leaving your machine. Arc-reactor cyan HUD on any 27"+ display. 60 tools spanning vision, document generation, mail, calendar, code agent, persistent memory, MCP server, and an agentic web-use loop. White-label by design — every brand string lives in `config/brand.json`.
 
 ---
 
@@ -17,27 +18,24 @@ A complete on-prem AI assistant: local Qwen brain, local Whisper STT, local Koko
 
 | | |
 |---|---|
-| **Voice loop** | Wake on *"hey Flat-Out"*. Sentence-level streaming TTS — first audio in your ear in ~1s. Mic-RMS barge-in cancels mid-sentence. Filler phrases ("On it, sir.") cover LLM thinking time. |
-| **Vision** | Qwen 2.5-VL captions every keyframe, scores clips for trailer cuts, finds shots by description. *"Find the front-grille hero on the press car."* |
-| **Cinematic edits** | Voice → ffmpeg pipeline. Flash cuts, speed ramps, beat-synced cuts, brand intro / tail card, single-word stacked outro text. *"Cut a 30-second teaser of yesterday's shoot, vertical, closing card V12 BEAST."* |
-| **Brand pack export** | One command → 16:9 / 9:16 / 1:1 / 4:5 crops, watermarked + clean variants, zipped for the client. |
-| **Frame.io review** | List pending review, read comments, reply by voice, set status. Client-visible writes always confirm. |
+| **Voice loop** | Wake on *"hey Jarvis"*. Sentence-level streaming TTS — first audio in your ear in ~1s. Mic-RMS barge-in cancels mid-sentence. Filler phrases ("On it.") cover LLM thinking time. |
+| **Vision** | Qwen 2.5-VL captions images, describes screens, OCRs documents. *"What does this whiteboard say?"* |
 | **Apple Mail / Calendar** | Summarise unread, draft emails (never auto-sent), add calendar events. Reminders fire 15 min + 5 min before each event. |
-| **Premiere Pro 2025** | ExtendScript via osascript — open project, import folders, build rough cut sequences, render. |
-| **Lightroom presets** | Write XMP sidecars so RAWs open with the preset already applied. No need to launch Lightroom. |
-| **Persistent memory** | SQLite + embeddings (nomic-embed-text). Contacts, projects, facts, conversation summaries. Recall across sessions. Nightly Dream Cycle dedupes near-duplicate contacts. |
-| **Editorial style memory** | ImageMagick-driven extraction of warm-cool bias / saturation / contrast / luminance from a folder of finished edits. *"Compare this Bentley grade to the FOM signature look."* |
-| **Press radar + media-day calendar** | Daily sweep across automotive press for tracked manufacturers. Manual + auto event tracking. |
-| **Live shoot mode** | Phone-as-mic companion view at `GET /live`. Photographer taps HERO mid-frame; editor at the desk sees it land in real time. |
+| **Code agent** | `code_agent_run` spins a sandboxed Claude / Qwen worker — edits files, runs tests, commits. Background tasks surface in the HUD as a queue you can voice-cancel. |
+| **Persistent memory** | SQLite + embeddings (nomic-embed-text). Contacts, projects, facts, conversation summaries. Recall across sessions. Nightly Dream Cycle dedupes near-duplicate entries. |
+| **Knowledge base** | Drop markdown / PDF / docx into `docs/knowledge/`. Hybrid retrieval (vector + BM25 RRF) with source citations on every reply. Ask any question that might be in your docs and get the receipts. |
+| **Document generation** | PDF (templated), DOCX, XLSX, PPTX. Pipe data → polished deliverables. |
+| **YouTube creative** | Thumbnails (1280×720), shorts (9:16), promo packs — vision picks hero frames + engine inlays automatically. |
+| **Social captions** | Multi-platform caption drafts (Instagram / LinkedIn / TikTok) with hashtag research and brand-tone validation. |
 | **MCP server** | Every bridge tool exposed via JSON-RPC at `POST /mcp`. Drive the same kiosk from Claude Desktop, Cursor, Continue. |
-| **Agentic purchases** | Pre-funded virtual debit card via macOS Keychain. Category-tiered caps (photography £1500, travel £500, groceries £50, default £75). 25 UK retailer allowlist. Auto/voice/typed confirmation tiers. Append-only audit journal. Argos / Amazon UK / MPB checkout adapters. Simulator-mode default. |
-| **Pluggable LLM providers** | Anthropic / OpenAI / local Ollama all behind one `chat()` call. Workload routing — default chat to Ollama, vision to Claude, high-stakes to Claude. Live token + cost telemetry surfaces in the Agent Console so spend never surprises. |
-| **Embedding tool router** | At 99 tools the full catalogue overwhelms the 14b selector. nomic-embed-text indexes each tool at boot; per-query the catalogue is filtered to top-20 + 10 always-on. Live transparency in the Agent Console shows which tools the model actually saw. |
-| **Web-use loop** | `request_browse` drives a real Chromium with Playwright + a vision LLM (Claude/GPT) — clicks, types, scrolls, reads. URL denylist (banks, gov, brokers), prompt-injection guard, action allowlist. Use for "find the cheapest X", "summarise this page", "fill this form for me". |
+| **Agentic purchases** | Pre-funded virtual debit card via macOS Keychain. Category-tiered caps. UK retailer allowlist. Auto/voice/typed confirmation tiers. Append-only audit journal. Simulator-mode default. |
+| **Pluggable LLM providers** | Anthropic / OpenAI / local Ollama all behind one `chat()` call. Workload routing — default chat to Ollama, vision to Claude, high-stakes to Claude. Live token + cost telemetry in the Agent Console so spend never surprises. |
+| **Embedding tool router** | At 60 tools the full catalogue overwhelms the 7b selector. nomic-embed-text indexes each tool at boot; per-query the catalogue is filtered to top-20 + 10 always-on. Live transparency in the Agent Console shows which tools the model actually saw. |
+| **Web-use loop** | `request_browse` drives a real Chromium with Playwright + a vision LLM — clicks, types, scrolls, reads. URL denylist (banks, gov, brokers), prompt-injection guard, action allowlist. Use for "find the cheapest X", "summarise this page", "fill this form for me". |
 | **Conversation history** | Every turn persisted to SQLite. Right-edge slide-out drawer (`H` key) shows everything searchable across sessions, with tool chips per row. |
 | **Personal-assistant tools** | iMessage, Apple Reminders, in-HUD timers, Apple Music / Spotify, Apple Notes / Bear / Obsidian, Mozilla Readability article fetch, screencapture, macOS Focus mode, 1Password CLI lookup. Zero-API-cost daily-life primitives via osascript. |
 | **Video transcription** | `transcribe_video` strips audio with ffmpeg → local Whisper for timestamped speech segments → samples N keyframes → vision LLM captions each one. Returns interleaved narrative. |
-| **Visual style learning** | Point at a folder OR a video file — ffmpeg samples 4 keyframes per video, vision LLM produces structured prose (palette / lighting / contrast / framing / grading / mood) alongside the existing numerical signature. |
+| **White-label brand** | Every brand string, color, font, and wake phrase lives in `config/brand.json`. The setup wizard re-skins the entire HUD without code changes. `.brand-lock` + `update.sh` guard prevent silent rebrands. |
 
 ### Keyboard shortcuts
 
@@ -120,7 +118,7 @@ Backs up `memory.db`, stashes any local edits, `git pull --ff-only`, `npm instal
 ./tools/diagnose.sh
 ```
 
-Bundles every relevant log (`/tmp/flat-out-*.log`), a system snapshot (Mac model, RAM, Node version, healthz output, port bindings), and `config/brand.json` into a tarball on your Desktop. On macOS it also opens a pre-filled Mail draft to **Antony@aoneill.co.uk** with the bundle attached. No secrets — `.env` is excluded.
+Bundles every relevant log (`/tmp/jarvis-*.log`), a system snapshot (Mac model, RAM, Node version, healthz output, port bindings), and `config/brand.json` into a tarball on your Desktop. On macOS it also opens a pre-filled Mail draft to **Antony@aoneill.co.uk** with the bundle attached. No secrets — `.env` is excluded.
 
 Common gotchas (full FAQ in `docs/install-guide.html` pages 11–13):
 
@@ -211,14 +209,14 @@ Every tool is exposed via the Model Context Protocol at `POST http://localhost:8
 ```json
 {
   "mcpServers": {
-    "flatout": {
+    "jarvis": {
       "url": "http://localhost:8766/mcp"
     }
   }
 }
 ```
 
-That's it. All 99 tools become available. Tools that require operator confirmation surface their `requires_confirmation` payload back through the host's UI.
+That's it. All 60 tools become available. Tools that require operator confirmation surface their `requires_confirmation` payload back through the host's UI.
 
 ---
 
@@ -277,10 +275,10 @@ Marketing + install videos live in `remotion/` (a small Remotion project — no 
 cd remotion
 npm install                                          # first run only
 node scripts/generate-narration.mjs                  # synth voiceover via Kokoro (bridge must be running)
-npx remotion render FlatOutOverview     ~/Downloads/flat-out-overview.mp4       # full install + capability tour
-npx remotion render FlatOutCapabilities ~/Downloads/flat-out-capabilities.mp4   # deep-dive on what it does
-npx remotion render FlatOutUninstall    ~/Downloads/flat-out-uninstall.mp4      # short uninstall walkthrough
-npx remotion render FlatOutTikTok       ~/Downloads/flat-out-tiktok.mp4         # 9:16 social cut
+npx remotion render JarvisOverview     ~/Downloads/jarvis-overview.mp4       # full install + capability tour
+npx remotion render JarvisCapabilities ~/Downloads/jarvis-capabilities.mp4   # deep-dive on what it does
+npx remotion render JarvisUninstall    ~/Downloads/jarvis-uninstall.mp4      # short uninstall walkthrough
+npx remotion render JarvisTikTok       ~/Downloads/jarvis-tiktok.mp4         # 9:16 social cut
 ```
 
 ---
@@ -293,7 +291,7 @@ The kiosk is brand-configurable end-to-end via `config/brand.json` + `.env`. Re-
 
 ## 📜 Licence
 
-This is a working delivery for a specific agency. Treat the public copy as a reference for what's possible with local-only AI assistants — fork it, learn from it, swap the brand for your own. Trademark / wordmark / logo / brand colours of "Flat-Out Media" remain owned by Flat-Out Media. The code is offered under MIT — see `LICENSE` if present.
+Jarvis is open source under MIT — fork it, brand it, ship it. The code carries no client trademarks. The original development was funded by a private commercial deployment; the white-label distribution stripped the bespoke automotive-agency tooling so the kiosk competes head-on with hosted assistants while staying fully on-device. See `LICENSE` if present.
 
 ---
 

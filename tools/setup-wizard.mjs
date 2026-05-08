@@ -110,12 +110,12 @@ function darken(hex, amount = 0.4) {
 
 /* ---------- main ---------- */
 /**
- * Print the FOM ASCII banner if the file is present and the terminal is wide enough.
+ * Print the brand ASCII banner if the file is present and the terminal is wide enough.
  * Why: the kiosk has a strong brand identity in the HUD; carrying that into the install
  * terminal makes the agency feel like a single product instead of generic CLI scripts.
  */
 async function printBanner() {
-  const banner = path.join(PROJECT_DIR, "assets", "fom-ascii.txt");
+  const banner = path.join(PROJECT_DIR, "assets", "brand-ascii.txt");
   if (!existsSync(banner)) return;
   /* The asset is ~144 columns wide — only render if the terminal can hold it without
    * line-wrapping that destroys the shape. Fall back to a tight box otherwise. */
@@ -141,16 +141,16 @@ async function main() {
   const interactive = !flags.nonInteractive;
 
   /* Why: when the operator passes flags to change the agent/agency, fields they DIDN'T pass
-   * should derive from the new identity, not silently inherit Flat-Out values from an old
+   * should derive from the new identity, not silently inherit prior values from an old
    * existing config. Track whether identity changed so downstream defaults derive correctly. */
   const identityChanged = !!(flags.name || flags.agency);
 
   /* ---------- AGENT ---------- */
   heading("Agent identity");
-  console.log(C.dim + "  This is the assistant's name (used in the wake phrase and persona).\n  Examples: Flat-Out, Jarvis, Watson, Echo, Pilot." + C.reset);
+  console.log(C.dim + "  This is the assistant's name (used in the wake phrase and persona).\n  Examples: Jarvis, Watson, Echo, Pilot, Aria." + C.reset);
   const agentName = flags.name || (interactive
-    ? await ask("Agent name", existing.agent?.name || "Flat-Out")
-    : (existing.agent?.name || "Flat-Out"));
+    ? await ask("Agent name", existing.agent?.name || "Jarvis")
+    : (existing.agent?.name || "Jarvis"));
   /* If the agent name changed, wake phrase derives from the new name unless explicitly overridden. */
   const wakeDefault = (existing.agent?.name === agentName && existing.agent?.wakePhrase)
     ? existing.agent.wakePhrase
@@ -165,10 +165,10 @@ async function main() {
   /* ---------- AGENCY ---------- */
   heading("Agency identity");
   const agencyName = flags.agency || (interactive
-    ? await ask("Agency / brand name", existing.agency?.name || "Flat-Out Media")
-    : (existing.agency?.name || "Flat-Out Media"));
+    ? await ask("Agency / brand name", existing.agency?.name || "Jarvis AI")
+    : (existing.agency?.name || "Jarvis AI"));
   /* Tagline / social / domain inherit only if agency name is unchanged — otherwise they're
-   * Flat-Out artefacts that don't belong on a re-skinned install. */
+   * Legacy artefacts that don't belong on a re-skinned install. */
   const agencyChanged = existing.agency?.name && existing.agency.name !== agencyName;
   const tagline = flags.tagline || (interactive
     ? await ask("Tagline", agencyChanged ? "" : (existing.agency?.tagline || "we live and breathe automotive"))
@@ -176,7 +176,7 @@ async function main() {
   /* Per-platform social handles. Asked individually because operators consistently
    * struggled with the old single "Social handle" prompt — they'd type one and
    * skip the others, ending up with credit-line gaps in watermarks + boilerplate.
-   * Defaults respect agencyChanged so a re-skin doesn't inherit Flat-Out's handles.
+   * Defaults respect agencyChanged so a re-skin doesn't inherit a prior brand's handles.
    *
    * The legacy `social` field is migrated to socials.instagram on read; if that's
    * the only one set, default Instagram to it so the operator doesn't lose it. */
@@ -190,16 +190,16 @@ async function main() {
   };
   console.log(C.dim + "  Press Enter to skip a platform you don't use." + C.reset);
   const igHandle = flags.instagram ?? (interactive
-    ? await ask("  Instagram (e.g. @flatoutmediauk)", socialDefaults.instagram)
+    ? await ask("  Instagram (e.g. @yourbrand)", socialDefaults.instagram)
     : socialDefaults.instagram);
   const fbHandle = flags.facebook ?? (interactive
-    ? await ask("  Facebook (page slug, e.g. flatoutmedia)", socialDefaults.facebook)
+    ? await ask("  Facebook (page slug, e.g. yourbrand)", socialDefaults.facebook)
     : socialDefaults.facebook);
   const xHandle = flags.x ?? (interactive
-    ? await ask("  X / Twitter (e.g. @flatoutmediauk)", socialDefaults.x)
+    ? await ask("  X / Twitter (e.g. @yourbrand)", socialDefaults.x)
     : socialDefaults.x);
   const ttHandle = flags.tiktok ?? (interactive
-    ? await ask("  TikTok (e.g. @flatoutmedia)", socialDefaults.tiktok)
+    ? await ask("  TikTok (e.g. @yourbrand)", socialDefaults.tiktok)
     : socialDefaults.tiktok);
   const socials = {
     facebook: (fbHandle || "").trim(),
@@ -213,10 +213,10 @@ async function main() {
 
   /* ---------- COLOURS ---------- */
   heading("Brand colours");
-  console.log(C.dim + "  Hex like #E10600 or #fff. The deep variant + glow + tint are derived automatically." + C.reset);
+  console.log(C.dim + "  Hex like #00d4ff or #fff. The deep variant + glow + tint are derived automatically." + C.reset);
   const primary = normalizeHex(flags.primary || (interactive
-    ? await ask("Primary brand colour", existing.colors?.primary || "#E10600")
-    : (existing.colors?.primary || "#E10600")), "#E10600");
+    ? await ask("Primary brand colour", existing.colors?.primary || "#00d4ff")
+    : (existing.colors?.primary || "#00d4ff")), "#00d4ff");
   /* If the primary colour changed, derive the deep variant from it — don't inherit the old
    * deep red when the new primary is, say, orange. */
   const primaryChanged = existing.colors?.primary && existing.colors.primary !== primary;
@@ -229,8 +229,8 @@ async function main() {
   heading("Logo");
   console.log(C.dim + "  Path relative to project root. PNG works for all browsers; SVG is sharper but optional." + C.reset);
   const wordmarkPng = flags.logoPng || (interactive
-    ? await ask("Wordmark PNG path", existing.logo?.wordmarkPng || "assets/fom-wordmark.png")
-    : (existing.logo?.wordmarkPng || "assets/fom-wordmark.png"));
+    ? await ask("Wordmark PNG path", existing.logo?.wordmarkPng || null)
+    : (existing.logo?.wordmarkPng || null));
   if (wordmarkPng && !existsSync(path.join(PROJECT_DIR, wordmarkPng))) {
     warn(`Logo not found at ${wordmarkPng} — placeholder kept; drop the file in before launch.`);
   }

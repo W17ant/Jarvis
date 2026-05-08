@@ -11,7 +11,7 @@
  *  Recommended setup (one-off):
  *    1. Open the bridge's persistent profile manually:
  *         npx playwright codegen --browser=chromium \
- *           --user-data-dir=/tmp/flat-out-jarvis-checkout-profile \
+ *           --user-data-dir=/tmp/jarvis-jarvis-checkout-profile \
  *           https://www.amazon.co.uk/
  *    2. Sign in. Complete one purchase manually so the session is "trusted".
  *    3. Verify selectors below match your DOM and uncomment the live click.

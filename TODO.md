@@ -1,8 +1,8 @@
-# Flat-Out HUD — Outstanding Work
+# Jarvis HUD — Outstanding Work
 
 Living todo list. Honest reckoning: a lot of this list was stale by the time anyone read it. **Last sync: 2026-05-07** after a major sprint that shipped 22+ commits in one session (MLX Whisper, voice loop ~3-4× faster, six voice.js extractions, vitest scaffold, CONTRIBUTING.md).
 
-**Legend**: 🟥 critical · 🟧 high · 🟨 medium · 🟩 low · ⚙️ architecture · 🚀 FOM workflow win
+**Legend**: 🟥 critical · 🟧 high · 🟨 medium · 🟩 low · ⚙️ architecture · 🚀  the agency workflow win
 
 ---
 
@@ -48,7 +48,7 @@ Audit pass over OpenClaw + NextChat + Cherry Studio + AionUi (Open-Assistant is 
 - 🟧 🚀 **Document RAG / knowledge base** (~3 days, Cherry Studio pattern) — currently `data/memory.db` holds contacts/projects/facts as one-line items. A document-level RAG would let Adam drop a brand brief, client onboarding PDF, or past press release into a "knowledge" folder and have Jarvis cite from it on any query. Uses the existing nomic-embed pipeline; just needs a new `documents` table + chunking + retrieval-into-context wiring.
 - 🟧 📨 **iMessage in / TTS out adapter** (~1 day) — thin AppleScript bridge: incoming iMessage → bridge → reply text → bridge → osascript reply with optional Kokoro audio attachment. Lets Adam interact with Jarvis from his phone without WhatsApp / Telegram bloat. Useful even for a single-operator kiosk because you're not always at the desk.
 - 🟧 ⚙️ **Vitest test infrastructure** (~1 day) — Cherry Studio + AionUi both run vitest + playwright. Jarvis has minimal automated tests; the bridge surface is ~7000 LOC. A test pass with fixture data for the dispatch path, fast-path, tool router, and purchases rails would catch regressions on every commit.
-- 🟨 🚀 **Office document tools** (~2-3 days, AionUi pattern) — AionUi's built-in skills include pptx, docx, xlsx, mermaid. Jarvis has rich PDF generation but no Office formats. `generate_pptx({ template, slides })` for client decks and `generate_xlsx({ data, layout })` for shoot logs would close a real FOM workflow gap.
+- 🟨 🚀 **Office document tools** (~2-3 days, AionUi pattern) — AionUi's built-in skills include pptx, docx, xlsx, mermaid. Jarvis has rich PDF generation but no Office formats. `generate_pptx({ template, slides })` for client decks and `generate_xlsx({ data, layout })` for shoot logs would close a real  the agency workflow gap.
 - 🟨 🚀 **Mermaid diagram generation** (~half day, AionUi pattern) — render mermaid → SVG/PNG for workflow diagrams, brand-structure maps, shoot timelines. Cheap addition; image generation already in the pipeline.
 - 🟨 🚀 **Multi-agent orchestration** (~3-5 days, AionUi "Cowork" pattern) — let the LLM spin up parallel sub-agents for independent research tasks ("compare these three lenses across WEX / MPB / Park Cameras simultaneously"). Each sub-agent uses request_browse + a focused goal; results merge into a final report. Builds on existing browse + provider infrastructure.
 
@@ -102,9 +102,9 @@ The big push. Voice loop ~3-4× faster end-to-end, voice.js -48% in size, real t
 - ✅ **Wake-word check button** (`62482f0`) — settings modal records 3s, transcribes via Whisper, runs `WakeParse.containsWake` — pass/fail verdict pill.
 - ✅ **Vitest scaffold + 58 tests** (`a3b89f3` + `6c1671e`) — fast-path regression coverage including all of Adam's reported phrasings, plus tool-router fallback paths. `npm test` runs in ~140ms.
 - ✅ **5 fast-path gap closes** (`6c1671e`) — `whats the time` (no apostrophe), `what time is it right now` (trailing context), `set timer for 10 minutes`, `sleep mode` / `go quiet` / `shush`, `thats all` / `thats enough`.
-- ✅ **Scope-refusal bug fix** (`c0a2417`) — Adam reported "I'm only here for automotive Flat-Out tasks" refusal on map queries. Fast-path regex liberalised + SYSTEM prompt got an explicit "DO NOT REFUSE GENERAL TASKS" block.
+- ✅ **Scope-refusal bug fix** (`c0a2417`) — Adam reported "I'm only here for automotive Jarvis tasks" refusal on map queries. Fast-path regex liberalised + SYSTEM prompt got an explicit "DO NOT REFUSE GENERAL TASKS" block.
 - ✅ **macOS device-change auto-recovery** (`892f0cb`) — listens for `navigator.mediaDevices.devicechange`, drops cached `wf.micStream` + analyser when the operator switches input. Self-healing.
-- ✅ **Whisper `initial_prompt` slim** (`126ed65`) — example sentences ("Hey Flat-Out, what's the time?") were biasing Whisper toward "what's" hallucinations on quiet clips. Brand tokens only now.
+- ✅ **Whisper `initial_prompt` slim** (`126ed65`) — example sentences ("Hey Jarvis, what's the time?") were biasing Whisper toward "what's" hallucinations on quiet clips. Brand tokens only now.
 - ✅ **Passive cycle ReferenceError fix** (`e68b563`) — voice.js extraction removed `WHISPER_URL` const but cyclePassive still referenced it. Every wake-detect attempt was failing silently. Restored.
 - ✅ **CONTRIBUTING.md** (`892f0cb`) — workflow guide for Adam to use Claude Code on the codebase: branch convention, commit style, service map, test commands, curated task list.
 - ✅ **voice.js extractions × 6** (3105 → 1620 LOC, -48%): wake-parsing (`00f2705`), settings-modal (`7cb0616`, -1000 LOC), setup-modal (`15000b5`), mic-test (`d2fb671`), timer-hud (`9466003`), whisper-stt (`c0883cf`).
@@ -224,35 +224,35 @@ P0.1 added `runId` to four heavy tools. Audit every other `broadcastToClients` c
 ## P1 — Operator productivity (week 3-5 of the original plan)
 
 🟥 **P1.1 Notification queue** (~2 days)
-Replace the `queueModal` one-at-a-time pattern with a real queue surface. Bell icon top-right, scrollable history of recent terminal task states. Hard dep on P0.1 task model. *FOM win: when a teaser, PDF, and email-draft all complete in 30 seconds, the operator gets a coherent timeline instead of three modals fighting for focus.*
+Replace the `queueModal` one-at-a-time pattern with a real queue surface. Bell icon top-right, scrollable history of recent terminal task states. Hard dep on P0.1 task model. *Agency win: when a teaser, PDF, and email-draft all complete in 30 seconds, the operator gets a coherent timeline instead of three modals fighting for focus.*
 
 🟥 **P1.2 Conversation history drawer** (~1.5 days)
-`conversationHistory` already exists in memory; persist it. Slide-out from the right edge (H key or swipe up from bottom). Per-turn timestamps + which tools fired. Hidden in demo mode. *FOM win: "what did I tell you about Ben's preferences yesterday?" gets answered by the operator scrolling, not by a recall query.*
+`conversationHistory` already exists in memory; persist it. Slide-out from the right edge (H key or swipe up from bottom). Per-turn timestamps + which tools fired. Hidden in demo mode. *Agency win: "what did I tell you about Ben's preferences yesterday?" gets answered by the operator scrolling, not by a recall query.*
 
 🟧 **P1.3 Demo / Clean mode toggle** (~half day)
-Single Cmd+D flips a body class. Hides: debug panel, transcript bubble, system-pod exact %s (show pretty bars only), notification timestamps, conversation drawer, REC indicator. Auto-clears inbox prompts. *FOM win: client walks into the studio, operator hits Cmd+D, kiosk goes from operational to cinematic in 100ms.*
+Single Cmd+D flips a body class. Hides: debug panel, transcript bubble, system-pod exact %s (show pretty bars only), notification timestamps, conversation drawer, REC indicator. Auto-clears inbox prompts. *Agency win: client walks into the studio, operator hits Cmd+D, kiosk goes from operational to cinematic in 100ms.*
 
 🟧 **P1.4 Command palette (Cmd+K)** (~2 days)
-Keyboard fallback for everything voice does, plus dev affordances. Pulls actions from the manifest above. Recent-commands and suggested-next in the picker. *FOM win: noisy production office, Daniel's voice can't reach the mic, operator types "press release press-car goodwood" instead of shouting.*
+Keyboard fallback for everything voice does, plus dev affordances. Pulls actions from the manifest above. Recent-commands and suggested-next in the picker. *Agency win: noisy production office, Daniel's voice can't reach the mic, operator types "press release press-car goodwood" instead of shouting.*
 
 🟧 **P1.5 Help / onboarding HUD** (~1 day)
-First-run beyond setup: a "what to say" cheat panel pinned for first 60s of first session, dismissible. Reads from action manifest. Idle nudges every 10 minutes ("try saying 'cut a teaser from the latest shoot'"). *FOM win: junior staff or visiting clients get instant proficiency.*
+First-run beyond setup: a "what to say" cheat panel pinned for first 60s of first session, dismissible. Reads from action manifest. Idle nudges every 10 minutes ("try saying 'cut a teaser from the latest shoot'"). *Agency win: junior staff or visiting clients get instant proficiency.*
 
 ---
 
 ## P2 — Enterprise (week 6-10)
 
 🟧 **P2.1 Multi-operator profiles** (~3 days)
-LocalStorage namespace prep is done (P0.5). Modal: profile picker on lock-screen. Each profile carries voice/colour/tier/launchers + own `clientId` for the audit log. *FOM win: lead photographer, editor, MD all use the kiosk; settings + memory + voice stay personal.*
+LocalStorage namespace prep is done (P0.5). Modal: profile picker on lock-screen. Each profile carries voice/colour/tier/launchers + own `clientId` for the audit log. *Agency win: lead photographer, editor, MD all use the kiosk; settings + memory + voice stay personal.*
 
 🟧 **P2.2 Audit log view** (~2 days)
-Hard dep on P1.1 + P2.1. Bridge writes `data/audit/YYYY-MM.jsonl` append-only with `{ts, operator, tool, args, result, runId}`. HUD reads via paged `/audit` route. Searchable. *FOM win: "who sent that draft to the client?" is answerable. Compliance / retention story for the agency.*
+Hard dep on P1.1 + P2.1. Bridge writes `data/audit/YYYY-MM.jsonl` append-only with `{ts, operator, tool, args, result, runId}`. HUD reads via paged `/audit` route. Searchable. *Agency win: "who sent that draft to the client?" is answerable. Compliance / retention story for the agency.*
 
 🟨 **P2.3 Undo** (~3 days, scoped)
-Only meaningful for destructive tools (`expire_usage_rights`, `revoke_rights`, file moves, label changes). Inverse-action recipes recorded by the audit log. Don't try to undo renders or sends. *FOM win: voice "scratch that" + toast undo prevent the 30-second-after-send "wait no" panic.*
+Only meaningful for destructive tools (`expire_usage_rights`, `revoke_rights`, file moves, label changes). Inverse-action recipes recorded by the audit log. Don't try to undo renders or sends. *Agency win: voice "scratch that" + toast undo prevent the 30-second-after-send "wait no" panic.*
 
 🟧 **P2.4 Project context switcher** (~4 days)
-Right rail becomes "ACTIVE PROJECTS" — cards for the most-recent 3 shoot folders, click to scope all subsequent voice commands. `find_frame` defaults to the active project's folder, generated PDFs auto-fill `client`, recent conversations filter to that project. *FOM win: this is the missing axis for "I'm working on the press car campaign" — the agency's actual mental model.*
+Right rail becomes "ACTIVE PROJECTS" — cards for the most-recent 3 shoot folders, click to scope all subsequent voice commands. `find_frame` defaults to the active project's folder, generated PDFs auto-fill `client`, recent conversations filter to that project. *Agency win: this is the missing axis for "I'm working on the press car campaign" — the agency's actual mental model.*
 
 ---
 
@@ -270,7 +270,7 @@ Right rail becomes "ACTIVE PROJECTS" — cards for the most-recent 3 shoot folde
 ## Workstream B follow-ups (speedo expressiveness)
 
 🟨 **Wake-flick on detected wake word** (~half day)
-The `flick` mood exists but isn't wired. Hook the wake-word detector → `__speedo.flash("flick")` → quick 0→40 acknowledgement before transitioning to `listening`. *FOM win: visible "I heard you" beat before the listening state — even before audio confirms.*
+The `flick` mood exists but isn't wired. Hook the wake-word detector → `__speedo.flash("flick")` → quick 0→40 acknowledgement before transitioning to `listening`. *Agency win: visible "I heard you" beat before the listening state — even before audio confirms.*
 
 🟩 **Speedo idle recovery after error** (~2 hours)
 `amber-drop` returns to `idle` after 1.5s. Verify it doesn't get stuck if a fresh task starts mid-amber. Add a guard.
@@ -320,7 +320,7 @@ Detect active app + current state and load only the relevant tools into Qwen's c
 
 ---
 
-## FOM-specific workflow wins
+## agency-specific workflow wins
 
 These don't appear in any reference repo because they're agency-specific. Each one is a clean tool addition that drops into an existing operator command.
 
@@ -339,8 +339,8 @@ Web-scrape the manufacturer / McLaren / Bentley press calendars + cache locally.
 🟧 🚀 **Pre-shoot kit checklist** (~1 day)
 Voice: "kit check for tomorrow's Bentley shoot" → reads project brief, vehicle type, location weather, generates checklist (lenses by focal need, batteries by camera count, lighting by indoor/outdoor, comms by crew count). PDF to phone. *Eliminates the "did we pack the wide?" pre-shoot panic.*
 
-🟨 🚀 **Editorial style memory from past FOM edits** (~3 days)
-Feed last 20 hero edits into Vision + Qwen. Extract grading preferences (warm-cool bias, contrast curve, saturation). When the operator says "match the FOM look", apply learned preferences as Lumetri starting values. *Captures Marcus's grading signature so junior editors hit it on first attempt.*
+🟨 🚀 **Editorial style memory from past  the agency edits** (~3 days)
+Feed last 20 hero edits into Vision + Qwen. Extract grading preferences (warm-cool bias, contrast curve, saturation). When the operator says "match the  the agency look", apply learned preferences as Lumetri starting values. *Captures Marcus's grading signature so junior editors hit it on first attempt.*
 
 🟨 🚀 **EOD activity digest** (~1 day)
 Daily summary email at 18:00 — renders shipped, PDFs generated, contacts added, Frame.io reviews completed, hours spent. *Replaces the "what did I do today" ten minutes at the end of every day.*
@@ -355,20 +355,20 @@ Daily web search across Top Gear / Autocar / Carwow + manufacturer press pages f
 
 ## Integrations — open-source / no paid licence required
 
-FOM doesn't run DaVinci Resolve or Capture One, so anything gated behind those (or behind Remotion's company licence) is out. The integrations below all work with the agency's actual stack: Premiere + Lightroom + Frame.io + ffmpeg + canvas.
+The agency doesn't run DaVinci Resolve or Capture One, so anything gated behind those (or behind Remotion's company licence) is out. The integrations below all work with the agency's actual stack: Premiere + Lightroom + Frame.io + ffmpeg + canvas.
 
 ### Skip / don't invest
 
 🟩 **Remotion** — paid for companies >3 employees ($100-500/mo). Drop. Keep the canvas + ffmpeg filtergraph pipeline; if iteration speed becomes painful, revisit MLT below.
-🟩 **Capture One scripting** — FOM doesn't run Capture One. Tethering is via Lightroom or direct-to-card. Drop the AppleScript hook idea.
-🟩 **DaVinci Resolve Python bridge / FCPXML round-trip** — FOM edits in Premiere; nobody's grading in Resolve. Drop.
+🟩 **Capture One scripting** —  the agency doesn't run Capture One. Tethering is via Lightroom or direct-to-card. Drop the AppleScript hook idea.
+🟩 **DaVinci Resolve Python bridge / FCPXML round-trip** —  the agency edits in Premiere; nobody's grading in Resolve. Drop.
 🟩 **`pymiere` (Premiere Python wrapper)** — unmaintained, relies on dying ExtendScript. Stay on UXP.
 🟩 **CEP / ExtendScript for new work** — September 2026 EOL. Existing scripts fine until then; don't add more.
 🟩 **After Effects scripting** — still ExtendScript-only, UXP "planned" with no date. AE is mostly avoidable for our pipeline.
 🟩 **Adobe Audition automation** — ExtendScript only, no useful CLI. ffmpeg + NLE-side render covers our needs.
 🟩 **Lightroom Classic Lua plugin** — overkill for our use. Continue with XMP sidecars (already shipped) — the most robust integration anyway.
 🟩 **Lightroom CC / mobile sync API** — invite-only / enterprise. Not available.
-🟩 **Final Cut Pro Workflow Extensions** — macOS-only, Swift + Xcode + App Store distribution. Heavy lift unless FOM has FCP editors.
+🟩 **Final Cut Pro Workflow Extensions** — macOS-only, Swift + Xcode + App Store distribution. Heavy lift unless  the agency has FCP editors.
 
 ### Worth knowing about, not urgent
 
@@ -393,7 +393,7 @@ FOM doesn't run DaVinci Resolve or Capture One, so anything gated behind those (
 🟨 **Frame caching budget** — `data/frame-cache/` grows unboundedly; add LRU eviction at 5GB
 🟨 **Embeddings model version pin** — `nomic-embed-text` updates would invalidate stored embeddings; record model + version with each embedding row
 🟩 **HUD performance baseline** — measure FPS budget on M1 Max vs target M5 Max; document tier overrides
-🟩 **Brand white-label install path** — currently FOM-tinted in many places; verify `setup-wizard.mjs --non-interactive` cleans every Flat-Out string
+🟩 **Brand white-label install path** — currently FOM-tinted in many places; verify `setup-wizard.mjs --non-interactive` cleans every Jarvis string
 
 ---
 
@@ -409,7 +409,7 @@ FOM doesn't run DaVinci Resolve or Capture One, so anything gated behind those (
 
 ## How to read this list
 
-Priorities are based on **impact for FOM specifically**, not generic engineering value. The 🚀 items move the agency's daily work forward; the ⚙️ items keep the codebase from collapsing under its own weight as we scale.
+Priorities are based on **impact for  the agency specifically**, not generic engineering value. The 🚀 items move the agency's daily work forward; the ⚙️ items keep the codebase from collapsing under its own weight as we scale.
 
 ### Two perspectives on "what next"
 

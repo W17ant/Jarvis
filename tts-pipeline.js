@@ -98,7 +98,7 @@ export async function speak(text) {
     setTimeout(() => { if (_transcript) _transcript.hidden = true; }, 1800);
     return;
   } catch (e) {
-    console.warn("[Flat-Out] Kokoro unreachable, falling back to system TTS:", e.message);
+    console.warn("[Jarvis] Kokoro unreachable, falling back to system TTS:", e.message);
   }
 
   /* Fallback path — Web Speech API. Lower fidelity but keeps the voice
@@ -224,7 +224,7 @@ export async function speakStream(query, history) {
      * bridge's id-correlated reply, but we don't need to await it — events
      * drive everything. */
     _bridgeAsk({ type: "llm.askStream", payload: { query, history, sessionId: _getSessionId() } }).catch((e) => {
-      console.warn("[Flat-Out] askStream failed:", e.message);
+      console.warn("[Jarvis] askStream failed:", e.message);
       if (session.resolveEarly) session.resolveEarly(session.accumulated || "");
     });
     const text = await finished;

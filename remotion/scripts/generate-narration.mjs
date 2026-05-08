@@ -13,15 +13,15 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const SCENES = [
-  { id: 'title',    text: "Flat-Out. The automotive AI kiosk built for your studio." },
-  { id: 'hook',     text: "Imagine a kiosk that listens, sees, edits, and remembers — purpose-built for an automotive PR and content agency. Here's what Flat-Out can do, and how to install it on your M5 Max in under thirty minutes." },
-  { id: 'voice',    text: "Say: hey Flat-Out, cut a thirty-second teaser of yesterday's Aston shoot. The kiosk picks up the wake phrase, transcribes locally, and starts rendering. Sentence-level streaming gets the first reply in your ear in about a second. Say stop and it'll cut you off mid-sentence." },
+  { id: 'title',    text: "Jarvis. The automotive AI kiosk built for your studio." },
+  { id: 'hook',     text: "Imagine a kiosk that listens, sees, edits, and remembers — purpose-built for an automotive PR and content agency. Here's what Jarvis can do, and how to install it on your M5 Max in under thirty minutes." },
+  { id: 'voice',    text: "Say: hey Jarvis, cut a thirty-second teaser of yesterday's Aston shoot. The kiosk picks up the wake phrase, transcribes locally, and starts rendering. Sentence-level streaming gets the first reply in your ear in about a second. Say stop and it'll cut you off mid-sentence." },
   { id: 'vision',   text: "Vision sees every shot. Caption the Vulcan folder, find the front-grille hero, score clips for the trailer cut. The local Qwen 2.5 vision model keeps your client work on your machine." },
-  { id: 'edit',     text: "Voice-driven cinematic edits. Drop a shoot folder, ask for a teaser, and Flat-Out plans the cut points, applies your brand pack tail-card, beat-syncs to a music track, and lands a finished MP4 in your Downloads." },
+  { id: 'edit',     text: "Voice-driven cinematic edits. Drop a shoot folder, ask for a teaser, and Jarvis plans the cut points, applies your brand pack tail-card, beat-syncs to a music track, and lands a finished MP4 in your Downloads." },
   { id: 'brand',    text: "Hero shot ready? One command exports a full brand pack — sixteen-by-nine, nine-by-sixteen, one-by-one and four-by-five, watermarked and clean, zipped for the client. On location, the live shoot mode turns the photographer's phone into a hands-free flag-and-caption mic." },
-  { id: 'memory',   text: "Persistent memory means you never re-explain who Sarah at the press office is, or what the FOM look means. Plus, Flat-Out exposes its tools through the Model Context Protocol, so Claude Desktop, Cursor and Continue can drive the same kiosk from anywhere." },
-  { id: 'install',  text: "Installing takes a coffee. Open Terminal. Clone the repo. Run install dot sh — the script grabs Ollama, Whisper, Kokoro and Qwen for you. Run setup wizard — pick your hardware tier, your voice, and your shoots folder. Done. Run launch dot sh kiosk, and Flat-Out is live." },
-  { id: 'outro',    text: "Flat-Out. Built for the agency that lives and breathes automotive. Ready when you are." },
+  { id: 'memory',   text: "Persistent memory means you never re-explain who Sarah at the press office is, or what the FOM look means. Plus, Jarvis exposes its tools through the Model Context Protocol, so Claude Desktop, Cursor and Continue can drive the same kiosk from anywhere." },
+  { id: 'install',  text: "Installing takes a coffee. Open Terminal. Clone the repo. Run install dot sh — the script grabs Ollama, Whisper, Kokoro and Qwen for you. Run setup wizard — pick your hardware tier, your voice, and your shoots folder. Done. Run launch dot sh kiosk, and Jarvis is live." },
+  { id: 'outro',    text: "Jarvis. Built for the agency that lives and breathes automotive. Ready when you are." },
 ];
 
 const KOKORO_URL = "http://localhost:8767/tts";

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh - One-shot installer for Flat-Out HUD on macOS (Apple Silicon).
+# install.sh - One-shot installer for Jarvis HUD on macOS (Apple Silicon).
 #
 # Built to be bulletproof for non-technical operators:
 #   - Every step idempotent (re-runs are safe + fast)
@@ -56,11 +56,6 @@ BREW="/opt/homebrew/bin/brew"
 [[ -x /usr/local/bin/brew ]] && BREW="/usr/local/bin/brew"
 
 # ── Brand banner if terminal is wide enough ────────────────
-if [[ -f assets/fom-ascii.txt ]] && [[ "$(tput cols 2>/dev/null || echo 80)" -ge 145 ]]; then
-  printf '\033[31m'
-  cat assets/fom-ascii.txt
-  printf '\033[0m\n'
-fi
 
 # ── Arg parsing ───────────────────────────────────────────────
 MODE="full"
@@ -331,7 +326,7 @@ info "booting bridge for end-to-end test ..."
 # Kill anything already on :8766 so the test doesn't false-pass on a stale bridge.
 pkill -TERM -f "node bridge/server.mjs" 2>/dev/null || true
 sleep 1
-node bridge/server.mjs >/tmp/flat-out-bridge-test.log 2>&1 &
+node bridge/server.mjs >/tmp/jarvis-bridge-test.log 2>&1 &
 BRIDGE_PID=$!
 SUCCESS=0
 for i in {1..15}; do
@@ -351,7 +346,7 @@ if (( SUCCESS )); then
 else
   fail "bridge did not respond after 15 s"
   info "log tail:"
-  tail -10 /tmp/flat-out-bridge-test.log | sed 's/^/    /'
+  tail -10 /tmp/jarvis-bridge-test.log | sed 's/^/    /'
   info "common causes: native binding mismatch, missing config/, port :8766 in use"
   exit 1
 fi
@@ -407,13 +402,13 @@ cat <<EOF
   │     ./tools/uninstall-wizard.sh   # remove everything        │
   │                                                              │
   │  Logs:                                                       │
-  │     tail -f /tmp/flat-out-{bridge,kokoro,whisper,static}.log │
+  │     tail -f /tmp/jarvis-{bridge,kokoro,whisper,static}.log │
   └──────────────────────────────────────────────────────────────┘
 
 EOF
 
 # Developer credit — printed at the end so the operator's last visual is the
-# author signature. Same render pattern as the FOM brand banner at install
+# author signature. Same render pattern as the brand banner at install
 # start, but in the brand red so it visually closes the bookend.
 if [[ -f "$HERE/assets/aoneill-ascii.txt" ]] && [[ "$(tput cols 2>/dev/null || echo 80)" -ge 60 ]]; then
   printf '\033[31m'

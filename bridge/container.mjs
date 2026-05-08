@@ -2,7 +2,7 @@
  *
  *  Why: macOS Homebrew ffmpeg / ImageMagick versions drift between operator machines.
  *  When RENDER_USE_DOCKER=1 is set in .env, shell commands route through the
- *  flat-out/render image (built via docker/render/build.sh) so the render produces
+ *  jarvis/render image (built via docker/render/build.sh) so the render produces
  *  identical output regardless of host Mac. Concurrent renders also stop fighting over
  *  shared system temp dirs because each container gets its own /tmp.
  *
@@ -12,7 +12,7 @@
  *  Mount strategy:
  *    /shoots  ← Paths.getShootsDir()   (read-only — render is read-only on source media)
  *    /output  ← Paths.getOutputDir()   (read-write — where deliverables land)
- *    /assets  ← PROJECT_DIR/assets     (read-only — FOM logos, fonts)
+ *    /assets  ← PROJECT_DIR/assets     (read-only — brand logos, fonts)
  *  Plus the working dir is set to /output so relative paths in shell commands resolve
  *  the same way as on the host (where cwd is the project root and `output/foo.mp4`
  *  lands in the right place).
@@ -30,7 +30,7 @@ import path from "node:path";
 import * as Paths from "./paths.mjs";
 
 const execp = promisify(exec);
-const IMAGE_TAG = "flat-out/render:latest";
+const IMAGE_TAG = "jarvis/render:latest";
 
 const PROJECT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const ASSETS_DIR = path.join(PROJECT_DIR, "assets");
@@ -88,7 +88,7 @@ export function rewriteHostPathsToContainer(cmd) {
 }
 
 /**
- * Run a shell command inside the flat-out/render container. Mounts shoots (ro),
+ * Run a shell command inside the jarvis/render container. Mounts shoots (ro),
  * output (rw), and assets (ro) at known container paths. The current operator's
  * uid/gid is passed via --user so files created in /output are owned by them, not root.
  *

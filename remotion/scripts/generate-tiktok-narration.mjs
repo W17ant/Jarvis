@@ -7,13 +7,13 @@ import path from 'node:path';
 
 const SCENES = [
   { id: 't_hook',   text: "Your studio just got an AI." },
-  { id: 't_voice',  text: "Wake it. Hey Flat-Out, cut a 30-second teaser." },
+  { id: 't_voice',  text: "Wake it. Hey Jarvis, cut a 30-second teaser." },
   { id: 't_vision', text: "It sees every shot. Captions every angle." },
   { id: 't_edit',   text: "Voice in. Cinematic edit out. Three minutes." },
   { id: 't_brand',  text: "One command. Every aspect. Zipped for the client." },
   { id: 't_memory', text: "Remembers your contacts, your projects, your look." },
   { id: 't_live',   text: "On set? Phone as mic. Flag the hero from the lens." },
-  { id: 't_cta',    text: "Flat-Out. Built for automotive." },
+  { id: 't_cta',    text: "Jarvis. Built for automotive." },
 ];
 
 const KOKORO_URL = "http://localhost:8767/tts";

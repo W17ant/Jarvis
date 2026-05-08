@@ -47,15 +47,15 @@ function formatModelLabel(m) {
 
 /* Why: brand-aligned default swatches. Operator can paste any 6-digit hex into the
  * city input via dev console for custom — but these eight cover the realistic palette
- * for a media agency (FOM's red, plus a spread of editorial/automotive accents).
- * Order-tuned so the FOM red sits first as the default. */
+ * for a media agency (arc-reactor cyan plus a spread of accents).
+ * Order-tuned so the cyan sits first as the default. */
 const SWATCH_COLOURS = [
-  { hex: "#E10600", name: "FOM Red" },
-  { hex: "#FF6B00", name: "Track Orange" },
+  { hex: "#00d4ff", name: "Arc Cyan" },
+  { hex: "#FF6B00", name: "Solar Orange" },
   { hex: "#FFB400", name: "Amber" },
-  { hex: "#00D4AA", name: "Pit Green" },
-  { hex: "#00B4FF", name: "Helmet Blue" },
-  { hex: "#7B61FF", name: "Editorial Violet" },
+  { hex: "#00D4AA", name: "Phosphor Green" },
+  { hex: "#00B4FF", name: "Sapphire" },
+  { hex: "#7B61FF", name: "Royal Violet" },
   { hex: "#FF2E88", name: "Hot Pink" },
   { hex: "#F4F4F4", name: "Mono White" },
 ];
@@ -83,10 +83,10 @@ function deriveColours(hex) {
 
 function applyColoursLive(c) {
   const root = document.documentElement;
-  root.style.setProperty("--fom-red", c.primary);
-  root.style.setProperty("--fom-red-deep", c.primaryDeep);
-  root.style.setProperty("--fom-red-glow", c.primaryGlow);
-  root.style.setProperty("--fom-red-tint", c.primaryTint);
+  root.style.setProperty("--accent", c.primary);
+  root.style.setProperty("--accent-deep", c.primaryDeep);
+  root.style.setProperty("--accent-glow", c.primaryGlow);
+  root.style.setProperty("--accent-tint", c.primaryTint);
 }
 
 /** Replace every child of a select with a fresh option list, no innerHTML. */
@@ -99,6 +99,90 @@ function appendOption(parent, value, label) {
   o.textContent = label;
   parent.appendChild(o);
 }
+/** Build one NAME=VALUE row in the generic API keys list.
+ *  When `existingHint` is provided (from a known key), the value field is
+ *  empty and shows "(set …abcd) — type to change" as placeholder. New rows
+ *  start with empty NAME + VALUE inputs and a remove button. */
+function buildKeyRow({ name = "", existingHint = "", isExisting = false } = {}) {
+  const row = document.createElement("div");
+  row.className = "settings-modal__keyrow";
+  if (isExisting) row.dataset.existing = "true";
+
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.className = "is-name";
+  nameInput.placeholder = "ENV_NAME";
+  nameInput.autocomplete = "off";
+  nameInput.value = name;
+  nameInput.spellcheck = false;
+  if (isExisting) nameInput.readOnly = true;
+
+  const eq = document.createElement("span");
+  eq.className = "keyrow__eq";
+  eq.textContent = "=";
+
+  const valueInput = document.createElement("input");
+  valueInput.type = "password";
+  valueInput.className = "is-value";
+  valueInput.autocomplete = "off";
+  valueInput.spellcheck = false;
+  valueInput.placeholder = existingHint
+    ? `(set ${existingHint}) — type to change`
+    : "value";
+
+  const showBtn = document.createElement("button");
+  showBtn.type = "button";
+  showBtn.title = "Show / hide";
+  showBtn.textContent = "👁";
+  showBtn.addEventListener("click", () => {
+    valueInput.type = valueInput.type === "password" ? "text" : "password";
+  });
+
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.title = "Clear this key";
+  removeBtn.textContent = "✕";
+  removeBtn.addEventListener("click", () => {
+    if (isExisting) {
+      /* Mark for clearing; on save the row's value POSTs as empty which
+       * removes the env var. */
+      row.dataset.cleared = "true";
+      valueInput.value = "";
+      valueInput.placeholder = "(will be cleared on save)";
+      row.style.opacity = "0.45";
+    } else {
+      row.remove();
+    }
+  });
+
+  row.appendChild(nameInput);
+  row.appendChild(eq);
+  row.appendChild(valueInput);
+  row.appendChild(showBtn);
+  row.appendChild(removeBtn);
+  return row;
+}
+
+/** Render the API keys list from /api-keys response. */
+function renderApiKeyList(host, payload) {
+  host.replaceChildren();
+  /* Pre-named provider slots (anthropic, openai) first — these power the
+   * LLM provider routing dropdowns, so the operator should see them at the
+   * top of the list. */
+  const slots = [
+    { key: "ANTHROPIC_API_KEY", info: payload?.keys?.anthropic },
+    { key: "OPENAI_API_KEY",    info: payload?.keys?.openai },
+  ];
+  for (const { key, info } of slots) {
+    host.appendChild(buildKeyRow({ name: key, existingHint: info?.hint || "", isExisting: !!info?.set }));
+  }
+  /* Generic env vars the operator has added previously. */
+  for (const entry of payload?.generic || []) {
+    if (entry.name === "ANTHROPIC_API_KEY" || entry.name === "OPENAI_API_KEY") continue;
+    host.appendChild(buildKeyRow({ name: entry.name, existingHint: entry.hint || "", isExisting: !!entry.set }));
+  }
+}
+
 function appendPlaceholder(sel, text) {
   clearSelect(sel);
   appendOption(sel, "", text);
@@ -146,17 +230,37 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   const styleTextarea = document.getElementById("settingsCreativeStyle");
   const styleLoadTemplateBtn = document.getElementById("settingsStyleLoadTemplate");
   const styleStatus = document.getElementById("settingsStyleStatus");
-  const socialInstagram = document.getElementById("settingsSocialInstagram");
-  const socialFacebook = document.getElementById("settingsSocialFacebook");
-  const socialX = document.getElementById("settingsSocialX");
-  const socialTiktok = document.getElementById("settingsSocialTiktok");
+  /* Social-handle inputs were retired in the white-label cleanup — keep the
+   * variables as null so existing code paths that touch them no-op cleanly
+   * without a try/catch wrapper. */
+  const socialInstagram = null, socialFacebook = null, socialX = null, socialTiktok = null;
   const tsStatusEl = document.getElementById("settingsTailscaleStatus");
   const tsSetupBtn = document.getElementById("settingsTailscaleSetupBtn");
   const tsAdminBtn = document.getElementById("settingsTailscaleAdminBtn");
   const tsRefreshBtn = document.getElementById("settingsTailscaleRefreshBtn");
-  const keyFrameio = document.getElementById("settingsKeyFrameio");
-  const keySerpapi = document.getElementById("settingsKeySerpapi");
-  const keyHunter = document.getElementById("settingsKeyHunter");
+  /* Legacy named API key inputs were replaced by the generic NAME=VALUE list
+   * (settingsApiKeysList). Kept null-aliased so any legacy path that reads
+   * these no-ops cleanly. */
+  const keyFrameio = null, keySerpapi = null, keyHunter = null;
+  /* Brand identity editor */
+  const brandAgent = document.getElementById("settingsBrandAgent");
+  const brandWake = document.getElementById("settingsBrandWake");
+  const brandWakeMishears = document.getElementById("settingsBrandWakeMishears");
+  const brandAgency = document.getElementById("settingsBrandAgency");
+  const brandTagline = document.getElementById("settingsBrandTagline");
+  /* LLM provider routing */
+  const llmChat = document.getElementById("settingsLlmChat");
+  const llmVision = document.getElementById("settingsLlmVision");
+  const llmHighStakes = document.getElementById("settingsLlmHighStakes");
+  /* Generic NAME=VALUE API keys */
+  const apiKeysList = document.getElementById("settingsApiKeysList");
+  const apiKeyAddBtn = document.getElementById("settingsApiKeyAdd");
+  const apiKeysStatus = document.getElementById("settingsApiKeysStatus");
+  /* VAD / mic sensitivity */
+  const vadThreshold = document.getElementById("settingsVadThreshold");
+  const vadValue = document.getElementById("settingsVadValue");
+  const vadMeter = document.getElementById("settingsVadMeter");
+  const vadMeterMark = document.getElementById("settingsVadMeterMark");
 
   /* Stash the selected geocode hit so save can skip the second API call when the
    * operator picked an explicit suggestion. Cleared whenever the input mutates. */
@@ -265,6 +369,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
    *  Captures the pre-open colour state so CANCEL / Esc restore it cleanly. */
   async function openModal() {
     modal.hidden = false;
+    document.dispatchEvent(new Event("settings:opened"));
     appendPlaceholder(voiceSel, "loading...");
     appendPlaceholder(modelSel, "loading...");
     setStatus("");
@@ -272,10 +377,10 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
     /* Snapshot whatever colour the HUD is currently rendering so we can revert on cancel. */
     const cs = getComputedStyle(document.documentElement);
     originalColours = {
-      primary: cs.getPropertyValue("--fom-red").trim() || "#E10600",
-      primaryDeep: cs.getPropertyValue("--fom-red-deep").trim(),
-      primaryGlow: cs.getPropertyValue("--fom-red-glow").trim(),
-      primaryTint: cs.getPropertyValue("--fom-red-tint").trim(),
+      primary: cs.getPropertyValue("--accent").trim() || "#00d4ff",
+      primaryDeep: cs.getPropertyValue("--accent-deep").trim(),
+      primaryGlow: cs.getPropertyValue("--accent-glow").trim(),
+      primaryTint: cs.getPropertyValue("--accent-tint").trim(),
     };
 
     /* Fetch operator's current location so the city input pre-fills. */
@@ -301,7 +406,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
           const j = await r.json();
           imessageEnabled.checked = !!j.enabled;
           imessageSenders.value = (j.allowedSenders || []).join(", ");
-          imessageTrigger.value = j.trigger || "hey flat-out";
+          imessageTrigger.value = j.trigger || "hey jarvis";
           imessagePoll.value = Math.round((j.pollIntervalMs || 5000) / 1000);
           if (imessageStatusEl) {
             imessageStatusEl.classList.remove("is-pass", "is-fail");
@@ -337,24 +442,42 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
       profileSel.value = activeId;
     }
 
-    /* External API keys — fetch presence info from /api-keys and render the
-     * inputs as placeholders ("set · …abcd") when configured. The actual key
-     * value is NEVER returned by the bridge — operator types a new value to
-     * change it, leaves blank to keep the existing one. */
-    if (keyFrameio) {
+    /* Generic NAME=VALUE API keys — render one row per env-var the bridge
+     * surfaces. Values are NEVER returned (only presence + last-4 hint), so
+     * each row's value field is empty until the operator types in a new
+     * value. The legacy ANTHROPIC_API_KEY / OPENAI_API_KEY pre-named slots
+     * stay rendered first so LLM provider routing has obvious anchors. */
+    if (apiKeysList) {
       try {
         const r = await fetch("http://localhost:8766/api-keys", { cache: "no-store" });
         if (r.ok) {
           const j = await r.json();
-          const apply = (input, info) => {
-            input.value = "";
-            if (info?.set) input.placeholder = `(set ${info.hint || ""}) — type to change`;
-          };
-          apply(keyFrameio, j.keys?.frameio);
-          apply(keySerpapi, j.keys?.serpapi);
-          apply(keyHunter, j.keys?.hunter);
+          renderApiKeyList(apiKeysList, j);
+          /* Provider routing dropdowns — sync from /api-keys. */
+          if (llmChat)       llmChat.value       = j.routing?.default    || "ollama";
+          if (llmVision)     llmVision.value     = j.routing?.vision     || "ollama";
+          if (llmHighStakes) llmHighStakes.value = j.routing?.highstakes || "ollama";
+        } else if (apiKeysList) {
+          apiKeysList.replaceChildren();
         }
-      } catch { /* bridge offline — leave default placeholders */ }
+      } catch {
+        if (apiKeysList) apiKeysList.replaceChildren();
+      }
+    }
+
+    /* Brand identity — read /brand, populate the editor inputs. */
+    if (brandAgent) {
+      try {
+        const r = await fetch("http://localhost:8766/brand", { cache: "no-store" });
+        if (r.ok) {
+          const b = await r.json();
+          brandAgent.value = b.agent?.name || "";
+          brandWake.value = b.agent?.wakePhrase || "";
+          brandWakeMishears.value = (b.agent?.wakeMishears || []).join(", ");
+          brandAgency.value = b.agency?.name || "";
+          brandTagline.value = b.agency?.tagline || "";
+        }
+      } catch { /* bridge offline */ }
     }
 
     /* Tailscale status — fetch + render. Three states (missing / logged-out /
@@ -477,6 +600,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
     }
     pendingColour = null;
     modal.hidden = true;
+    document.dispatchEvent(new Event("settings:closed"));
     setStatus("");
   }
 
@@ -590,16 +714,30 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
       applyCameraVisibility?.(currentState);
     }
 
-    /* External API keys — collect any non-empty inputs and POST to /api-keys.
-     * Empty input = "leave existing value alone" (we never trash an existing
-     * key by accident). The bridge writes to .env + updates process.env so
-     * the change is live without restart. */
+    /* Generic API keys + LLM routing — collect from the dynamic NAME=VALUE
+     * list + the routing dropdowns and POST to /api-keys. Empty value =
+     * leave existing key alone (matches legacy behaviour). */
     let apiKeysChanged = false;
-    if (keyFrameio) {
+    if (apiKeysList) {
       const payload2 = {};
-      if (keyFrameio.value.trim()) payload2.frameio = keyFrameio.value.trim();
-      if (keySerpapi.value.trim()) payload2.serpapi = keySerpapi.value.trim();
-      if (keyHunter.value.trim())  payload2.hunter  = keyHunter.value.trim();
+      const customRows = apiKeysList.querySelectorAll(".settings-modal__keyrow");
+      const custom = [];
+      customRows.forEach((row) => {
+        const nameInput = row.querySelector("input.is-name");
+        const valueInput = row.querySelector("input.is-value");
+        if (!nameInput || !valueInput) return;
+        const name = (nameInput.value || "").trim().toUpperCase();
+        const value = (valueInput.value || "").trim();
+        if (!name) return;
+        /* Skip rows that have no new value AND aren't being cleared. */
+        if (!value && !row.dataset.cleared) return;
+        custom.push({ name, value });
+      });
+      if (custom.length) payload2.custom = custom;
+      /* LLM provider routing knobs */
+      if (llmChat?.value)       payload2.defaultProvider    = llmChat.value;
+      if (llmVision?.value)     payload2.visionProvider     = llmVision.value;
+      if (llmHighStakes?.value) payload2.highstakesProvider = llmHighStakes.value;
       if (Object.keys(payload2).length) {
         try {
           const r = await fetch("http://localhost:8766/api-keys", {
@@ -607,47 +745,53 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
             headers: { "content-type": "application/json" },
             body: JSON.stringify(payload2),
           });
-          if (r.ok) {
-            apiKeysChanged = true;
-            /* Clear the inputs so the operator doesn't accidentally re-submit
-             * on next save; the masked placeholder will refresh on next open. */
-            [keyFrameio, keySerpapi, keyHunter].forEach(el => { el.value = ""; });
-          }
+          if (r.ok) apiKeysChanged = true;
         } catch { /* surfaced via the main save status */ }
       }
     }
 
-    /* Social handles — diff against what /brand currently reports, only attach
-     * to payload if any of the four changed. Sending the whole object is fine
-     * (the bridge merges field-by-field) but skipping the round-trip on no-op
-     * keeps the "no changes" status accurate. */
-    if (socialInstagram) {
-      try {
-        const r = await fetch("http://localhost:8766/brand", { cache: "no-store" });
-        if (r.ok) {
-          const b = await r.json();
-          const cur = b.agency?.socials || {};
-          const newSocials = {
-            instagram: (socialInstagram.value || "").trim(),
-            facebook: (socialFacebook.value || "").trim(),
-            x: (socialX.value || "").trim(),
-            tiktok: (socialTiktok.value || "").trim(),
-          };
-          const dirty = ["instagram", "facebook", "x", "tiktok"].some(
-            k => newSocials[k] !== ((cur[k] || (k === "instagram" ? b.agency?.social : "")) || "")
-          );
-          if (dirty) payload.socials = newSocials;
-        } else {
-          /* Bridge didn't return /brand — be safe and send anyway. */
-          payload.socials = {
-            instagram: (socialInstagram.value || "").trim(),
-            facebook: (socialFacebook.value || "").trim(),
-            x: (socialX.value || "").trim(),
-            tiktok: (socialTiktok.value || "").trim(),
-          };
-        }
-      } catch { /* bridge offline — skip; main save will catch it */ }
+    /* Brand identity — POST /brand with whatever the operator changed. The
+     * bridge shallow-merges so blank fields don't clobber existing values
+     * unless explicitly cleared. */
+    let brandChanged = false;
+    if (brandAgent) {
+      const agentPatch = {
+        name: (brandAgent.value || "").trim() || undefined,
+        wakePhrase: (brandWake.value || "").trim() || undefined,
+        wakeMishears: (brandWakeMishears.value || "").trim() || undefined,
+      };
+      const agencyPatch = {
+        name: (brandAgency.value || "").trim() || undefined,
+        tagline: (brandTagline.value || "").trim() || undefined,
+      };
+      /* Only POST if at least one field is non-undefined. */
+      const hasAgent = Object.values(agentPatch).some((v) => v !== undefined);
+      const hasAgency = Object.values(agencyPatch).some((v) => v !== undefined);
+      if (hasAgent || hasAgency) {
+        try {
+          const r = await fetch("http://localhost:8766/brand", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              agent:  hasAgent  ? agentPatch  : undefined,
+              agency: hasAgency ? agencyPatch : undefined,
+            }),
+          });
+          if (r.ok) brandChanged = true;
+        } catch { /* surfaced via main status */ }
+      }
     }
+
+    /* VAD threshold — browser-local. Persist to profile-namespaced storage
+     * so each operator profile keeps its own mic calibration. The wake
+     * detector reads it on next mic-loop tick. */
+    if (vadThreshold) {
+      Storage.set("vadThreshold", String(parseFloat(vadThreshold.value) || 0.02));
+    }
+
+    /* (Social-handle save block removed in white-label cleanup — the
+     * dedicated section is gone from the panel. Brand identity editor
+     * above handles the agency + agent fields.) */
 
     /* Folders — only POST if either input changed. Send paths separately because they
      * are validated (mkdir-tested) before brand.json is rewritten; combining with the
@@ -696,7 +840,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean);
-        const trigger = (imessageTrigger.value || "hey flat-out").trim();
+        const trigger = (imessageTrigger.value || "hey jarvis").trim();
         const pollSec = parseInt(imessagePoll.value, 10);
         const pollIntervalMs = Math.max(1000, Math.min(60_000, (pollSec || 5) * 1000));
         const r = await fetch("http://localhost:8766/imessage/config", {
@@ -1058,7 +1202,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
    * Records 3s from the operator's preferred mic, sends to Whisper, and
    * runs WakeParse.containsWake() against the transcript. Confirms Adam's
    * accent + mic combo reliably triggers the wake word before he hits a
-   * "I keep saying Hey Flat-Out and nothing happens" rabbit hole.
+   * "I keep saying Hey Jarvis and nothing happens" rabbit hole.
    *
    * Doesn't go through the voice loop — direct getUserMedia → MediaRecorder
    * → POST /transcribe → WakeParse — so it works even when passive listening
@@ -1157,16 +1301,63 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   const locateBrowserBtn = document.getElementById("settingsLocateBrowser");
   if (locateBrowserBtn) locateBrowserBtn.addEventListener("click", locateViaBrowser);
 
-  /* API-key show/hide toggles. Each toggle button has data-target=<input id>;
-   * we just flip the input's type between password and text. Single delegated
-   * listener so adding more keys later doesn't need new wiring. */
-  document.querySelectorAll(".settings-modal__key-toggle").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const target = document.getElementById(btn.dataset.target);
-      if (!target) return;
-      target.type = target.type === "password" ? "text" : "password";
+  /* +ADD KEY button on the generic API keys list. Inserts a fresh empty row
+   * the operator can fill in; on save, only rows with a valid uppercase
+   * NAME are written through. */
+  if (apiKeyAddBtn && apiKeysList) {
+    apiKeyAddBtn.addEventListener("click", () => {
+      apiKeysList.appendChild(buildKeyRow({}));
+      const last = apiKeysList.lastElementChild?.querySelector("input.is-name");
+      last?.focus();
     });
-  });
+  }
+
+  /* VAD slider — live-update the display value + position the threshold
+   * mark on the meter. The live mic-level fill is driven elsewhere via
+   * window.__speedo.getLevel() polling on a 100ms tick. */
+  if (vadThreshold && vadValue) {
+    const VAD_MIN = parseFloat(vadThreshold.min) || 0.005;
+    const VAD_MAX = parseFloat(vadThreshold.max) || 0.08;
+    const updateVadDisplay = () => {
+      const v = parseFloat(vadThreshold.value) || 0.02;
+      vadValue.textContent = v.toFixed(3);
+      if (vadMeterMark) {
+        const pct = ((v - VAD_MIN) / (VAD_MAX - VAD_MIN)) * 100;
+        vadMeterMark.style.left = `${Math.max(0, Math.min(100, pct))}%`;
+      }
+    };
+    vadThreshold.addEventListener("input", updateVadDisplay);
+    updateVadDisplay();
+    /* Restore persisted value (profile-namespaced) and start the live meter. */
+    const persisted = parseFloat(Storage.get("vadThreshold", ""));
+    if (!Number.isNaN(persisted) && persisted >= VAD_MIN && persisted <= VAD_MAX) {
+      vadThreshold.value = String(persisted);
+      updateVadDisplay();
+    }
+    /* Live mic-level meter — polls window.__speedo's getLevel (mic RMS already
+     * normalised to 0..1 by voice.js) and renders against the same scale as
+     * the threshold mark. Polling is light (100ms / 10Hz) and only runs while
+     * the modal is open. */
+    let vadMeterPoll = null;
+    const startVadMeter = () => {
+      if (vadMeterPoll) return;
+      vadMeterPoll = setInterval(() => {
+        const level = window.__speedo?.getLevel?.() ?? 0;
+        if (vadMeter) {
+          /* Convert 0..1 mic RMS to a percentage of the meter span 0..VAD_MAX. */
+          const pct = (level / VAD_MAX) * 100;
+          vadMeter.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+        }
+      }, 100);
+    };
+    const stopVadMeter = () => {
+      if (vadMeterPoll) clearInterval(vadMeterPoll);
+      vadMeterPoll = null;
+    };
+    /* Hook lifecycle — start when modal opens, stop on close. */
+    document.addEventListener("settings:opened", startVadMeter);
+    document.addEventListener("settings:closed", stopVadMeter);
+  }
 
   /* Tailscale buttons — refresh re-fetches status, setup pops Terminal at
    * the install wrapper, admin opens the Tailscale admin console. */
@@ -1196,7 +1387,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   }
 
   /* Load template — fetches the example creative-style.md from the static
-   * server so the operator can start from the Flat-Out baseline + tweak.
+   * server so the operator can start from the Jarvis baseline + tweak.
    * Confirms before clobbering existing edits. */
   if (styleLoadTemplateBtn && styleTextarea) {
     styleLoadTemplateBtn.addEventListener("click", async () => {
@@ -1235,7 +1426,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
         const r = await fetch("http://localhost:8766/brand", { cache: "no-store" });
         if (!r.ok) throw new Error(`bridge ${r.status}`);
         const brand = await r.json();
-        const brandPrimary = (brand?.colors?.primary || "#E10600").toUpperCase();
+        const brandPrimary = (brand?.colors?.primary || "#00d4ff").toUpperCase();
         const c = deriveColours(brandPrimary);
         applyColoursLive(c);
         /* Clear any pending swatch selection + null sentinel so save() removes the

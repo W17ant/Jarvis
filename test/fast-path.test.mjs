@@ -3,7 +3,7 @@
  *  Why this exists: Adam reported a refusal-loop bug where "bring up a map of
  *  Goodwood to scout a shoot" fell through the fast-path's narrow regex
  *  ("open|pull up|show me") and reached the LLM, which then refused with
- *  "I'm only here for automotive Flat-Out tasks". A regex change like that
+ *  "I'm only here for automotive Jarvis tasks". A regex change like that
  *  has no other guard rails — a lazy edit could silently kill the map path
  *  for everyone. These tests pin every phrasing we've validated by hand so
  *  future regex tweaks don't regress.

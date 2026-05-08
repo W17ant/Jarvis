@@ -117,7 +117,7 @@ const HANDLERS = [
    *  Adam (and visitors / clients) keep asking this in the kiosk's first
    *  five minutes. Currently it goes through the LLM, which paraphrases
    *  inconsistently and sometimes drifts into the refusal-shaped phrasing
-   *  we hit earlier ("I'm only here for automotive Flat-Out tasks"). A
+   *  we hit earlier ("I'm only here for automotive Jarvis tasks"). A
    *  canned, friendly tour that points at the cheat-sheet hotkey for the
    *  full list is faster (~500ms) and on-brand.
    *

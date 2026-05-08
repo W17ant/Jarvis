@@ -1,6 +1,6 @@
 # Changelog
 
-Running record of features shipped to the Flat-Out HUD kiosk. Newest first.
+Running record of features shipped to the Jarvis HUD kiosk. Newest first.
 
 ## 2026-05 (current sprint)
 
@@ -35,8 +35,8 @@ Running record of features shipped to the Flat-Out HUD kiosk. Newest first.
 
 ### Dropped (not pursued)
 - **Remotion** — paid for companies >3 employees ($100-500/mo). Keeping canvas + ffmpeg pipeline.
-- **Capture One** scripting — FOM doesn't run Capture One.
-- **DaVinci Resolve / FCPXML bridge** — FOM edits in Premiere; nobody's grading in Resolve.
+- **Capture One** scripting —  the lead client doesn't run Capture One.
+- **DaVinci Resolve / FCPXML bridge** —  the lead client edits in Premiere; nobody's grading in Resolve.
 - **Voice cloning** (F5-TTS, ElevenLabs Pro) — operator finds it weird; sticking to off-the-shelf Kokoro voices.
 
 ---

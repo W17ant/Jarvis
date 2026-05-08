@@ -1,11 +1,11 @@
 {
-  "name": "flat-out-remotion",
+  "name": "jarvis-remotion",
   "version": "1.0.0",
   "private": true,
-  "description": "Branded marketing + install video for the Flat-Out HUD kiosk.",
+  "description": "Branded marketing + install video for the Jarvis HUD kiosk.",
   "scripts": {
     "studio": "remotion studio",
-    "render": "remotion render FlatOutOverview ~/Downloads/flat-out-overview.mp4 --concurrency=4"
+    "render": "remotion render JarvisOverview ~/Downloads/jarvis-overview.mp4 --concurrency=4"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.435",

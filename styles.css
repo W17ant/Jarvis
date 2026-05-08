@@ -1,21 +1,21 @@
-/** styles.css - Flat-Out HUD. Brand-true: Oswald + Rubik, #E10600 with #8F0003 accents. */
+/** styles.css - Jarvis HUD. Arc-reactor cyan: #00d4ff with #0077a8 deep accents. */
 
 :root {
-  /* Why: brand red lifted from FOM logo files (bright) + their CSS rgba(143,0,3,.9) (deep). Pair, don't blend. */
-  --fom-red: #E10600;
-  --fom-red-deep: #8F0003;
-  --fom-red-glow: rgba(225, 6, 0, 0.55);
-  --fom-red-tint: rgba(225, 6, 0, 0.06);
+  /* Why: arc-reactor cyan — bright (#00d4ff) + deeper teal (#0077a8) for layered glow. */
+  --accent: #00d4ff;
+  --accent-deep: #0077a8;
+  --accent-glow: rgba(0, 212, 255, 0.55);
+  --accent-tint: rgba(0, 212, 255, 0.06);
 
-  --ink-0: #000;
-  --ink-1: #0a0a0a;
-  --ink-2: #141414;
+  --ink-0: #02060c;
+  --ink-1: #060c16;
+  --ink-2: #0a131f;
   --line: rgba(255, 255, 255, 0.18);
   --line-soft: rgba(255, 255, 255, 0.08);
-  --text: #f4f4f4;
-  --text-dim: rgba(244, 244, 244, 0.55);
+  --text: #e8f4ff;
+  --text-dim: rgba(232, 244, 255, 0.55);
 
-  /* Why: Oswald + Rubik are the exact pair loaded by flatoutmedia.org */
+  /* Why: Oswald + Rubik are the exact pair loaded by  */
   --font-display: "Oswald", "Arial Narrow", system-ui, sans-serif;
   --font-body: "Rubik", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
@@ -41,8 +41,8 @@ html, body {
 .grid-bg {
   position: fixed; inset: 0;
   background-image:
-    linear-gradient(rgba(225, 6, 0, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(225, 6, 0, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(0, 212, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.04) 1px, transparent 1px);
   background-size: 48px 48px;
   animation: gridDrift 18s linear infinite;
   z-index: 0;
@@ -76,7 +76,10 @@ html, body {
   z-index: 2;
   display: grid;
   grid-template-columns: 1fr 1fr 1.6fr 1fr 1.4fr;
-  grid-template-rows: 48px 0.95fr 1.3fr 0.95fr 64px;
+  /* Row 4 (launcher) trimmed slightly because the 9-tile 3×3 grid only
+   * needs ~80% of the original height; the saved space goes to row 2
+   * (date pill + clock) so the date doesn't read oversized. */
+  grid-template-rows: 48px 0.95fr 1.4fr 0.78fr 64px;
   gap: 10px;
   padding: 10px 14px;
   height: 100vh;
@@ -126,12 +129,12 @@ html, body {
   box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
 }
 .health__pip.is-down .health__dot {
-  background: var(--fom-red);
-  box-shadow: 0 0 8px var(--fom-red-glow);
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
   animation: health-pulse 1.4s ease-in-out infinite;
 }
 .health__pip.is-up .health__label { color: var(--text); }
-.health__pip.is-down .health__label { color: var(--fom-red); }
+.health__pip.is-down .health__label { color: var(--accent); }
 @keyframes health-pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.4; }
@@ -153,9 +156,9 @@ html, body {
 }
 .calendar__days span.is-today {
   color: var(--ink-0);
-  background: var(--fom-red);
-  border-color: var(--fom-red);
-  box-shadow: 0 0 12px var(--fom-red-glow);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
   font-weight: 700;
 }
 .calendar__brand {
@@ -189,7 +192,7 @@ html, body {
   text-transform: uppercase;
   line-height: 1;
   text-shadow:
-    0 0 14px var(--fom-red-glow),
+    0 0 14px var(--accent-glow),
     0 0 2px rgba(255, 255, 255, 0.6);
 }
 .calendar__brand-text-suffix {
@@ -197,10 +200,10 @@ html, body {
   font-weight: 600;
   font-size: 13px;
   letter-spacing: 0.4em;
-  color: var(--fom-red);
+  color: var(--accent);
   text-transform: uppercase;
   margin-right: -0.4em;          /* strip trailing letter-spacing gap so right-edge aligns */
-  text-shadow: 0 0 8px var(--fom-red-glow);
+  text-shadow: 0 0 8px var(--accent-glow);
 }
 
 .calendar__brand-tag {
@@ -216,7 +219,7 @@ html, body {
 .panel {
   position: relative;
   background:
-    linear-gradient(135deg, var(--fom-red-tint) 0%, transparent 60%),
+    linear-gradient(135deg, var(--accent-tint) 0%, transparent 60%),
     var(--ink-1);
   border: var(--line-w) solid var(--line);
   padding: 10px 12px;
@@ -241,7 +244,7 @@ html, body {
   font-weight: 600;
   letter-spacing: 0.3em;
   font-size: 11px;
-  color: var(--fom-red);
+  color: var(--accent);
   margin-bottom: 8px;
   text-transform: uppercase;
 }
@@ -251,31 +254,33 @@ html, body {
  * distribute their natural content across the full panel height — month centres its
  * ring, system spreads syspods/stat-row evenly, comms lets its list fill the slot.
  * Result: same grid geometry, no awkward bottom-gap. */
-.panel--month     { grid-column: 1; grid-row: 2; justify-content: center; }
-.panel--system    { grid-column: 1; grid-row: 3; justify-content: space-around; }
-.panel--comms     { grid-column: 1; grid-row: 4; }
-.panel--comms .comms { flex: 1; min-height: 0; }    /* fill remaining vertical, scroll on overflow */
+/* CORE TELEMETRY now claims the full left rail rows 2-4 (panel--month
+ * retired in the white-label cleanup; date is already visible in the
+ * calendar strip + clock panel). 8 paired dials + 3 sparklines + stat row
+ * spread comfortably across the extra height. */
+/* CORE TELEMETRY — full left rail, content distributes to fill height. */
+.panel--system    { grid-column: 1; grid-row: 2 / 5; justify-content: space-between; }
 .panel--core      { grid-column: 2 / 5; grid-row: 2 / 5; border: none; background: transparent; clip-path: none; padding: 0; display: grid; place-items: center; position: relative; }
-.panel--weather   { grid-column: 5; grid-row: 2; }
-.panel--clock     { grid-column: 5; grid-row: 3; display: flex; flex-direction: column; align-items: stretch; justify-content: stretch; }
+.panel--clock     { grid-column: 5; grid-row: 2; display: flex; flex-direction: column; align-items: stretch; justify-content: stretch; }
+.panel--weather   { grid-column: 5; grid-row: 3; }
 
 /* Why: clock panel split into a 2-up — time block (top) + today's diary feed (bottom).
  * Diary is bridge-fed via /diary which proxies macOS Calendar so the operator can glance
  * at what's coming up without leaving the HUD. Items are colour-coded by how soon they fire:
  * imminent (<30 min) red, today's later events soft text, rest dim. */
-.clock-split { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; }
+.clock-split { display: flex; flex-direction: column; gap: 8px; height: 100%; min-height: 0; }
 .clock-split__time {
   display: flex; flex-direction: column; align-items: flex-end; justify-content: center;
-  flex: 1 1 50%;
+  flex: 0 0 auto;
   border-bottom: 1px dashed var(--line-soft);
-  padding-bottom: 8px;
+  padding-bottom: 6px;
 }
 .clock-split__diary {
-  flex: 1 1 50%;
+  flex: 1 1 auto;
   display: flex; flex-direction: column; min-height: 0;
 }
 .diary__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
-.diary__title { font-family: var(--font-display); font-weight: 600; font-size: 10px; letter-spacing: 0.32em; color: var(--fom-red); text-transform: uppercase; }
+.diary__title { font-family: var(--font-display); font-weight: 600; font-size: 10px; letter-spacing: 0.32em; color: var(--accent); text-transform: uppercase; }
 .diary__count { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.12em; }
 .diary {
   list-style: none;
@@ -295,9 +300,9 @@ html, body {
 }
 .diary li:last-child { border-bottom: none; }
 .diary li.diary__empty { color: var(--text-dim); font-style: italic; border-bottom: none; }
-.diary__time { color: var(--fom-red); font-weight: 600; min-width: 44px; }
+.diary__time { color: var(--accent); font-weight: 600; min-width: 44px; }
 .diary__title-line { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
-.diary li.is-imminent .diary__time { color: var(--text); text-shadow: 0 0 8px var(--fom-red-glow); }
+.diary li.is-imminent .diary__time { color: var(--text); text-shadow: 0 0 8px var(--accent-glow); }
 .diary li.is-imminent .diary__title-line { color: var(--text); }
 .panel--launch    { grid-column: 5; grid-row: 4; }
 .panel--telemetry { grid-column: 1 / -1; grid-row: 5; }
@@ -311,11 +316,11 @@ html, body {
 .ring__svg { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring__track { fill: none; stroke: var(--line-soft); stroke-width: 4; }
 .ring__fill {
-  fill: none; stroke: var(--fom-red); stroke-width: 4;
+  fill: none; stroke: var(--accent); stroke-width: 4;
   stroke-linecap: round;
   stroke-dasharray: 578;
   stroke-dashoffset: 578;
-  filter: drop-shadow(0 0 6px var(--fom-red-glow));
+  filter: drop-shadow(0 0 6px var(--accent-glow));
   transition: stroke-dashoffset 1s ease;
 }
 .ring__inner {
@@ -339,10 +344,10 @@ html, body {
 .gauge__svg { width: 100%; height: auto; }
 .gauge__track { fill: none; stroke: var(--line-soft); stroke-width: 8; stroke-linecap: round; }
 .gauge__fill {
-  fill: none; stroke: var(--fom-red); stroke-width: 8; stroke-linecap: round;
+  fill: none; stroke: var(--accent); stroke-width: 8; stroke-linecap: round;
   stroke-dasharray: 283;
   stroke-dashoffset: 283;
-  filter: drop-shadow(0 0 4px var(--fom-red-glow));
+  filter: drop-shadow(0 0 4px var(--accent-glow));
   transition: stroke-dashoffset 0.8s ease;
 }
 .gauge__readout {
@@ -379,16 +384,16 @@ html, body {
   fill: none; stroke: var(--line-soft); stroke-width: 6;
 }
 .syspod__fill {
-  fill: none; stroke: var(--fom-red); stroke-width: 6;
+  fill: none; stroke: var(--accent); stroke-width: 6;
   stroke-linecap: round;
   stroke-dasharray: 264;        /* 2π × r=42 */
   stroke-dashoffset: 264;       /* starts empty; JS sets via setArcGauge */
-  filter: drop-shadow(0 0 3px var(--fom-red-glow));
+  filter: drop-shadow(0 0 3px var(--accent-glow));
   transition: stroke-dashoffset 0.7s ease;
 }
-.syspod__fill--cpu { stroke: var(--fom-red); }
+.syspod__fill--cpu { stroke: var(--accent); }
 .syspod__fill--gpu { stroke: #ff5a3a; filter: drop-shadow(0 0 4px rgba(255, 90, 58, 0.55)); }
-.syspod__fill--ram { stroke: var(--fom-red-deep); }
+.syspod__fill--ram { stroke: var(--accent-deep); }
 
 .syspod__readout {
   position: absolute; inset: 0;
@@ -403,7 +408,7 @@ html, body {
 .syspod__sub   { font-size: 7px; letter-spacing: 0.18em; color: var(--text-dim); text-transform: uppercase; margin-top: 1px; }
 .syspod__sub.is-light    { color: #f6c544; }
 .syspod__sub.is-moderate { color: #ff9c1a; }
-.syspod__sub.is-heavy    { color: var(--fom-red); text-shadow: 0 0 6px var(--fom-red-glow); }
+.syspod__sub.is-heavy    { color: var(--accent); text-shadow: 0 0 6px var(--accent-glow); }
 
 .stat-row { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .stat { display: flex; flex-direction: column; gap: 2px; font-family: var(--font-mono); font-size: 11px; }
@@ -434,11 +439,11 @@ html, body {
   content: "";
   position: absolute; left: 0; top: 6px;
   width: 8px; height: 12px;
-  background: var(--fom-red);
+  background: var(--accent);
   clip-path: polygon(40% 0, 100% 0, 60% 100%, 0 100%);
 }
 .comms__clickable { cursor: pointer; transition: color 0.15s, padding-left 0.15s, background 0.15s; }
-.comms__clickable:hover { color: var(--text); padding-left: 18px; background: linear-gradient(90deg, var(--fom-red-tint) 0%, transparent 50%); }
+.comms__clickable:hover { color: var(--text); padding-left: 18px; background: linear-gradient(90deg, var(--accent-tint) 0%, transparent 50%); }
 
 /* ---------- SPEEDO (CENTERPIECE) ---------- */
 .speedo {
@@ -447,7 +452,7 @@ html, body {
   aspect-ratio: 1;
   /* Why: when the operator speaks or Daniel replies, the transcript bubble appears just
    * below the speedo. To stop it overlapping the dial we shrink + lift the speedo so
-   * there's room for HEARD/FLAT-OUT lines underneath. Smooth transition keeps the
+   * there's room for HEARD/JARVIS lines underneath. Smooth transition keeps the
    * choreography clean — looks like the gauge is "leaning back" to give the conversation
    * the spotlight, then settling back in standby. */
   transform: scale(1) translateY(0);
@@ -461,37 +466,23 @@ html, body {
 }
 .speedo__svg { width: 100%; height: 100%; position: relative; z-index: 2; }
 
-/* The FOM dial sits prominently behind the SVG gauge — the red blade is mostly all there is in the PNG (rest is transparent), so on black it reads as a bold signature stroke rather than a competing element. */
-.speedo__brand-mark {
-  position: absolute;
-  inset: 8%;
-  background: url("assets/fom-dial.png") center / contain no-repeat;
-  opacity: 0.95;
-  z-index: 1;
-  /* Why: amplify the red blade with its own glow so it pops as the brand anchor */
-  filter: drop-shadow(0 0 16px var(--fom-red-glow)) drop-shadow(0 0 4px var(--fom-red-glow));
-  animation: bladePulse 3s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes bladePulse {
-  0%, 100% { opacity: 0.85; transform: scale(1); }
-  50%      { opacity: 1.0;  transform: scale(1.015); }
-}
+/* (legacy .speedo__brand-mark + bladePulse keyframes removed — the FOM dial PNG
+ * was retired and the placeholder div is hidden by a later rule.) */
 
 .speedo__ring { fill: none; stroke: var(--line); stroke-width: 1.5; }
-.speedo__ring--outer { stroke: var(--fom-red); opacity: 0.3; }
+.speedo__ring--outer { stroke: var(--accent); opacity: 0.3; }
 .speedo__ring--mid   { stroke-dasharray: 4 6; opacity: 0.5; }
 .speedo__ring--inner { stroke-width: 2; }
 
 .speedo__arc {
-  fill: none; stroke: var(--fom-red); stroke-width: 3;
+  fill: none; stroke: var(--accent); stroke-width: 3;
   stroke-dasharray: 1500 2000;
   stroke-dashoffset: 0;
   transform-origin: 300px 300px;
   /* Drop-shadow on a rotating element is GPU-expensive — only show on tiers that can afford it */
 }
 body.tier-pro .speedo__arc, body.tier-max .speedo__arc {
-  filter: drop-shadow(0 0 6px var(--fom-red-glow));
+  filter: drop-shadow(0 0 6px var(--accent-glow));
 }
 body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   /* Lite tier: stop the constant rotation entirely — saves the most GPU */
@@ -504,25 +495,11 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 
 /* Legacy line needle kept for backwards compatibility; the blade path is the active needle. */
 .speedo__needle {
-  stroke: var(--fom-red); stroke-width: 4; stroke-linecap: round;
-  filter: drop-shadow(0 0 8px var(--fom-red-glow));
+  stroke: var(--accent); stroke-width: 4; stroke-linecap: round;
+  filter: drop-shadow(0 0 8px var(--accent-glow));
 }
 
-/* FOM blade-shaped needle — tapered curved wedge mirroring the brand mark */
-.speedo__needle-blade {
-  fill: url(#redGrad);
-  stroke: var(--fom-red);
-  stroke-width: 0.6;
-  filter: drop-shadow(0 0 10px var(--fom-red-glow)) drop-shadow(0 0 4px var(--fom-red-glow));
-  transition: fill 0.25s, stroke 0.25s, filter 0.25s;
-}
-/* Amber-drop mood — error / service-down. Tints the blade for ~1.5s before fading
- * back to brand red. Speedo controller toggles the class. */
-.speedo__needle-blade.is-amber {
-  fill: #f39c12;
-  stroke: #f39c12;
-  filter: drop-shadow(0 0 12px rgba(243, 156, 18, 0.6)) drop-shadow(0 0 4px rgba(243, 156, 18, 0.4));
-}
+/* (FOM blade needle removed — white-label reactor has no needle.) */
 
 #needle {
   /* Why: SVG viewBox-relative origin so 50%/50% = (300, 300) regardless of rendered size.
@@ -533,10 +510,10 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   transform-box: view-box;
   transform-origin: 50% 50%;
 }
-.speedo__hub { fill: var(--fom-red); filter: drop-shadow(0 0 6px var(--fom-red-glow)); }
+.speedo__hub { fill: var(--accent); filter: drop-shadow(0 0 6px var(--accent-glow)); }
 .speedo__hub-inner { fill: var(--ink-0); }
-.speedo__core { fill: var(--ink-0); stroke: var(--fom-red); stroke-width: 2; }
-.speedo__core-glow { fill: none; stroke: var(--fom-red); stroke-width: 1; opacity: 0.6; }
+.speedo__core { fill: var(--ink-0); stroke: var(--accent); stroke-width: 2; }
+.speedo__core-glow { fill: none; stroke: var(--accent); stroke-width: 1; opacity: 0.6; }
 /* Why: dial centre had 20px FLAT + 11px OUT with 25 SVG units between baselines —
  * left a visible empty band around the text. Bumped FLAT to 28px (Anton-style heft so
  * it reads as the brand mark, not just a label) and OUT to 14px with tighter spacing
@@ -550,16 +527,16 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 }
 .speedo__mark--small {
   font-size: 14px;
-  fill: var(--fom-red);
+  fill: var(--accent);
   letter-spacing: 0.35em;
   font-weight: 600;
 }
 
 .speedo__tick { stroke: var(--text-dim); }
 .speedo__tick--major { stroke: #fff; }
-.speedo__tick--red { stroke: var(--fom-red); }
+.speedo__tick--red { stroke: var(--accent); }
 .speedo__numeral { fill: var(--text-dim); font-family: var(--font-mono); font-size: 13px; }
-.speedo__numeral--red { fill: var(--fom-red); }
+.speedo__numeral--red { fill: var(--accent); }
 
 .speedo__state {
   position: absolute; bottom: 4%; left: 50%;
@@ -582,8 +559,8 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .speedo.is-listening .speedo__state-text { color: #00ff88; }
 .speedo.is-thinking  .speedo__state-dot { background: #ffaa00; box-shadow: 0 0 12px #ffaa00; animation: pulse 0.8s ease-in-out infinite; }
 .speedo.is-thinking  .speedo__state-text { color: #ffaa00; }
-.speedo.is-speaking  .speedo__state-dot { background: var(--fom-red); box-shadow: 0 0 16px var(--fom-red-glow); animation: pulse 0.4s ease-in-out infinite; }
-.speedo.is-speaking  .speedo__state-text { color: var(--fom-red); }
+.speedo.is-speaking  .speedo__state-dot { background: var(--accent); box-shadow: 0 0 16px var(--accent-glow); animation: pulse 0.4s ease-in-out infinite; }
+.speedo.is-speaking  .speedo__state-text { color: var(--accent); }
 /* Asleep state — set by enter_sleep_mode tool. Whole speedometer dims so the
  * operator can see at a glance Jarvis isn't listening. Click the speedo or
  * call any voice command to wake. */
@@ -613,14 +590,14 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   pointer-events: none;
   white-space: nowrap;
   text-transform: uppercase;
-  text-shadow: 0 0 24px var(--fom-red-glow);
+  text-shadow: 0 0 24px var(--accent-glow);
   z-index: 0;
 }
 .panel--telemetry .waveform { position: relative; z-index: 1; }
 .panel--telemetry .telemetry__row { position: relative; z-index: 2; }
 .speedo__tagline em {
   font-style: normal;
-  color: var(--fom-red);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -630,7 +607,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: 0.35em;
-  color: var(--fom-red);
+  color: var(--accent);
   text-transform: uppercase;
 }
 /* Why: now-row pivots from "label, label" to "icon | (temp / condition stack)".
@@ -656,11 +633,20 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .weather__forecast .hi { color: var(--text); }
 .weather__forecast .lo { color: var(--text-dim); }
 
-/* ---------- CLOCK ---------- */
+/* ---------- CLOCK ----------
+ * Single-line layout: HH:MM in display weight, :SS in accent colour
+ * inline at the end. Date row sits below on its own line. */
+.clock-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  line-height: 1;
+}
 .clock {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 96px;
+  font-size: 84px;
   line-height: 1;
   color: var(--text);
   letter-spacing: 0;
@@ -668,9 +654,9 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .clock__sec {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 32px;
-  color: var(--fom-red);
-  margin-top: -8px;
+  font-size: 28px;
+  color: var(--accent);
+  letter-spacing: 0.02em;
 }
 .clock__date {
   font-family: var(--font-mono);
@@ -692,7 +678,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   margin-top: 4px;
   flex-wrap: wrap;
 }
-.telemetry__k { color: var(--fom-red); letter-spacing: 0.3em; margin-right: 4px; }
+.telemetry__k { color: var(--accent); letter-spacing: 0.3em; margin-right: 4px; }
 .telemetry__v { color: var(--text); margin-right: 14px; }
 
 /* ────────── TASK STRIP ──────────
@@ -743,7 +729,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   letter-spacing: 0.3em;
   /* Why: bright red for visibility, derived from brand accent so colour-picker theming
    * propagates. Mirror trick used on the settings cog. */
-  color: color-mix(in srgb, var(--fom-red), white 25%);
+  color: color-mix(in srgb, var(--accent), white 25%);
   text-transform: uppercase;
 }
 
@@ -815,14 +801,14 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   /* Brand-red active stage with a glow — matches the progress-bar fill
    * so the eye groups them. Pulses subtly so the row reads as "alive". */
   color: #fff;
-  background: var(--fom-red);
-  border-color: var(--fom-red);
-  box-shadow: 0 0 8px var(--fom-red-glow);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
   animation: tasks-lane-pulse 1.6s ease-in-out infinite;
 }
 @keyframes tasks-lane-pulse {
-  0%, 100% { box-shadow: 0 0 8px var(--fom-red-glow); }
-  50%      { box-shadow: 0 0 14px var(--fom-red-glow); }
+  0%, 100% { box-shadow: 0 0 8px var(--accent-glow); }
+  50%      { box-shadow: 0 0 14px var(--accent-glow); }
 }
 @media (prefers-reduced-motion: reduce) {
   .tasks__lane.is-active { animation: none; }
@@ -853,9 +839,9 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 }
 .tasks__row-cancel:hover,
 .tasks__row-cancel:focus-visible {
-  background: var(--fom-red);
+  background: var(--accent);
   color: #000;
-  border-color: var(--fom-red);
+  border-color: var(--accent);
   outline: none;
 }
 
@@ -868,17 +854,17 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 }
 .tasks__bar-fill {
   height: 100%;
-  background: var(--fom-red);
+  background: var(--accent);
   /* Why: smooth fill animation so progress visibly flows rather than snap-jumping. */
   transition: width 0.4s ease-out;
-  box-shadow: 0 0 8px var(--fom-red-glow);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 .tasks__bar--indeterminate::after {
   content: "";
   position: absolute;
   top: 0; left: 0;
   width: 30%; height: 100%;
-  background: linear-gradient(90deg, transparent, var(--fom-red), transparent);
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
   animation: tasks-indeterminate 1.4s ease-in-out infinite;
 }
 @keyframes tasks-indeterminate {
@@ -910,7 +896,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   text-transform: uppercase;
   color: #eaeaea;
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--fom-red), white 10%);
+  border: 1px solid color-mix(in srgb, var(--accent), white 10%);
   padding: 3px 10px;
   cursor: pointer;
   /* Why: matches the brand red but desaturated so the active progress bars
@@ -919,9 +905,9 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 }
 .tasks__stop-btn:hover,
 .tasks__stop-btn:focus-visible {
-  background: var(--fom-red);
+  background: var(--accent);
   color: #000;
-  border-color: var(--fom-red);
+  border-color: var(--accent);
   outline: none;
 }
 
@@ -945,16 +931,14 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 }
 
 /* ---------- LAUNCH ----------
- * Why: 8+ launchers (Mail / Capture One / Adobe CC / Premiere / Lightroom / Output /
- * Shoots / Frame.io) in a single column got tall and pushed the panel past its row.
- * Switched to a 2-column grid so launchers come 2-up, halving the vertical footprint.
- * Right rail was widened to 1.4fr in the page grid so the tiles still read at a glance. */
+ * Why: 8 generic launchers in a 3-column grid keep the right-rail tile compact
+ * so the clock+diary above can claim more vertical space for events. */
 .launch {
   list-style: none;
-  font-family: var(--font-display); font-size: 12px;
+  font-family: var(--font-display); font-size: 11px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 8px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px 6px;
   max-height: 100%; overflow-y: auto;
   padding-right: 4px;
 }
@@ -973,38 +957,46 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   text-overflow: ellipsis;
 }
 .launch li:hover {
-  color: var(--fom-red);
+  color: var(--accent);
   padding-left: 10px;
-  background: linear-gradient(90deg, var(--fom-red-glow) 0%, transparent 30%);
+  background: linear-gradient(90deg, var(--accent-glow) 0%, transparent 30%);
 }
 
 /* ---------- WAKE BUTTON ---------- */
 .wake {
-  /* Why: bottom-right corner so it doesn't cover the calendar dates or wordmark.
-   * Floats above the launch panel — the most ignorable corner of the layout. */
+  /* Voice-first kiosk: the wake button is a fallback affordance. Anchored
+   * bottom-left inside the waveform strip so it sits OFF the sine-wave
+   * centre line and doesn't cover the live waveform. */
   position: fixed;
-  bottom: 18px;
-  right: 18px;
+  bottom: 22px;
+  left: 24px;
+  transform: none;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  max-width: 280px;
   background: var(--ink-0);
-  border: var(--line-w) solid var(--fom-red);
-  color: var(--fom-red);
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: 0.3em;
-  font-size: 10px;
-  padding: 6px 14px;
+  letter-spacing: 0.24em;
+  font-size: 12px;
+  line-height: 1;
+  padding: 8px 18px;
   z-index: 50;
   cursor: pointer;
-  z-index: 10;
   text-transform: uppercase;
-  /* Why: angled clip echoes the FOM "blade" mark */
-  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  clip-path: polygon(5px 0, 100% 0, calc(100% - 5px) 100%, 0 100%);
   transition: background 0.2s, color 0.2s, box-shadow 0.2s;
 }
+.wake__inner { display: inline-block; line-height: 1; }
 .wake:hover, .wake:focus-visible {
-  background: var(--fom-red);
+  background: var(--accent);
   color: var(--ink-0);
-  box-shadow: 0 0 24px var(--fom-red-glow);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 24px var(--accent-glow);
   outline: none;
 }
 
@@ -1015,7 +1007,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   left: 50%; transform: translateX(-50%);
   width: min(680px, 90vw);
   background: rgba(0, 0, 0, 0.85);
-  border: var(--line-w) solid var(--fom-red);
+  border: var(--line-w) solid var(--accent);
   padding: 14px 18px;
   z-index: 9;
   backdrop-filter: blur(8px);
@@ -1027,7 +1019,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   color: var(--text-dim);
   margin-bottom: 6px;
 }
-.transcript__heard:before { content: "HEARD // "; color: var(--fom-red); letter-spacing: 0.2em; }
+.transcript__heard:before { content: "HEARD // "; color: var(--accent); letter-spacing: 0.2em; }
 .transcript__reply {
   font-family: var(--font-display);
   font-weight: 400;
@@ -1037,7 +1029,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   line-height: 1.4;
 }
 .transcript__reply:empty { display: none; }
-.transcript__reply:not(:empty):before { content: "FLAT-OUT // "; color: var(--fom-red); letter-spacing: 0.2em; font-size: 12px; font-weight: 600; }
+.transcript__reply:not(:empty):before { content: var(--agent-label, "JARVIS") " // "; color: var(--accent); letter-spacing: 0.2em; font-size: 12px; font-weight: 600; }
 
 /* ---------- DEBUG PANEL (audio diagnostics) ---------- */
 .debug {
@@ -1047,7 +1039,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   z-index: 60;
   width: 320px;
   background: rgba(0, 0, 0, 0.85);
-  border: 1.5px solid var(--fom-red);
+  border: 1.5px solid var(--accent);
   padding: 10px 12px;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1060,7 +1052,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   font-weight: 700;
   letter-spacing: 0.4em;
   font-size: 11px;
-  color: var(--fom-red);
+  color: var(--accent);
   margin-bottom: 8px;
   text-transform: uppercase;
 }
@@ -1094,16 +1086,16 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .debug__meter-fill {
   height: 100%;
   width: 0%;
-  background: var(--fom-red);
-  box-shadow: 0 0 6px var(--fom-red-glow);
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
   transition: width 0.05s linear;
 }
 .debug__btn {
   margin-top: 10px;
   width: 100%;
   background: var(--ink-0);
-  color: var(--fom-red);
-  border: 1.5px solid var(--fom-red);
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
   font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: 0.3em;
@@ -1113,12 +1105,12 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   pointer-events: auto;
   text-transform: uppercase;
 }
-.debug__btn:hover { background: var(--fom-red); color: var(--ink-0); }
+.debug__btn:hover { background: var(--accent); color: var(--ink-0); }
 .debug__select {
   pointer-events: auto;
   background: var(--ink-0);
   color: var(--text);
-  border: 1px solid var(--fom-red);
+  border: 1px solid var(--accent);
   font-family: var(--font-mono);
   font-size: 10px;
   padding: 2px 4px;
@@ -1140,8 +1132,8 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   /* Why: clip-path angled corners echo the FOM blade language */
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
   background: var(--ink-0);
-  border: 1.5px solid var(--fom-red);
-  box-shadow: 0 0 28px rgba(225, 6, 0, 0.45), inset 0 0 30px rgba(225, 6, 0, 0.15);
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 28px rgba(0, 212, 255, 0.45), inset 0 0 30px rgba(0, 212, 255, 0.15);
   overflow: hidden;
   /* Why: camera-on-demand. Default hidden via opacity (not display:none, so MediaPipe
    * can still tick the video element when revealed); adds an .is-revealed class to
@@ -1166,7 +1158,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .cam__tint {
   position: absolute; inset: 0;
   background:
-    radial-gradient(ellipse at center, rgba(225, 6, 0, 0.18) 0%, rgba(225, 6, 0, 0.45) 100%),
+    radial-gradient(ellipse at center, rgba(0, 212, 255, 0.18) 0%, rgba(0, 212, 255, 0.45) 100%),
     linear-gradient(180deg, rgba(0,0,0,0.0), rgba(0,0,0,0.35));
   mix-blend-mode: multiply;
   pointer-events: none;
@@ -1180,7 +1172,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
       to bottom,
       transparent 0,
       transparent 2px,
-      rgba(225, 6, 0, 0.10) 3px,
+      rgba(0, 212, 255, 0.10) 3px,
       transparent 4px
     );
   animation: camScan 7s linear infinite;
@@ -1196,8 +1188,8 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .cam__bracket {
   position: absolute;
   width: 22px; height: 22px;
-  border: 2px solid var(--fom-red);
-  filter: drop-shadow(0 0 4px var(--fom-red-glow));
+  border: 2px solid var(--accent);
+  filter: drop-shadow(0 0 4px var(--accent-glow));
 }
 .cam__bracket--tl { top: 6px;    left: 6px;    border-right: none;  border-bottom: none; }
 .cam__bracket--tr { top: 6px;    right: 6px;   border-left: none;   border-bottom: none; }
@@ -1210,9 +1202,9 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 0.4em;
-  color: var(--fom-red);
+  color: var(--accent);
   text-transform: uppercase;
-  text-shadow: 0 0 6px var(--fom-red-glow);
+  text-shadow: 0 0 6px var(--accent-glow);
 }
 
 /* Centre targeting reticle — small + + animated rotation */
@@ -1221,14 +1213,14 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   top: 50%; left: 50%;
   width: 60px; height: 60px;
   transform: translate(-50%, -50%);
-  border: 1px solid rgba(225, 6, 0, 0.55);
+  border: 1px solid rgba(0, 212, 255, 0.55);
   border-radius: 50%;
   animation: camRotate 4s linear infinite;
 }
 .cam__targeting:before, .cam__targeting:after {
   content: "";
   position: absolute;
-  background: var(--fom-red);
+  background: var(--accent);
 }
 .cam__targeting:before { top: 50%; left: -8px; width: 16px; height: 1px; transform: translateY(-50%); }
 .cam__targeting:after  { left: 50%; top: -8px; height: 16px; width: 1px;  transform: translateX(-50%); }
@@ -1254,8 +1246,8 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   z-index: 500;
   width: min(58vw, 560px);
   background: var(--ink-0);
-  border: 2px solid var(--fom-red);
-  box-shadow: 0 0 60px var(--fom-red-glow), 0 16px 40px rgba(0,0,0,0.6);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 60px var(--accent-glow), 0 16px 40px rgba(0,0,0,0.6);
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
   display: flex;
   flex-direction: column;
@@ -1263,14 +1255,14 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .video-window__header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 14px;
-  background: linear-gradient(135deg, var(--fom-red-tint), transparent);
+  background: linear-gradient(135deg, var(--accent-tint), transparent);
   border-bottom: 1px solid var(--line);
 }
 .video-window__title {
   font-family: var(--font-display);
   letter-spacing: 0.4em;
   font-size: 11px;
-  color: var(--fom-red);
+  color: var(--accent);
   text-transform: uppercase;
 }
 .video-window__title-sub {
@@ -1283,8 +1275,8 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .video-window__actions { display: flex; gap: 8px; }
 .video-window__btn {
   background: var(--ink-0);
-  border: 1px solid var(--fom-red);
-  color: var(--fom-red);
+  border: 1px solid var(--accent);
+  color: var(--accent);
   font-family: var(--font-display);
   letter-spacing: 0.3em;
   font-size: 10px;
@@ -1293,7 +1285,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   text-transform: uppercase;
   transition: background 0.15s, color 0.15s;
 }
-.video-window__btn:hover { background: var(--fom-red); color: var(--ink-0); }
+.video-window__btn:hover { background: var(--accent); color: var(--ink-0); }
 .video-window__player {
   width: 100%;
   display: block;
@@ -1327,8 +1319,8 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   width: min(70vw, 720px);
   height: 80vh;
   background: var(--ink-0);
-  border: 2px solid var(--fom-red);
-  box-shadow: 0 0 60px var(--fom-red-glow), 0 16px 40px rgba(0,0,0,0.6);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 60px var(--accent-glow), 0 16px 40px rgba(0,0,0,0.6);
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
   display: flex;
   flex-direction: column;
@@ -1336,17 +1328,17 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .pdf-window__header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 14px;
-  background: linear-gradient(135deg, var(--fom-red-tint), transparent);
+  background: linear-gradient(135deg, var(--accent-tint), transparent);
   border-bottom: 1px solid var(--line);
   flex: 0 0 auto;
 }
-.pdf-window__title { font-family: var(--font-display); letter-spacing: 0.4em; font-size: 11px; color: var(--fom-red); text-transform: uppercase; }
+.pdf-window__title { font-family: var(--font-display); letter-spacing: 0.4em; font-size: 11px; color: var(--accent); text-transform: uppercase; }
 .pdf-window__title-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-left: 12px; letter-spacing: 0.05em; }
 .pdf-window__actions { display: flex; gap: 8px; }
 .pdf-window__btn {
   background: var(--ink-0);
-  border: 1px solid var(--fom-red);
-  color: var(--fom-red);
+  border: 1px solid var(--accent);
+  color: var(--accent);
   font-family: var(--font-display);
   letter-spacing: 0.3em;
   font-size: 10px;
@@ -1357,7 +1349,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   display: inline-block;
   transition: background 0.15s, color 0.15s;
 }
-.pdf-window__btn:hover { background: var(--fom-red); color: var(--ink-0); }
+.pdf-window__btn:hover { background: var(--accent); color: var(--ink-0); }
 .pdf-window__frame { flex: 1; width: 100%; border: none; background: white; }
 
 /* ---------- DEMO RECORDING INDICATOR ---------- */
@@ -1368,12 +1360,12 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   z-index: 100;
   display: flex; align-items: center; gap: 8px;
   background: rgba(0,0,0,0.85);
-  border: 1.5px solid var(--fom-red);
+  border: 1.5px solid var(--accent);
   padding: 6px 12px;
   font-family: var(--font-display);
   font-size: 12px;
   letter-spacing: 0.3em;
-  color: var(--fom-red);
+  color: var(--accent);
   text-transform: uppercase;
   pointer-events: none;
   clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
@@ -1381,8 +1373,8 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .rec-indicator[hidden] { display: none; }
 .rec-indicator__dot {
   width: 10px; height: 10px; border-radius: 50%;
-  background: var(--fom-red);
-  box-shadow: 0 0 10px var(--fom-red);
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
   animation: recPulse 1s ease-in-out infinite;
 }
 .rec-indicator__time {
@@ -1406,10 +1398,10 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   width: min(560px, 92vw);
   max-height: 90vh; overflow-y: auto;
   background: var(--ink-1);
-  border: 1.5px solid var(--fom-red);
+  border: 1.5px solid var(--accent);
   padding: 36px 40px;
   clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
-  box-shadow: 0 0 80px var(--fom-red-glow);
+  box-shadow: 0 0 80px var(--accent-glow);
 }
 .setup__brand { text-align: center; margin-bottom: 18px; }
 .setup__logo { width: 220px; height: auto; }
@@ -1417,7 +1409,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   font-family: var(--font-display);
   letter-spacing: 0.5em;
   font-size: 11px;
-  color: var(--fom-red);
+  color: var(--accent);
   margin-top: 6px;
   text-transform: uppercase;
 }
@@ -1436,7 +1428,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: 0.3em;
-  color: var(--fom-red);
+  color: var(--accent);
   margin-bottom: 6px;
   text-transform: uppercase;
 }
@@ -1451,12 +1443,12 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   margin-bottom: 6px;
 }
 .setup__field input:focus, .setup__field select:focus {
-  outline: none; border-color: var(--fom-red);
+  outline: none; border-color: var(--accent);
 }
 .setup__field button {
   background: transparent;
-  color: var(--fom-red);
-  border: 1px solid var(--fom-red);
+  color: var(--accent);
+  border: 1px solid var(--accent);
   font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 0.3em;
@@ -1465,7 +1457,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   text-transform: uppercase;
   transition: background 0.2s, color 0.2s;
 }
-.setup__field button:hover { background: var(--fom-red); color: var(--ink-0); }
+.setup__field button:hover { background: var(--accent); color: var(--ink-0); }
 .setup__field small {
   display: block;
   font-family: var(--font-mono);
@@ -1476,7 +1468,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
 .setup__loc-row input { margin-bottom: 0; }
 .setup__submit {
   width: 100%;
-  background: var(--fom-red);
+  background: var(--accent);
   color: var(--ink-0);
   border: none;
   font-family: var(--font-display);
@@ -1488,9 +1480,9 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   margin-top: 14px;
   text-transform: uppercase;
   clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
-  box-shadow: 0 0 24px var(--fom-red-glow);
+  box-shadow: 0 0 24px var(--accent-glow);
 }
-.setup__submit:hover { box-shadow: 0 0 32px var(--fom-red), inset 0 0 12px rgba(0,0,0,0.3); }
+.setup__submit:hover { box-shadow: 0 0 32px var(--accent), inset 0 0 12px rgba(0,0,0,0.3); }
 .setup__skip {
   display: block;
   margin: 8px auto 0;
@@ -1516,8 +1508,8 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   max-width: 360px;
   padding: 10px 32px 10px 14px;
   background: var(--ink-1);
-  border: 1px solid color-mix(in srgb, var(--fom-red), white 25%);
-  border-left: 3px solid color-mix(in srgb, var(--fom-red), white 25%);
+  border: 1px solid color-mix(in srgb, var(--accent), white 25%);
+  border-left: 3px solid color-mix(in srgb, var(--accent), white 25%);
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text);
@@ -1536,7 +1528,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   font-family: var(--font-display);
   font-size: 9px;
   letter-spacing: 0.3em;
-  color: color-mix(in srgb, var(--fom-red), white 25%);
+  color: color-mix(in srgb, var(--accent), white 25%);
   margin-right: 10px;
   text-transform: uppercase;
 }
@@ -1556,7 +1548,7 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   padding: 2px 6px;
   font-family: var(--font-display);
 }
-.help-card__dismiss:hover { color: var(--fom-red); }
+.help-card__dismiss:hover { color: var(--accent); }
 
 /* Help card auto-hidden in demo mode — client visits don't need internal hints. */
 body.is-demo .help-card { display: none !important; }
@@ -1581,9 +1573,9 @@ body.is-demo .help-card { display: none !important; }
 .palette__panel {
   width: min(640px, 92vw);
   background: var(--ink-1);
-  border: 1.5px solid var(--fom-red);
+  border: 1.5px solid var(--accent);
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
-  box-shadow: 0 0 60px var(--fom-red-glow);
+  box-shadow: 0 0 60px var(--accent-glow);
   display: flex; flex-direction: column;
   max-height: 70vh;
   animation: palette-slide-in 0.18s ease-out;
@@ -1598,12 +1590,12 @@ body.is-demo .help-card { display: none !important; }
   gap: 12px;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--fom-red);
+  border-bottom: 1px solid var(--accent);
 }
 .palette__prompt {
   font-family: var(--font-display);
   font-size: 22px;
-  color: color-mix(in srgb, var(--fom-red), white 25%);
+  color: color-mix(in srgb, var(--accent), white 25%);
   line-height: 1;
 }
 .palette__input {
@@ -1639,8 +1631,8 @@ body.is-demo .help-card { display: none !important; }
   transition: background 0.12s, border-color 0.12s;
 }
 .palette__row:hover, .palette__row.is-active {
-  background: var(--fom-red-tint);
-  border-left-color: color-mix(in srgb, var(--fom-red), white 25%);
+  background: var(--accent-tint);
+  border-left-color: color-mix(in srgb, var(--accent), white 25%);
 }
 .palette__row-head {
   display: flex; gap: 10px; align-items: baseline;
@@ -1649,7 +1641,7 @@ body.is-demo .help-card { display: none !important; }
   font-family: var(--font-display);
   font-size: 9px;
   letter-spacing: 0.3em;
-  color: var(--fom-red);
+  color: var(--accent);
   min-width: 70px;
 }
 .palette__row-label {
@@ -1731,13 +1723,13 @@ body.font-scale-xl { font-size: 21px; }
   appearance: none;
   -webkit-appearance: none;
   width: 16px; height: 16px;
-  border: 1px solid var(--fom-red);
+  border: 1px solid var(--accent);
   background: var(--ink-0);
   cursor: pointer;
   display: grid; place-items: center;
 }
 .settings-modal__check input[type="checkbox"]:checked {
-  background: var(--fom-red);
+  background: var(--accent);
 }
 .settings-modal__check input[type="checkbox"]:checked::after {
   content: "✓";
@@ -1775,7 +1767,7 @@ body.is-high-contrast {
   --text: #ffffff;
   --text-dim: #d8d8d8;
   --panel-bg: #000;
-  --panel-border: var(--fom-red);
+  --panel-border: var(--accent);
   --hairline: rgba(255, 255, 255, 0.45);
 }
 body.is-high-contrast .panel,
@@ -1828,11 +1820,11 @@ body.is-demo .waveform { height: 76px; }
 }
 .notif-bell svg { width: 16px; height: 16px; }
 .notif-bell:hover, .notif-bell:focus-visible {
-  color: color-mix(in srgb, var(--fom-red), white 25%);
-  border-color: color-mix(in srgb, var(--fom-red), white 25%);
+  color: color-mix(in srgb, var(--accent), white 25%);
+  border-color: color-mix(in srgb, var(--accent), white 25%);
   outline: none;
 }
-.notif-bell.is-unread { color: var(--fom-red); border-color: var(--fom-red); }
+.notif-bell.is-unread { color: var(--accent); border-color: var(--accent); }
 .notif-bell.is-unread svg { animation: bell-shake 1.2s ease-in-out 0s 2; }
 @keyframes bell-shake {
   0%, 100% { transform: rotate(0); }
@@ -1845,7 +1837,7 @@ body.is-demo .waveform { height: 76px; }
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  background: var(--fom-red);
+  background: var(--accent);
   color: var(--ink-0);
   font-family: var(--font-display);
   font-size: 9px;
@@ -1853,7 +1845,7 @@ body.is-demo .waveform { height: 76px; }
   letter-spacing: 0.05em;
   display: grid; place-items: center;
   border-radius: 8px;
-  box-shadow: 0 0 8px var(--fom-red-glow);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 .notif-bell__count:empty { display: none; }
 
@@ -1892,8 +1884,8 @@ body.is-demo .waveform { height: 76px; }
   to   { opacity: 1; transform: translateX(0); }
 }
 .notif--success { border-left-color: #4ade80; }
-.notif--error   { border-left-color: var(--fom-red); }
-.notif--info    { border-left-color: color-mix(in srgb, var(--fom-red), white 25%); }
+.notif--error   { border-left-color: var(--accent); }
+.notif--info    { border-left-color: color-mix(in srgb, var(--accent), white 25%); }
 .notif__head {
   display: grid;
   grid-template-columns: auto 1fr auto;
@@ -1905,11 +1897,11 @@ body.is-demo .waveform { height: 76px; }
   font-family: var(--font-display);
   font-size: 9px;
   letter-spacing: 0.3em;
-  color: color-mix(in srgb, var(--fom-red), white 25%);
+  color: color-mix(in srgb, var(--accent), white 25%);
   text-transform: uppercase;
 }
 .notif--success .notif__kind { color: #4ade80; }
-.notif--error   .notif__kind { color: var(--fom-red); }
+.notif--error   .notif__kind { color: var(--accent); }
 .notif__title {
   color: var(--text);
   font-family: var(--font-display);
@@ -1935,8 +1927,8 @@ body.is-demo .waveform { height: 76px; }
 }
 .notif__action {
   background: transparent;
-  color: color-mix(in srgb, var(--fom-red), white 25%);
-  border: 1px solid color-mix(in srgb, var(--fom-red), white 25%);
+  color: color-mix(in srgb, var(--accent), white 25%);
+  border: 1px solid color-mix(in srgb, var(--accent), white 25%);
   font-family: var(--font-display);
   font-size: 9px;
   letter-spacing: 0.25em;
@@ -1947,7 +1939,7 @@ body.is-demo .waveform { height: 76px; }
   transition: background 0.15s, color 0.15s;
 }
 .notif__action:hover {
-  background: color-mix(in srgb, var(--fom-red), white 25%);
+  background: color-mix(in srgb, var(--accent), white 25%);
   color: var(--ink-0);
 }
 .notif__dismiss {
@@ -1971,7 +1963,7 @@ body.is-demo .waveform { height: 76px; }
   width: 380px;
   max-width: 92vw;
   background: var(--ink-1);
-  border-left: 2px solid var(--fom-red);
+  border-left: 2px solid var(--accent);
   z-index: 2000;
   display: flex; flex-direction: column;
   box-shadow: -16px 0 40px rgba(0, 0, 0, 0.6);
@@ -1984,7 +1976,7 @@ body.is-demo .waveform { height: 76px; }
 }
 .notif-drawer__head {
   padding: 18px 20px;
-  border-bottom: 1px solid var(--fom-red);
+  border-bottom: 1px solid var(--accent);
   display: flex; justify-content: space-between; align-items: center;
 }
 .notif-drawer__title {
@@ -1992,7 +1984,7 @@ body.is-demo .waveform { height: 76px; }
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.4em;
-  color: var(--fom-red);
+  color: var(--accent);
 }
 .notif-drawer__clear {
   background: transparent;
@@ -2005,7 +1997,7 @@ body.is-demo .waveform { height: 76px; }
   cursor: pointer;
   text-transform: uppercase;
 }
-.notif-drawer__clear:hover { color: var(--fom-red); border-color: var(--fom-red); }
+.notif-drawer__clear:hover { color: var(--accent); border-color: var(--accent); }
 
 /* Action group on the right of the drawer head — CLEAR + close button. */
 .notif-drawer__actions {
@@ -2023,7 +2015,7 @@ body.is-demo .waveform { height: 76px; }
   cursor: pointer;
   display: grid; place-items: center;
 }
-.notif-drawer__close:hover { color: var(--fom-red); border-color: var(--fom-red); }
+.notif-drawer__close:hover { color: var(--accent); border-color: var(--accent); }
 .notif-drawer__list {
   flex: 1;
   overflow-y: auto;
@@ -2057,9 +2049,9 @@ body.is-demo .waveform { height: 76px; }
   width: min(820px, 94vw);
   height: min(640px, 86vh);
   background: var(--ink-1);
-  border: 1.5px solid var(--fom-red);
+  border: 1.5px solid var(--accent);
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
-  box-shadow: 0 0 60px var(--fom-red-glow);
+  box-shadow: 0 0 60px var(--accent-glow);
   display: flex; flex-direction: column;
 }
 .audit-overlay__head {
@@ -2068,14 +2060,14 @@ body.is-demo .waveform { height: 76px; }
   gap: 14px;
   align-items: center;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--fom-red);
+  border-bottom: 1px solid var(--accent);
 }
 .audit-overlay__title {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 14px;
   letter-spacing: 0.5em;
-  color: var(--fom-red);
+  color: var(--accent);
 }
 .audit-overlay__summary {
   font-family: var(--font-mono);
@@ -2097,7 +2089,7 @@ body.is-demo .waveform { height: 76px; }
   -webkit-mask: url("assets/icons/x.svg") center / contain no-repeat;
           mask: url("assets/icons/x.svg") center / contain no-repeat;
 }
-.audit-overlay__close:hover { color: var(--fom-red); }
+.audit-overlay__close:hover { color: var(--accent); }
 .audit-overlay__filters {
   display: flex;
   gap: 8px;
@@ -2116,8 +2108,8 @@ body.is-demo .waveform { height: 76px; }
 }
 .audit-overlay__filters button {
   background: transparent;
-  color: var(--fom-red);
-  border: 1px solid var(--fom-red);
+  color: var(--accent);
+  border: 1px solid var(--accent);
   font-family: var(--font-display);
   font-size: 9px;
   letter-spacing: 0.3em;
@@ -2125,7 +2117,7 @@ body.is-demo .waveform { height: 76px; }
   cursor: pointer;
   margin-left: auto;
 }
-.audit-overlay__filters button:hover { background: var(--fom-red); color: var(--ink-0); }
+.audit-overlay__filters button:hover { background: var(--accent); color: var(--ink-0); }
 .audit-overlay__list {
   flex: 1;
   overflow-y: auto;
@@ -2157,7 +2149,7 @@ body.is-demo .waveform { height: 76px; }
   letter-spacing: 0.05em;
 }
 .audit-row__operator {
-  color: color-mix(in srgb, var(--fom-red), white 25%);
+  color: color-mix(in srgb, var(--accent), white 25%);
   letter-spacing: 0.1em;
 }
 .audit-row__tool {
@@ -2179,10 +2171,10 @@ body.is-demo .waveform { height: 76px; }
 .audit-row__error {
   margin-top: 4px;
   margin-left: 170px;
-  color: var(--fom-red);
+  color: var(--accent);
   font-size: 11px;
 }
-.audit-row--error .audit-row__tool { color: var(--fom-red); }
+.audit-row--error .audit-row__tool { color: var(--accent); }
 
 /* Settings-modal footer with secondary actions (VIEW AUDIT LOG, EDIT LAYOUT, RESET).
  * Three buttons line up in a flex row that wraps on narrow viewports. */
@@ -2208,8 +2200,8 @@ body.is-demo .waveform { height: 76px; }
   transition: color 0.18s, border-color 0.18s;
 }
 .settings-modal__secondary:hover {
-  color: var(--fom-red);
-  border-color: var(--fom-red);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* ────────── Conversation history drawer ──────────
@@ -2221,7 +2213,7 @@ body.is-demo .waveform { height: 76px; }
   width: 420px;
   max-width: 92vw;
   background: var(--ink-1);
-  border-right: 2px solid var(--fom-red);
+  border-right: 2px solid var(--accent);
   z-index: 2000;
   display: flex; flex-direction: column;
   box-shadow: 16px 0 40px rgba(0, 0, 0, 0.6);
@@ -2234,7 +2226,7 @@ body.is-demo .waveform { height: 76px; }
 }
 .history-drawer__head {
   padding: 18px 20px;
-  border-bottom: 1px solid var(--fom-red);
+  border-bottom: 1px solid var(--accent);
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 14px;
@@ -2245,7 +2237,7 @@ body.is-demo .waveform { height: 76px; }
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.4em;
-  color: var(--fom-red);
+  color: var(--accent);
 }
 .history-drawer__meta {
   font-family: var(--font-mono);
@@ -2265,7 +2257,7 @@ body.is-demo .waveform { height: 76px; }
   cursor: pointer;
   text-transform: uppercase;
 }
-.history-drawer__clear:hover { color: var(--fom-red); border-color: var(--fom-red); }
+.history-drawer__clear:hover { color: var(--accent); border-color: var(--accent); }
 .history-drawer__list {
   flex: 1;
   overflow-y: auto;
@@ -2289,7 +2281,7 @@ body.is-demo .waveform { height: 76px; }
   font-family: var(--font-body, var(--font-mono));
 }
 .history-entry--user {
-  border-left-color: color-mix(in srgb, var(--fom-red), white 25%);
+  border-left-color: color-mix(in srgb, var(--accent), white 25%);
 }
 .history-entry--assistant {
   border-left-color: #4ade80;
@@ -2303,7 +2295,7 @@ body.is-demo .waveform { height: 76px; }
   font-family: var(--font-display);
   font-size: 9px;
   letter-spacing: 0.3em;
-  color: var(--fom-red);
+  color: var(--accent);
   text-transform: uppercase;
 }
 .history-entry--assistant .history-entry__role { color: #4ade80; }
@@ -2349,7 +2341,7 @@ body.is-demo .waveform { height: 76px; }
    * the parent panel grid placement handles the layout. */
   position: absolute;
   bottom: 14px; right: 14px;
-  width: 78px; height: 30px;
+  width: 130px; height: 30px;
   background: transparent;
   border: none;
   cursor: pointer;
@@ -2378,9 +2370,9 @@ body.is-demo .waveform { height: 76px; }
   font-weight: 600;
   font-size: 11px;
   letter-spacing: 0.5em;
-  /* Why: 0.5em on a 4-letter word ("TUNE") gives optical centring inside the brackets
-   * — the trailing letterspace pushes "E" off-axis right, so we add a 0.5em left pad
-   * that recentres the text mass. Same trick the launch panel uses. */
+  /* Why: 0.5em letter-spacing pushes the trailing letter off-axis right, so we add
+   * a 0.5em left pad to recentre the text mass inside the brackets. Same trick the
+   * launch panel uses. */
   padding-left: 0.5em;
   color: var(--text-dim);
   text-transform: uppercase;
@@ -2389,16 +2381,16 @@ body.is-demo .waveform { height: 76px; }
 
 .settings-btn:hover .settings-btn__bracket,
 .settings-btn:focus-visible .settings-btn__bracket {
-  border-color: var(--fom-red);
-  filter: drop-shadow(0 0 4px var(--fom-red-glow));
+  border-color: var(--accent);
+  filter: drop-shadow(0 0 4px var(--accent-glow));
   /* Why: brackets grow 2px on hover so the plate "locks on" — echoes the camera's
    * targeting reticle behaviour. Subtle, no rotation, no clip-path gymnastics. */
   width: 11px; height: 11px;
 }
 .settings-btn:hover .settings-btn__label,
 .settings-btn:focus-visible .settings-btn__label {
-  color: var(--fom-red);
-  text-shadow: 0 0 8px var(--fom-red-glow);
+  color: var(--accent);
+  text-shadow: 0 0 8px var(--accent-glow);
 }
 .settings-btn:focus-visible { outline: none; }
 
@@ -2430,10 +2422,10 @@ body.is-demo .waveform { height: 76px; }
   max-height: 90dvh;
   overflow-y: auto;
   background: var(--ink-1);
-  border: 1.5px solid var(--fom-red);
+  border: 1.5px solid var(--accent);
   padding: 28px 32px;
   clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
-  box-shadow: 0 0 60px var(--fom-red-glow);
+  box-shadow: 0 0 60px var(--accent-glow);
 }
 .settings-modal__head {
   position: sticky;
@@ -2456,21 +2448,21 @@ body.is-demo .waveform { height: 76px; }
 /* Slim red scrollbar so the scroll affordance matches the panel chrome. */
 .settings-modal__panel::-webkit-scrollbar { width: 8px; }
 .settings-modal__panel::-webkit-scrollbar-track { background: transparent; }
-.settings-modal__panel::-webkit-scrollbar-thumb { background: var(--fom-red-deep); }
-.settings-modal__panel::-webkit-scrollbar-thumb:hover { background: var(--fom-red); }
+.settings-modal__panel::-webkit-scrollbar-thumb { background: var(--accent-deep); }
+.settings-modal__panel::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 /* Layout for the head region. Sticky behaviour set above (line ~2245); these rules
  * just set the head's flex layout + bottom border. Order them as flex on top of
  * the sticky/positioning so both apply. */
 .settings-modal__head {
   display: flex; justify-content: space-between; align-items: center;
-  border-bottom: 1px solid var(--fom-red);
+  border-bottom: 1px solid var(--accent);
 }
 .settings-modal__title {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 14px;
   letter-spacing: 0.5em;
-  color: var(--fom-red);
+  color: var(--accent);
 }
 .settings-modal__close {
   background: none; border: none;
@@ -2486,7 +2478,7 @@ body.is-demo .waveform { height: 76px; }
   -webkit-mask: url("assets/icons/x.svg") center / contain no-repeat;
           mask: url("assets/icons/x.svg") center / contain no-repeat;
 }
-.settings-modal__close:hover { color: var(--fom-red); }
+.settings-modal__close:hover { color: var(--accent); }
 
 /* Per-field icon next to the label — mirrors the Phosphor → mask pattern. */
 .settings-modal__icon {
@@ -2583,7 +2575,7 @@ body.is-demo .waveform { height: 76px; }
   font-size: 13px;
   padding: 8px 10px;
 }
-.settings-modal__field input[type="text"]:focus { outline: none; border-color: var(--fom-red); }
+.settings-modal__field input[type="text"]:focus { outline: none; border-color: var(--accent); }
 
 /* Creative-style textarea — operator types/edits markdown directly. Generously
  * sized so a long style guide doesn't feel cramped, but capped so it doesn't
@@ -2602,10 +2594,10 @@ body.is-demo .waveform { height: 76px; }
   padding: 12px 14px;
   margin-top: 4px;
   /* Scrollbar styled to match other monospace areas (history viewer etc). */
-  scrollbar-color: rgba(225, 6, 0, 0.4) transparent;
+  scrollbar-color: rgba(0, 212, 255, 0.4) transparent;
   scrollbar-width: thin;
 }
-.settings-modal__textarea:focus { outline: none; border-color: var(--fom-red); }
+.settings-modal__textarea:focus { outline: none; border-color: var(--accent); }
 .settings-modal__textarea::placeholder {
   color: rgba(244, 244, 244, 0.35);
   font-style: italic;
@@ -2623,7 +2615,7 @@ body.is-demo .waveform { height: 76px; }
   letter-spacing: 0.05em;
 }
 .settings-modal__hint.is-saved { color: #4ade80; }
-.settings-modal__hint.is-error { color: var(--fom-red); }
+.settings-modal__hint.is-error { color: var(--accent); }
 
 /* API-key row: show/hide toggle button to the right of the password input. */
 .settings-modal__key-toggle {
@@ -2635,7 +2627,7 @@ body.is-demo .waveform { height: 76px; }
   cursor: pointer;
   height: 32px;
 }
-.settings-modal__key-toggle:hover { color: var(--text); border-color: var(--fom-red); }
+.settings-modal__key-toggle:hover { color: var(--text); border-color: var(--accent); }
 
 /* Tailscale status block — three states. The dot is a 6px circle that
  * mirrors the HUD's bridge-pip vocabulary; the meta line carries device name
@@ -2699,7 +2691,7 @@ body.is-demo .waveform { height: 76px; }
   left: 0; right: 0;
   z-index: 10;
   background: var(--ink-1);
-  border: 1px solid var(--fom-red);
+  border: 1px solid var(--accent);
   max-height: 240px;
   overflow-y: auto;
   font-family: var(--font-mono);
@@ -2720,7 +2712,7 @@ body.is-demo .waveform { height: 76px; }
 .settings-modal__suggest-row:last-child { border-bottom: none; }
 .settings-modal__suggest-row:hover,
 .settings-modal__suggest-row.is-active {
-  background: var(--fom-red-tint);
+  background: var(--accent-tint);
 }
 .settings-modal__suggest-name {
   color: var(--text);
@@ -2730,7 +2722,7 @@ body.is-demo .waveform { height: 76px; }
   text-overflow: ellipsis;
 }
 .settings-modal__suggest-name strong {
-  color: color-mix(in srgb, var(--fom-red), white 25%);
+  color: color-mix(in srgb, var(--accent), white 25%);
   font-weight: 600;
 }
 .settings-modal__suggest-region {
@@ -2752,7 +2744,7 @@ body.is-demo .waveform { height: 76px; }
   font-family: var(--font-display);
   font-size: 11px;
   letter-spacing: 0.3em;
-  color: var(--fom-red);
+  color: var(--accent);
   margin-bottom: 6px;
   text-transform: uppercase;
 }
@@ -2766,11 +2758,11 @@ body.is-demo .waveform { height: 76px; }
   font-size: 13px;
   padding: 8px 10px;
 }
-.settings-modal__row select:focus { outline: none; border-color: var(--fom-red); }
+.settings-modal__row select:focus { outline: none; border-color: var(--accent); }
 .settings-modal__row button {
   background: transparent;
-  color: var(--fom-red);
-  border: 1px solid var(--fom-red);
+  color: var(--accent);
+  border: 1px solid var(--accent);
   font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 0.3em;
@@ -2779,7 +2771,7 @@ body.is-demo .waveform { height: 76px; }
   text-transform: uppercase;
   transition: background 0.2s, color 0.2s;
 }
-.settings-modal__row button:hover { background: var(--fom-red); color: var(--ink-0); }
+.settings-modal__row button:hover { background: var(--accent); color: var(--ink-0); }
 .settings-modal__row button:disabled { opacity: 0.5; cursor: wait; }
 .settings-modal__field small {
   display: block;
@@ -2803,22 +2795,22 @@ body.is-demo .waveform { height: 76px; }
   padding: 12px 0;
   cursor: pointer;
   text-transform: uppercase;
-  border: 1px solid var(--fom-red);
+  border: 1px solid var(--accent);
 }
 .settings-modal__cancel {
   background: transparent;
-  color: var(--fom-red);
+  color: var(--accent);
 }
-.settings-modal__cancel:hover { background: var(--fom-red-tint); }
+.settings-modal__cancel:hover { background: var(--accent-tint); }
 .settings-modal__save {
-  background: var(--fom-red);
+  background: var(--accent);
   color: var(--ink-0);
   font-weight: 700;
   border: none;
   clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
-  box-shadow: 0 0 16px var(--fom-red-glow);
+  box-shadow: 0 0 16px var(--accent-glow);
 }
-.settings-modal__save:hover { box-shadow: 0 0 24px var(--fom-red); }
+.settings-modal__save:hover { box-shadow: 0 0 24px var(--accent); }
 .settings-modal__save:disabled { opacity: 0.5; cursor: wait; box-shadow: none; }
 .settings-modal__status {
   margin-top: 12px;
@@ -2828,7 +2820,7 @@ body.is-demo .waveform { height: 76px; }
   min-height: 14px;
   color: var(--text-dim);
 }
-.settings-modal__status.is-error { color: var(--fom-red); }
+.settings-modal__status.is-error { color: var(--accent); }
 .settings-modal__status.is-ok { color: #4ade80; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2850,8 +2842,8 @@ body.is-demo .waveform { height: 76px; }
   transform: translateX(-50%) translateY(-8px);
   z-index: 2000;
   background: var(--ink-1);
-  border: 1px solid var(--fom-red);
-  border-left: 3px solid var(--fom-red);
+  border: 1px solid var(--accent);
+  border-left: 3px solid var(--accent);
   padding: 10px 18px 10px 14px;
   min-width: 320px;
   max-width: 560px;
@@ -2859,7 +2851,7 @@ body.is-demo .waveform { height: 76px; }
   color: var(--text);
   clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
   pointer-events: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 18px rgba(225, 6, 0, 0.25);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 18px rgba(0, 212, 255, 0.25);
   opacity: 0;
   transition: opacity 0.18s ease-out, transform 0.18s ease-out;
 }
@@ -2876,7 +2868,7 @@ body.is-demo .waveform { height: 76px; }
   font-weight: 700;
   letter-spacing: 0.08em;
   font-size: 10px;
-  color: var(--fom-red);
+  color: var(--accent);
   text-transform: uppercase;
   margin-bottom: 4px;
 }
@@ -2936,7 +2928,7 @@ body.is-demo .waveform { height: 76px; }
   z-index: 30;
   background: var(--ink-1);
   color: var(--text);
-  border: 1px solid var(--fom-red);
+  border: 1px solid var(--accent);
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.05em;
@@ -2950,12 +2942,12 @@ body.is-edit-layout .widget-edit__cycler { display: inline-block; }
 .widget-edit__handle  { top: 4px; left: 4px; cursor: grab; }
 .widget-edit__handle:active { cursor: grabbing; }
 .widget-edit__cycler  { top: 4px; right: 4px; min-width: 36px; text-align: center; }
-.widget-edit__cycler:hover { background: var(--fom-red); color: var(--ink-0); }
+.widget-edit__cycler:hover { background: var(--accent); color: var(--ink-0); }
 
 /* While editing, widgets get a subtle red border-glow so the operator sees they're
  * interactive. Non-edit-mode panels stay on their existing chrome. */
 body.is-edit-layout [data-widget-id] {
-  outline: 1px dashed var(--fom-red);
+  outline: 1px dashed var(--accent);
   outline-offset: -2px;
   cursor: move;
 }
@@ -2963,8 +2955,8 @@ body.is-edit-layout [data-widget-id].is-drag-source {
   opacity: 0.4;
 }
 body.is-edit-layout [data-widget-id].is-drag-target {
-  outline: 2px solid var(--fom-red);
-  box-shadow: 0 0 18px var(--fom-red-glow);
+  outline: 2px solid var(--accent);
+  box-shadow: 0 0 18px var(--accent-glow);
 }
 
 /* The hint banner — bottom-centre, above the telemetry strip, communicates "you're
@@ -2975,20 +2967,20 @@ body.is-edit-layout [data-widget-id].is-drag-target {
   left: 50%;
   transform: translateX(-50%);
   background: var(--ink-1);
-  border: 1px solid var(--fom-red);
+  border: 1px solid var(--accent);
   color: var(--text);
   padding: 10px 18px;
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.06em;
   z-index: 2200;
-  box-shadow: 0 0 24px var(--fom-red-glow);
+  box-shadow: 0 0 24px var(--accent-glow);
   clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
   animation: widget-edit-pulse 2s ease-in-out infinite;
 }
 @keyframes widget-edit-pulse {
-  0%, 100% { box-shadow: 0 0 18px var(--fom-red-glow); }
-  50%      { box-shadow: 0 0 32px var(--fom-red); }
+  0%, 100% { box-shadow: 0 0 18px var(--accent-glow); }
+  50%      { box-shadow: 0 0 32px var(--accent); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3015,27 +3007,27 @@ body.is-edit-layout [data-widget-id].is-drag-target {
   max-height: 90dvh;
   overflow-y: auto;
   background: var(--ink-1);
-  border: 1.5px solid var(--fom-red);
+  border: 1.5px solid var(--accent);
   padding: 24px 28px;
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
-  box-shadow: 0 0 50px var(--fom-red-glow);
+  box-shadow: 0 0 50px var(--accent-glow);
 }
 .usage-overlay__panel::-webkit-scrollbar { width: 6px; }
-.usage-overlay__panel::-webkit-scrollbar-thumb { background: var(--fom-red-deep); }
-.usage-overlay__panel::-webkit-scrollbar-thumb:hover { background: var(--fom-red); }
+.usage-overlay__panel::-webkit-scrollbar-thumb { background: var(--accent-deep); }
+.usage-overlay__panel::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
 .usage-overlay__head {
   display: flex; justify-content: space-between; align-items: center;
   padding-bottom: 14px;
   margin-bottom: 18px;
-  border-bottom: 1px solid var(--fom-red);
+  border-bottom: 1px solid var(--accent);
 }
 .usage-overlay__title {
   font-family: var(--font-display);
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.5em;
-  color: var(--fom-red);
+  color: var(--accent);
 }
 .usage-overlay__close {
   background: transparent;
@@ -3047,7 +3039,7 @@ body.is-edit-layout [data-widget-id].is-drag-target {
   cursor: pointer;
   display: grid; place-items: center;
 }
-.usage-overlay__close:hover { color: var(--fom-red); border-color: var(--fom-red); }
+.usage-overlay__close:hover { color: var(--accent); border-color: var(--accent); }
 
 .usage-overlay__loading {
   padding: 40px 0;
@@ -3070,7 +3062,7 @@ body.is-edit-layout [data-widget-id].is-drag-target {
   padding: 14px 10px;
   text-align: center;
 }
-.usage-overlay__tile.is-warn  { border-color: var(--fom-red); color: var(--fom-red); }
+.usage-overlay__tile.is-warn  { border-color: var(--accent); color: var(--accent); }
 .usage-overlay__tile.is-spend { border-color: #F8E71C; color: #F8E71C; }
 .usage-overlay__tile-value {
   font-family: var(--font-mono);
@@ -3102,7 +3094,7 @@ body.is-edit-layout [data-widget-id].is-drag-target {
   font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 0.3em;
-  color: var(--fom-red);
+  color: var(--accent);
   margin: 18px 0 8px;
   padding-bottom: 6px;
   border-bottom: 1px dashed var(--line);
@@ -3136,7 +3128,7 @@ body.is-edit-layout [data-widget-id].is-drag-target {
 }
 .usage-overlay__tool-row:last-child { border-bottom: none; }
 .usage-overlay__tool-name { color: var(--text); }
-.usage-overlay__tool-count { color: var(--fom-red); font-weight: 600; min-width: 40px; text-align: right; }
+.usage-overlay__tool-count { color: var(--accent); font-weight: 600; min-width: 40px; text-align: right; }
 .usage-overlay__tool-dur  { color: var(--text-dim); min-width: 56px; text-align: right; }
 .usage-overlay__tool-tags { display: flex; gap: 4px; }
 .usage-overlay__tag {
@@ -3147,7 +3139,7 @@ body.is-edit-layout [data-widget-id].is-drag-target {
   border: 1px solid currentColor;
 }
 .usage-overlay__tag--fal { color: #F8E71C; }
-.usage-overlay__tag--err { color: var(--fom-red); }
+.usage-overlay__tag--err { color: var(--accent); }
 
 .usage-overlay__note {
   margin-top: 14px;
@@ -3177,7 +3169,7 @@ input:focus-visible,
 textarea:focus-visible,
 [tabindex]:focus-visible,
 summary:focus-visible {
-  outline: 2px solid var(--fom-red);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -3187,7 +3179,7 @@ summary:focus-visible {
   position: fixed;
   top: -40px;
   left: 12px;
-  background: var(--fom-red);
+  background: var(--accent);
   color: var(--ink-0);
   padding: 8px 14px;
   font-family: var(--font-display);
@@ -3238,11 +3230,12 @@ summary:focus-visible {
     grid-template-columns: 0.9fr 0.9fr 1.5fr 0.9fr 1.3fr;
     grid-template-rows: 40px 0.9fr 1.4fr 0.9fr 56px;
   }
-  /* Touch-friendly tap targets — at-rest size 44px+. */
+  /* Touch-friendly tap targets — at-rest size kept compact since this is a
+   * voice-first kiosk; the wake button is a fallback affordance, not the
+   * primary control, so it shouldn't dominate. */
   .settings-btn { width: 96px; height: 36px; }
-  .notif-bell { width: 44px; height: 44px; }
-  .wake { min-height: 56px; }
-  .launch__a { min-height: 44px; }
+  .notif-bell { width: 32px; height: 32px; }
+  .launch__a { min-height: 36px; }
 }
 
 /* iPad portrait / narrow landscape ≤900px — stacked variant. The 5-column desktop
@@ -3333,11 +3326,11 @@ summary:focus-visible {
 
 .bridge-status__card {
   background: var(--ink-1);
-  border: 2px solid var(--fom-red);
+  border: 2px solid var(--accent);
   clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
   padding: 36px 44px;
   width: min(560px, 90vw);
-  box-shadow: 0 0 80px var(--fom-red-glow);
+  box-shadow: 0 0 80px var(--accent-glow);
   text-align: left;
 }
 
@@ -3346,7 +3339,7 @@ summary:focus-visible {
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.5em;
-  color: var(--fom-red);
+  color: var(--accent);
   margin-bottom: 18px;
   text-transform: uppercase;
 }
@@ -3372,7 +3365,7 @@ summary:focus-visible {
 .bridge-status__code {
   background: var(--ink-0);
   border: 1px solid var(--line);
-  border-left: 3px solid var(--fom-red);
+  border-left: 3px solid var(--accent);
   padding: 14px 18px;
   font-family: var(--font-mono);
   font-size: 14px;
@@ -3396,7 +3389,7 @@ summary:focus-visible {
   font-family: var(--font-mono);
   font-size: 18px;
   letter-spacing: 0.5em;
-  color: var(--fom-red);
+  color: var(--accent);
   animation: bridge-status-pulse 1.6s ease-in-out infinite;
 }
 @keyframes bridge-status-pulse {
@@ -3418,10 +3411,725 @@ summary:focus-visible {
   transition: color 0.18s, border-color 0.18s;
 }
 .bridge-status__dismiss:hover {
-  color: var(--fom-red);
-  border-color: var(--fom-red);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .bridge-status__dots { animation: none; opacity: 0.7; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  JARVIS HUD — VISUAL REFRESH (arc-reactor aesthetic)
+ *  ─────────────────────────────────────────────────────────────────
+ *  Layered enhancements over the base instrument-cluster styling:
+ *    · atmospheric backdrop (reactor halo + vignette)
+ *    · hairline corner brackets on panels (tactile, not decorative)
+ *    · letter-spaced caption typography
+ *    · wake-fire sweep ring (.is-wake-fired)
+ *    · idle breathing on speedo wrapper
+ *    · graceful fallback when brand artwork is absent
+ *  Applied below all other rules so cascade order beats the base.
+ *  ═══════════════════════════════════════════════════════════════ */
+
+/* — Atmospheric backdrop —
+ * Soft cyan halo emanating from where the speedo sits + dark vignette
+ * sealing the corners. Replaces the flat ink-0 body background; layered
+ * fixed-position element so it never paints over content. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 50% 56%, rgba(0, 212, 255, 0.10) 0%, transparent 32%),
+    radial-gradient(circle at 50% 56%, rgba(0, 119, 168, 0.06) 0%, transparent 56%),
+    radial-gradient(ellipse at center, transparent 35%, rgba(0, 0, 0, 0.55) 100%);
+}
+/* Subtle horizontal sweep that crosses the screen every ~9s — keeps idle */
+/* states alive without demanding attention. Disabled under reduced motion. */
+body::after {
+  content: "";
+  position: fixed;
+  left: -10%; right: -10%; top: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.55), transparent);
+  box-shadow: 0 0 24px rgba(0, 212, 255, 0.35);
+  pointer-events: none;
+  z-index: 1;
+  animation: hudSweep 9s linear infinite;
+  opacity: 0.6;
+}
+@keyframes hudSweep {
+  0%   { transform: translateY(-2vh); opacity: 0; }
+  8%   { opacity: 0.6; }
+  92%  { opacity: 0.6; }
+  100% { transform: translateY(102vh); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body::after { display: none; }
+}
+
+/* — Heavy two-piece corner brackets —
+ * Each panel gets a TL + BR bracket assembly. The pseudo-element draws an
+ * L-shaped outline; a box-shadow set inward of the L renders the small
+ * filled chip that distinguishes a "Stark instrument" bracket from a
+ * generic CSS bracket. Two corners (not all four) is intentional — the
+ * panel's clipped polygon already shapes the missing corners. */
+.panel:not(.panel--core)::before,
+.panel:not(.panel--core)::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-color: var(--accent);
+  pointer-events: none;
+  z-index: 5;
+  transition: border-color 180ms;
+}
+.panel:not(.panel--core)::before {
+  top: 5px; left: 5px;
+  border-top: 1.5px solid;
+  border-left: 1.5px solid;
+  /* The 4×4 inner chip, set 2px diagonal-inward from the L. */
+  box-shadow: 6px 6px 0 -4px var(--accent);
+}
+.panel:not(.panel--core)::after {
+  bottom: 5px; right: 5px;
+  border-bottom: 1.5px solid;
+  border-right: 1.5px solid;
+  box-shadow: -6px -6px 0 -4px var(--accent);
+}
+.panel:not(.panel--core):hover::before,
+.panel:not(.panel--core):hover::after {
+  border-color: #fff;
+}
+
+/* — Refined panel titles —
+ * Lead-in `//` glyph + faint underline tail. Targets only generic .panel__title;
+ * widget-specific overrides keep their own treatment. */
+.panel__title::before {
+  content: "// ";
+  color: var(--accent-deep);
+  margin-right: 2px;
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+/* — Speedo: arc-reactor concentric core —
+ * The existing SVG already has rings + arcs + a glowing centre; we layer
+ * additional CSS-driven concentric rings BEHIND the SVG to give the
+ * reactor depth that an SVG alone can't produce. Three rings, slowly
+ * rotating at different rates — the eye never quite locks on a frame.
+ * Disabled on .tier-lite to save GPU; reduced-motion respected. */
+.speedo {
+  isolation: isolate; /* contain blend modes to the speedo */
+}
+.speedo::before,
+.speedo::after {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  box-shadow:
+    inset 0 0 40px rgba(0, 212, 255, 0.08),
+    0 0 60px rgba(0, 212, 255, 0.04);
+}
+.speedo::before {
+  inset: 6%;
+  border-style: dashed;
+  border-color: rgba(0, 212, 255, 0.12);
+  animation: reactorRingA 28s linear infinite;
+}
+.speedo::after {
+  inset: 18%;
+  border-color: rgba(0, 212, 255, 0.22);
+  animation: reactorRingB 38s linear infinite reverse;
+}
+@keyframes reactorRingA { to { transform: rotate(360deg); } }
+@keyframes reactorRingB { to { transform: rotate(360deg); } }
+body.tier-lite .speedo::before,
+body.tier-lite .speedo::after { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .speedo::before, .speedo::after { animation: none; }
+}
+
+/* — Brand-mark fallback —
+ * The legacy speedo__brand-mark loaded a brand PNG from disk. White-label
+ * installs ship without bundled artwork; we replace the now-missing PNG
+ * with a CSS-rendered radial reactor — six bright spokes radiating from a
+ * central core. Drop assets/brand-dial.png to override (background-image
+ * defined here is overridden by the original rule that sets a real URL). */
+/* (legacy CSS-rendered reactor backdrop removed — clean SVG reactor now
+ * carries all the centerpiece geometry. .speedo__brand-mark stays hidden
+ * by the rule lower in this file.) */
+
+/* — Wake-fire scan sweep —
+ * When the wake word fires, hud.js can add `.is-wake-fired` to the .speedo
+ * (or root .hud) for ~700ms. We render a single radial scan ring that
+ * expands from the centre and fades — a physical-feeling "I heard you"
+ * acknowledgement before the listening state visuals take over. Hardware-
+ * accelerated transform + opacity only; no layout thrash. */
+.speedo.is-wake-fired::before {
+  /* Override the slow rotation with the sweep pulse for the duration */
+  animation: wakeSweep 700ms ease-out forwards;
+  border-color: var(--accent);
+  border-style: solid;
+  border-width: 2px;
+}
+@keyframes wakeSweep {
+  0%   { transform: scale(0.20); opacity: 0.95; }
+  100% { transform: scale(1.10); opacity: 0; }
+}
+
+/* — Idle breath —
+ * Imperceptible 5s breathe on the whole speedo that subliminally signals
+ * "alive but resting". Disabled when listening/thinking/speaking so it
+ * doesn't fight the active-state animations. */
+.speedo:not(.is-listening):not(.is-thinking):not(.is-speaking) {
+  animation: speedoBreath 5s ease-in-out infinite;
+}
+@keyframes speedoBreath {
+  0%, 100% { filter: brightness(1) saturate(1); }
+  50%      { filter: brightness(1.06) saturate(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .speedo:not(.is-listening):not(.is-thinking):not(.is-speaking) { animation: none; }
+}
+
+/* — Health pip refinement —
+ * The bridge/AI/TTS/STT pips at the top-right deserve to feel like LED
+ * indicators, not browser circles. Inner highlight + subtle bevel. */
+.health__dot {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.20),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* (Wake-button hover ring consolidated into the canonical .wake rule above —
+ * the dual .wake-btn / button[id="wakeBtn"] aliases were unused since the
+ * markup only ever ships <button class="wake" id="wakeBtn">.) */
+
+/* — Settings TUNE button refinement —
+ * Existing brackets get a hairline accent on hover to match the panel
+ * corner-bracket vocabulary. */
+.settings-btn:hover .settings-btn__bracket {
+  border-color: var(--accent) !important;
+  filter: drop-shadow(0 0 4px var(--accent-glow));
+}
+
+/* — Wordmark accent under speedo (when present) —
+ * Subtle horizontal scan line under any element with [data-brand-agent]
+ * to ground the agent name with an instrument-panel underline. */
+[data-brand-agent]::after {
+  content: "";
+  display: block;
+  width: 32px;
+  height: 1px;
+  margin-top: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+
+/* — High-contrast accessibility refinement —
+ * When body.high-contrast is set (existing toggle), boost the bracket and
+ * ring opacity so they remain visible against the tinted backdrop. */
+body.high-contrast .panel:not(.panel--core)::before,
+body.high-contrast .panel:not(.panel--core)::after {
+  opacity: 1;
+  border-width: 2px;
+}
+body.high-contrast .speedo::before,
+body.high-contrast .speedo::after {
+  border-color: rgba(0, 212, 255, 0.35);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  ARC REACTOR — replaces the rev-gauge centerpiece
+ *  Six radial petals around a layered glowing core; outer rings inherit
+ *  the existing slow-rotation arcs. State-driven via .is-listening /
+ *  .is-thinking / .is-speaking on .speedo.
+ *  ═══════════════════════════════════════════════════════════════ */
+
+/* Override the old red-zone speedo__core fill to use the radial gradient. */
+.speedo__core {
+  fill: url(#reactorCore);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+/* The bright inner pip + diffuse halo behind the core. */
+.reactor-bright {
+  fill: #f4fbff;
+  filter: drop-shadow(0 0 12px var(--accent-glow));
+}
+.reactor-halo {
+  fill: var(--accent);
+  opacity: 0.35;
+}
+
+/* (legacy reactor-petals + petalPulse/corePulse/haloBreath keyframes removed —
+ * Mark VII rebuild rejected; the simple reactor uses .speedo__arc--a/b
+ * rotation only. State-driven listening/thinking visuals are reapplied in
+ * Wave B as part of the instrument-cluster rebuild.) */
+
+/* Hide the brand-mark CSS dial backdrop placeholder div. */
+.speedo__brand-mark { display: none; }
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  CORE TELEMETRY — sparklines + thermal block
+ *  Replaces the comms panel; lives in panel--system spanning rows 3-4.
+ *  Dense info-rich layout: round dials → sparklines → thermal → ancillary.
+ *  ═══════════════════════════════════════════════════════════════ */
+
+.panel--system .syspods {
+  margin-bottom: 10px;
+}
+
+/* CORE TELEMETRY pairs grid — 4 rows of 2 dials. Each row pairs the live
+ * usage metric with its matching thermal/secondary so the operator reads
+ * "load + heat" together. Grid grows to fill available panel height via
+ * grid-auto-rows: 1fr — when the panel is full-rail height the dials
+ * spread evenly instead of clustering at the top. */
+.syspods--pairs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr;
+  gap: 12px 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--line-soft);
+  flex: 1 1 auto;          /* claim available height inside the panel */
+  min-height: 0;
+}
+.syspods--pairs .syspod {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.syspods--pairs .syspod__readout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+/* Each sparkline row: label · canvas · value, monospaced numerals on the right. */
+.sparkrows {
+  display: flex; flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px dashed var(--line-soft);
+  border-bottom: 1px dashed var(--line-soft);
+  margin-bottom: 8px;
+}
+.sparkrow {
+  display: grid;
+  grid-template-columns: 32px 1fr 42px;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+}
+.sparkrow__k {
+  color: var(--accent-deep);
+  letter-spacing: 0.2em;
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+.sparkrow__canvas {
+  width: 100%;
+  height: 22px;
+  background:
+    linear-gradient(0deg, transparent 0px, transparent 10px, rgba(0,212,255,0.06) 10px, rgba(0,212,255,0.06) 11px, transparent 11px),
+    var(--ink-2);
+  border: 1px solid var(--line-soft);
+  display: block;
+}
+.sparkrow__v {
+  color: var(--accent);
+  text-align: right;
+  letter-spacing: 0.06em;
+}
+
+/* Per-metric stroke tints — load (cyan, default), thermal (warm amber),
+ * VRAM (lavender), GPU thermal pressure (warm coral). Distinct hues so
+ * the row pairing reads at a glance: same-row dials share visual family. */
+.syspod__fill--cpu     { stroke: var(--accent); }
+.syspod__fill--gpu     { stroke: var(--accent); }
+.syspod__fill--ram     { stroke: var(--accent); }
+.syspod__fill--cputemp { stroke: #ffb84d; }   /* warm amber */
+.syspod__fill--gputemp { stroke: #ff8092; }   /* coral */
+.syspod__fill--vram    { stroke: #b48dff; }   /* lavender */
+.syspod__fill--netdn   { stroke: #5cf2c8; }   /* mint */
+.syspod__fill--netup   { stroke: #f5d76e; }   /* honey */
+
+/* Bigger dials for the paired layout — was 50px in the 3-up row, now 64px. */
+.panel--system .syspod__svg { width: 64px; height: 64px; flex: 0 0 auto; }
+.panel--system .syspod__value { font-size: 18px; font-weight: 600; }
+.panel--system .syspod__value--small { font-size: 11px; letter-spacing: 0.1em; }
+.panel--system .syspod__label { font-size: 9px; letter-spacing: 0.22em; }
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  MARK VII REACTOR — full visual rebuild (replaces 6-rect petal version)
+ *  Layered geometry: ticks → 3 rings → 2 arcs → hex frame → 6 capacitor
+ *  bays → triangle core → scan ray. Each layer has its own breath rhythm
+ *  so the composition never reads as synchronised, and the eye follows
+ *  motion around the clock instead of locking on a single element.
+ *  ═══════════════════════════════════════════════════════════════ */
+
+/* Calibration tick marks at the outer ring. */
+.rx-ticks line {
+  stroke: rgba(0, 212, 255, 0.45);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* Override the legacy ring weights with a tighter Mark VII treatment.
+ * Outer = hairline, mid = dashed scale ring, inner = solid bright. */
+.rx-ring { fill: none; }
+.rx-ring--outer {
+  stroke: rgba(0, 212, 255, 0.42);
+  stroke-width: 1.2;
+}
+.rx-ring--mid {
+  stroke: rgba(0, 212, 255, 0.28);
+  stroke-width: 1;
+  stroke-dasharray: 3 8;
+}
+.rx-ring--inner {
+  stroke: rgba(0, 212, 255, 0.65);
+  stroke-width: 1.8;
+}
+
+/* Counter-rotating arc segments — short, fast, narrative. */
+.rx-arc {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-dasharray: 200 1700;
+  stroke-linecap: round;
+  transform-origin: 300px 300px;
+}
+
+/* (Mark VII rebuild rejected — hex/bay/triangle/pin/scan-ray classes and
+ * their associated keyframes removed. The simple reactor (rings + per-core
+ * arcs + glowing core) survives; Wave B re-introduces instrument-cluster
+ * vocabulary cleanly on top of the simple foundation.) */
+
+/* Reactor core halo — diffuse cyan halo behind the central core. */
+.rx-core-halo {
+  fill: var(--accent);
+  opacity: 0.5;
+}
+
+/* Bright pin at centre — TTS amplitude target. */
+.rx-core-spark {
+  fill: #ffffff;
+  filter: drop-shadow(0 0 14px var(--accent)) drop-shadow(0 0 4px #fff);
+  animation: rxSpark 1.6s ease-in-out infinite;
+}
+@keyframes rxSpark {
+  0%, 100% { r: 11; opacity: 0.85; }
+  50%      { r: 14; opacity: 1; }
+}
+body.tier-lite .rx-core-spark { animation: none; }
+@media (prefers-reduced-motion: reduce) { .rx-core-spark { animation: none; } }
+
+/* Speaking state — core scales to TTS amplitude. */
+.speedo.is-speaking .rx-core-spark {
+  animation: rxSparkSpeak 280ms ease-in-out infinite alternate;
+}
+@keyframes rxSparkSpeak {
+  from { r: 12; opacity: 0.9; }
+  to   { r: 18; opacity: 1; filter: drop-shadow(0 0 18px #fff); }
+}
+
+/* Listening state — outer arc tightens. */
+.speedo.is-listening .speedo__arc--a {
+  stroke-dasharray: 600 2900;
+  animation-duration: 4s;
+}
+.speedo.is-listening .rx-core-halo { opacity: 0.7; }
+
+/* Thinking state — second arc accelerates. */
+.speedo.is-thinking .speedo__arc--b { animation-duration: 2.2s; }
+
+/* ─── Per-core CPU rim arcs ───
+ * One <path> per core, drawn at the same radius as the outermost ring (r=292).
+ * Track = faint, Fill = bright + glow. P-cores cyan, E-cores violet so the
+ * load profile reads at a glance: cluster of hot E-cores = background work,
+ * hot P-cores = active task. */
+.rx-core-arc {
+  fill: none;
+  stroke-linecap: round;
+}
+.rx-core-arc--track {
+  stroke: rgba(255, 255, 255, 0.06);
+  stroke-width: 4;
+}
+.rx-core-arc--fill {
+  stroke-width: 4;
+  /* Drop-shadow filter removed — was running on every fill at every dasharray
+   * transition, ~10 GPU blur passes per stats tick. The stroke colour alone
+   * carries the brightness; rim chips communicate the load level numerically. */
+  transition: stroke-dasharray 280ms ease-out;
+}
+.rx-core-arc--fill.is-pcore { stroke: #00d4ff; }
+.rx-core-arc--fill.is-ecore { stroke: #7be7ff; opacity: 0.85; }
+
+/* ─── CORE TELEMETRY panel sizing fix ───
+ * The expanded panel (3 dials + 3 sparklines + 3 dials + stat row + title)
+ * was overflowing the row 3 budget. Compress internal sizing so everything
+ * fits without the bottom getting clipped. Also right-rail panels (clock,
+ * weather, launch) now justify-content: flex-start so their content packs
+ * to the top with no bottom dead space. */
+.panel--system {
+  font-size: 11px;
+}
+.panel--system .panel__title { margin-bottom: 8px; font-size: 10px; }
+/* (sysod sizing now lives in the .syspods--pairs block above; the dupe
+ * compressing rules from the original 3-up layout were removed.) */
+.panel--system .sparkrows { padding: 8px 0; margin: 8px 0 6px; gap: 4px; }
+.panel--system .sparkrow { grid-template-columns: 32px 1fr 42px; gap: 6px; font-size: 9px; }
+.panel--system .sparkrow__canvas { height: 22px; }
+.panel--system .stat-row { font-size: 9px; padding-top: 6px; gap: 8px; }
+
+/* Right-rail panels — pack content to top so panel-relative dead space
+ * disappears (the panel still fills the grid row, but the visible content
+ * hugs the top with a hairline ending below it). */
+.panel--clock .clock-split,
+.panel--weather,
+.panel--launch {
+  justify-content: flex-start;
+}
+
+/* Diary list — even when empty, give it a non-zero min-height so the
+ * "no events" line isn't crushed against the bottom of the time block. */
+.panel--clock .diary { min-height: 24px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  INSTRUMENT-CLUSTER CENTERPIECE (Wave B rebuild)
+ *  Replaces the "rings + arcs + glowing core" centerpiece with an
+ *  operating instrument vocabulary: broken outer ring with cardinal
+ *  break-points + label chips, calibration scale, dashed rotor, voice-
+ *  waveform anchor, asymmetric anchor tag, right-hemisphere scan line.
+ *  Heavy use of chamfered geometry (no border-radius).
+ *  ═══════════════════════════════════════════════════════════════ */
+
+/* Layer 1 — calibration ring + ticks */
+.ic-cal-ring {
+  fill: none;
+  stroke: rgba(0, 212, 255, 0.28);
+  stroke-width: 0.8;
+  stroke-dasharray: 1 4;
+}
+.ic-cal-ticks line {
+  stroke: rgba(0, 212, 255, 0.55);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+
+/* Layer 3 — broken outer ring segments. No filter (static element with high
+ * stroke-width already reads bright; filter cost not earning visual lift). */
+.ic-outer-ring .ic-ring-seg {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+
+/* Layer 4 — dashed mid ring, slow CCW */
+.ic-mid-ring {
+  fill: none;
+  stroke: rgba(0, 212, 255, 0.45);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 8;
+  transform-origin: 300px 300px;
+  animation: icMidSpin 24s linear infinite reverse;
+}
+@keyframes icMidSpin {
+  from { transform: rotate(0); }
+  to   { transform: rotate(360deg); }
+}
+body.tier-lite .ic-mid-ring { animation: none; }
+@media (prefers-reduced-motion: reduce) { .ic-mid-ring { animation: none; } }
+
+/* Layer 5 — bright inner ring */
+.ic-inner-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  opacity: 0.7;
+}
+
+/* Layer 6 — central voice waveform spokes.
+ * Filter applied to the GROUP not per-line: 1 GPU blur pass instead of 64,
+ * which knocks ~30% off GPU usage during the 60fps animation loop. */
+#icVoiceWave {
+  filter: drop-shadow(0 0 4px var(--accent-glow));
+}
+#icVoiceWave line {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* Compass markers — N/S/E/W */
+.ic-compass text {
+  font-feature-settings: "tnum" 1;
+}
+
+/* Asymmetric anchor tag (LEFT side) */
+.ic-anchor-bg {
+  fill: rgba(0, 212, 255, 0.08);
+  stroke: var(--accent);
+  stroke-width: 1.2;
+  filter: drop-shadow(0 0 4px var(--accent-glow));
+}
+
+/* Right-hemisphere scan line */
+.ic-scan-r {
+  transform-origin: 0 0;
+  animation: icScanR 4s linear infinite;
+}
+.ic-scan-line {
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0.6;
+  /* No filter on the rotating scan line — drop-shadow on a transformed
+   * element forces compositing every frame. Bright cyan stroke alone reads. */
+}
+@keyframes icScanR {
+  /* Sweep right hemisphere only: 90° → 270° going CW through 0°.
+   * 0% at 90°(E), 50% at 270°(W via 0°/N), back to 90°. Pause briefly
+   * at the W endpoint, then snap back. */
+  0%   { transform: rotate(90deg); opacity: 0; }
+  5%   { opacity: 0.6; }
+  45%  { transform: rotate(270deg); opacity: 0.6; }
+  50%  { opacity: 0; }
+  100% { transform: rotate(90deg); opacity: 0; }
+}
+body.tier-lite .ic-scan-r { animation: none; opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .ic-scan-r { animation: none; opacity: 0; } }
+
+/* ─── Rim chips (HTML overlay) ─── */
+.ic-chips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.ic-chip {
+  position: absolute;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--ink-1);
+  /* Chamfered chip: angled top-left + bottom-right corners */
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: border-color 220ms, box-shadow 220ms;
+}
+.ic-chip__k {
+  color: var(--accent-deep);
+  font-weight: 600;
+}
+.ic-chip__v {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  font-feature-settings: "tnum" 1;
+}
+.ic-chip.is-hot {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.ic-chip.is-hot .ic-chip__v { color: var(--accent); }
+
+/* Chip placement — anchored to the corners of the speedo's bounding box.
+ * The .speedo is min(78vmin, 720px) square inside .panel--core. The chips
+ * sit at the outer break-points of the heavy outer ring (NW, NE, SE, SW). */
+.ic-chip--nw { top: 14%; left: 10%; }
+.ic-chip--ne { top: 14%; right: 10%; }
+.ic-chip--se { bottom: 14%; right: 10%; }
+.ic-chip--sw { bottom: 14%; left: 10%; }
+
+/* ─── Settings: API keys NAME=VALUE list ─── */
+.settings-modal__keylist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.settings-modal__keyrow {
+  display: grid;
+  grid-template-columns: 1fr auto 1.2fr auto;
+  gap: 6px;
+  align-items: center;
+}
+.settings-modal__keyrow input {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 6px 8px;
+  background: var(--ink-2);
+  border: 1px solid var(--line-soft);
+  color: var(--text);
+}
+.settings-modal__keyrow input.is-name {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.settings-modal__keyrow .keyrow__eq {
+  color: var(--accent-deep);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.settings-modal__keyrow button {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 160ms, border-color 160ms;
+}
+.settings-modal__keyrow button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ─── Settings: VAD meter ─── */
+.settings-modal__vad-meter {
+  position: relative;
+  flex: 1;
+  height: 12px;
+  background: var(--ink-2);
+  border: 1px solid var(--line-soft);
+  overflow: hidden;
+}
+.settings-modal__vad-meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent));
+  transition: width 80ms linear;
+}
+.settings-modal__vad-meter-mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: #ffb84d;
+  pointer-events: none;
+  transition: left 160ms;
 }

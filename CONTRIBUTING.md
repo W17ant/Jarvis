@@ -75,10 +75,10 @@ Tests bumped from 58 → 60 green.
 
 | Service        | Port | Started by    | Stop with                | Logs                         |
 |----------------|------|---------------|--------------------------|------------------------------|
-| Static (HUD)   | 8765 | `./launch.sh` | `./launch.sh stop`       | `/tmp/flat-out-static.log`   |
-| Bridge (Node)  | 8766 | `./launch.sh` | `./launch.sh stop`       | `/tmp/flat-out-bridge.log`   |
-| Kokoro (TTS)   | 8767 | `./launch.sh` | `./launch.sh stop`       | `/tmp/flat-out-kokoro.log`   |
-| Whisper (STT)  | 8768 | `./launch.sh` | `./launch.sh stop`       | `/tmp/flat-out-whisper.log`  |
+| Static (HUD)   | 8765 | `./launch.sh` | `./launch.sh stop`       | `/tmp/jarvis-static.log`   |
+| Bridge (Node)  | 8766 | `./launch.sh` | `./launch.sh stop`       | `/tmp/jarvis-bridge.log`   |
+| Kokoro (TTS)   | 8767 | `./launch.sh` | `./launch.sh stop`       | `/tmp/jarvis-kokoro.log`   |
+| Whisper (STT)  | 8768 | `./launch.sh` | `./launch.sh stop`       | `/tmp/jarvis-whisper.log`  |
 | Ollama         | 11434| menu-bar app  | quit menu-bar app        | (no log file, see Console)   |
 
 **When you change a file, what restarts?**
@@ -133,7 +133,7 @@ Self-contained items Claude Code can ship in one session. Each has clear accepta
 
 2. **Add filler phrases.** Edit `tts.js` (`FILLERS_SHORT` / `FILLERS_LONG`) AND `bridge/kokoro_server.py` (`_CACHEABLE_PHRASES`). The two lists must stay in sync — comment in the Python file says so. New phrases get cached on first use.
 
-3. **Tune wake-word fuzzy patterns.** If Whisper keeps mishearing "Hey Flat-Out" as something specific (e.g., "hey flag out"), add the misheard form to `wake-parsing.js` `FLATOUT_FUZZY_PATTERNS`.
+3. **Tune wake-word fuzzy patterns.** If Whisper keeps mishearing "Hey Jarvis" as something specific (e.g., "hey flag out"), add the misheard form to `wake-parsing.js` `FLATOUT_FUZZY_PATTERNS`.
 
 4. **Adjust launcher tiles.** Edit `index.html` `<section class="panel--launch">` and the matching CSS in `styles.css`. Add / remove / reorder app shortcuts.
 
@@ -171,7 +171,7 @@ Self-contained items Claude Code can ship in one session. Each has clear accepta
 
 Tail the logs:
 ```bash
-tail -f /tmp/flat-out-static.log /tmp/flat-out-bridge.log /tmp/flat-out-kokoro.log /tmp/flat-out-whisper.log
+tail -f /tmp/jarvis-static.log /tmp/jarvis-bridge.log /tmp/jarvis-kokoro.log /tmp/jarvis-whisper.log
 ```
 
 Check service health:

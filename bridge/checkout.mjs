@@ -79,7 +79,7 @@ async function loadPlaywright() {
 }
 
 const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const PROFILE_DIR = "/tmp/flat-out-jarvis-checkout-profile";
+const PROFILE_DIR = "/tmp/jarvis-jarvis-checkout-profile";
 
 /** Lazy-launch a headed Chromium pointed at the operator's installed Chrome
  *  binary, with a dedicated profile dir so we don't fight with the operator's

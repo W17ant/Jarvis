@@ -1,11 +1,14 @@
 {
-  "_comment": "Quick-launch panel entries. Edit this file (or use the future settings UI) to add/remove/reorder. Icon names map to assets/icons/<name>.svg via Phosphor; omit for text-only.",
+  "_comment": "Quick-launch panel entries. Edit this file (or use the settings UI) to add/remove/reorder. Icon names map to assets/icons/<name>.svg via Phosphor; omit for text-only.",
   "items": [
-    { "label": "MAIL",         "app": "mail" },
-    { "label": "ADOBE CC",     "app": "adobe" },
-    { "label": "PREMIERE PRO", "app": "premiere" },
-    { "label": "COMPLETED",    "app": "output" },
-    { "label": "SHOOTS",       "app": "shoots" },
-    { "label": "FRAME.IO",     "app": "frameio" }
+    { "label": "MAIL",      "app": "mail" },
+    { "label": "MESSAGES",  "app": "messages" },
+    { "label": "CALENDAR",  "app": "calendar" },
+    { "label": "MUSIC",     "app": "music" },
+    { "label": "NOTES",     "app": "notes" },
+    { "label": "REMINDERS", "app": "reminders" },
+    { "label": "CHROME",    "app": "chrome" },
+    { "label": "TERMINAL",  "app": "terminal" },
+    { "label": "PHOTOS",    "app": "photos" }
   ]
 }

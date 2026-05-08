@@ -1,6 +1,6 @@
 /** storage.js - Profile-namespaced localStorage helper.
  *
- *  All persisted browser-side state lives under `flatout.<profile>.<name>`. This
+ *  All persisted browser-side state lives under `jarvis.<profile>.<name>`. This
  *  module is the only place that knows the key shape. Consumers call get / set /
  *  remove with bare logical names.
  *
@@ -11,10 +11,10 @@
  *  per-file migration needed.
  *
  *  One-shot legacy migration runs at module load: any pre-namespacing keys
- *  (`flatout.foo`) get moved into the default profile (`flatout.default.foo`) and
+ *  (`jarvis.foo`) get moved into the default profile (`jarvis.default.foo`) and
  *  the legacy entries are deleted. Idempotent — safe to run on every page load. */
 
-const PREFIX = "flatout";
+const PREFIX = "jarvis";
 let activeProfile = "default";
 
 function profileKey(name) { return `${PREFIX}.${activeProfile}.${name}`; }

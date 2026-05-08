@@ -7,10 +7,10 @@
  *    - server.mjs imports loadBrand() and exposes a /brand HTTP endpoint
  *    - index.html bootstraps with /brand and injects CSS variables before render
  *    - voice.js fetches /brand once, uses brand.agent.wakePhrase + mishears
- *    - System prompt for the LLM substitutes ${brand.agent.name} for "Flat-Out"
+ *    - System prompt for the LLM substitutes ${brand.agent.name} for "Jarvis"
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
 const PROJECT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -19,13 +19,13 @@ const BRAND_PATH = path.join(PROJECT_DIR, "config", "brand.json");
 /* Why: hard-coded fallback so a missing/corrupt brand.json doesn't crash the bridge. */
 const FALLBACK = {
   agent: {
-    name: "Flat-Out",
-    wakePhrase: "hey flat-out",
-    wakeMishears: ["hey flat-out", "flat-out"],
+    name: "Jarvis",
+    wakePhrase: "hey jarvis",
+    wakeMishears: ["hey jarvis", "jarvis"],
     voice: "bm_daniel",
   },
   agency: {
-    name: "Flat-Out Media",
+    name: "Jarvis AI",
     tagline: "",
     domain: "",
     /* Per-platform social handles. Replaces the legacy single `social` string —
@@ -38,13 +38,13 @@ const FALLBACK = {
     social: "",
   },
   colors: {
-    primary: "#E10600", primaryDeep: "#8F0003",
-    primaryGlow: "rgba(225,6,0,0.55)", primaryTint: "rgba(225,6,0,0.06)",
+    primary: "#00d4ff", primaryDeep: "#0077a8",
+    primaryGlow: "rgba(0,212,255,0.55)", primaryTint: "rgba(0,212,255,0.06)",
     ink0: "#000", ink1: "#0a0a0a", ink2: "#141414",
     text: "#f4f4f4", textDim: "rgba(244,244,244,0.55)",
   },
   fonts: { display: "Oswald", body: "Rubik", mono: "JetBrains Mono" },
-  logo: { wordmarkPng: "assets/fom-wordmark.png", wordmarkSvg: null, iconPng: null, iconSvg: null },
+  logo: { wordmarkPng: null, wordmarkSvg: null, iconPng: null, iconSvg: null },
 };
 
 let cached = null;
@@ -56,7 +56,7 @@ let cached = null;
 export function loadBrand() {
   if (cached) return cached;
   if (!existsSync(BRAND_PATH)) {
-    console.warn("[brand] config/brand.json not found — using Flat-Out fallback. Run ./tools/setup-wizard.mjs to white-label.");
+    console.warn("[brand] config/brand.json not found — using Jarvis fallback. Run ./tools/setup-wizard.mjs to white-label.");
     cached = FALLBACK;
     return cached;
   }
@@ -72,7 +72,7 @@ export function loadBrand() {
     /* Migrate legacy `agency.social` (single handle string) → `agency.socials.instagram`.
      * Done on read so old brand.json files keep working without a manual edit. The
      * single-string field is most often an Instagram handle in practice (matches what
-     * the Flat-Out example shipped with). Settings panel saves the new shape going
+     * the Jarvis example shipped with). Settings panel saves the new shape going
      * forward; the legacy field is kept in lock-step for any third-party reader. */
     cached.agency.socials = { ...FALLBACK.agency.socials, ...(raw.agency?.socials || {}) };
     if (!raw.agency?.socials && raw.agency?.social && !cached.agency.socials.instagram) {
@@ -115,6 +115,51 @@ export function expandMishears(name) {
 
 /** Force a re-read on next loadBrand() — used after the wizard writes a new config. */
 export function invalidateBrandCache() { cached = null; }
+
+/**
+ * Persist a brand patch to config/brand.json. The patch is shallow-merged
+ * over the current brand so the settings panel can submit just the agent +
+ * agency fields it touched without round-tripping logo/colors/fonts that
+ * other surfaces own. Returns the merged brand. Throws on filesystem errors.
+ *
+ * @param {object} patch - partial brand object: { agent?, agency?, colors?, fonts?, logo? }
+ * @returns {object} the new merged brand
+ */
+export function saveBrand(patch) {
+  if (!patch || typeof patch !== "object") throw new Error("brand patch must be an object");
+  const current = loadBrand();
+  const merged = {
+    agent:   { ...current.agent,   ...(patch.agent || {}) },
+    agency:  { ...current.agency,  ...(patch.agency || {}) },
+    colors:  { ...current.colors,  ...(patch.colors || {}) },
+    fonts:   { ...current.fonts,   ...(patch.fonts || {}) },
+    logo:    { ...current.logo,    ...(patch.logo || {}) },
+  };
+  if (patch.agency?.socials) {
+    merged.agency.socials = { ...current.agency.socials, ...patch.agency.socials };
+  }
+  /* Auto-derive wake phrase + mishears from agent name when the operator
+   * didn't supply them — keeps the settings panel from clobbering recognition
+   * if they only changed the name. */
+  if (patch.agent?.name && !patch.agent?.wakePhrase) {
+    merged.agent.wakePhrase = `hey ${String(patch.agent.name).toLowerCase()}`;
+  }
+  if (patch.agent?.name && !patch.agent?.wakeMishears) {
+    merged.agent.wakeMishears = expandMishears(patch.agent.name);
+  }
+  /* Strip empty-string mishears that would create a noop wake-variant entry. */
+  if (Array.isArray(merged.agent.wakeMishears)) {
+    merged.agent.wakeMishears = merged.agent.wakeMishears
+      .map((s) => String(s || "").trim())
+      .filter(Boolean);
+  }
+  /* Comment is preserved if it exists, just refreshed to note the last edit. */
+  const out = { _comment: "Edited via the settings panel — see tools/setup-wizard.mjs to reset.", ...merged };
+  mkdirSync(path.dirname(BRAND_PATH), { recursive: true });
+  writeFileSync(BRAND_PATH, JSON.stringify(out, null, 2) + "\n", "utf8");
+  invalidateBrandCache();
+  return loadBrand();
+}
 
 /**
  * Pick the agency's primary social handle for places that need a single string

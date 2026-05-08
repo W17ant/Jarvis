@@ -303,7 +303,7 @@ export async function readArticle({ url }) {
   try {
     const r = await fetch(u, {
       headers: {
-        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Flat-Out/1.0",
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Jarvis/1.0",
         "accept": "text/html,application/xhtml+xml",
       },
       signal: AbortSignal.timeout(12_000),

@@ -1,6 +1,6 @@
 /** build-feature-checklist.mjs - One-off PDF: feature checklist for client sign-off.
  *  Two sections — already built (ticked) + proposed (empty checkbox each, yes/no).
- *  Branded with the FOM marketing wordmark treatment (heavy black FLAT-OUT + red MEDIA). */
+ *  Branded with the agent brand wordmark treatment. */
 
 import puppeteer from "puppeteer-core";
 import { mkdir } from "node:fs/promises";
@@ -13,7 +13,7 @@ const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrom
 
 const BUILT = {
   "Voice & memory": [
-    'Voice control with wake word "Hey Flat-Out" — runs entirely on the office Mac, no cloud',
+    'Voice control with wake word "Hey Jarvis" — runs entirely on the office Mac, no cloud',
     "Persistent memory of contacts, projects and conversations across sessions",
     "Confirmation gate before any client-visible action (no auto-sends)",
     "Cancel any task instantly with ESC or voice",
@@ -26,7 +26,7 @@ const BUILT = {
     "Auto-crops to 9:16, 1:1, 4:5 with the subject kept centered",
   ],
   "Production & editing": [
-    "Cuts cinematic teasers (flash cuts, speed ramps, beat-synced music, FOM intro/outro)",
+    "Cuts cinematic teasers (flash cuts, speed ramps, beat-synced music, intro/outro)",
     "Drives Adobe Premiere Pro 2025 by voice (open, import, sequence, render)",
     "Applies Lightroom presets to RAW folders via XMP sidecars",
     "Image-to-video generation via Fal.ai Kling",
@@ -98,7 +98,7 @@ const PROPOSED = {
 
 const html = `<!doctype html>
 <html><head><meta charset="utf-8" />
-<title>Flat-Out Media — Feature Checklist</title>
+<title>Jarvis AI — Feature Checklist</title>
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 <style>
   @page { size: A4; margin: 0; }
@@ -106,10 +106,10 @@ const html = `<!doctype html>
   html, body { background: #ffffff; color: #111; font-family: "Rubik", system-ui, sans-serif; font-size: 10.5pt; line-height: 1.4; }
   .page { padding: 22mm 18mm 16mm; }
 
-  .masthead { display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 2px solid #E10600; padding-bottom: 10px; margin-bottom: 16px; }
+  .masthead { display: flex; align-items: flex-end; justify-content: space-between; border-bottom: 2px solid #00d4ff; padding-bottom: 10px; margin-bottom: 16px; }
   .wordmark { display: flex; flex-direction: column; line-height: 0.85; }
   .wordmark__primary { font-family: "Anton", "Oswald", sans-serif; font-size: 44pt; letter-spacing: -0.01em; color: #111; line-height: 0.85; text-transform: uppercase; }
-  .wordmark__suffix  { font-family: "Oswald", sans-serif; font-weight: 600; font-size: 11pt; letter-spacing: 0.55em; color: #E10600; text-transform: uppercase; margin-top: 4px; margin-right: -0.55em; }
+  .wordmark__suffix  { font-family: "Oswald", sans-serif; font-weight: 600; font-size: 11pt; letter-spacing: 0.55em; color: #00d4ff; text-transform: uppercase; margin-top: 4px; margin-right: -0.55em; }
   .meta { text-align: right; font-family: "Oswald", sans-serif; }
   .meta__title { font-size: 14pt; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #111; }
   .meta__sub   { font-size: 9pt; letter-spacing: 0.18em; color: #6a6a6a; text-transform: uppercase; margin-top: 2px; }
@@ -140,14 +140,14 @@ const html = `<!doctype html>
   .item__text { flex: 1; color: #1a1a1a; }
 
   .footer { position: fixed; bottom: 8mm; left: 18mm; right: 18mm; display: flex; justify-content: space-between; font-family: "Oswald", sans-serif; font-size: 8pt; letter-spacing: 0.22em; text-transform: uppercase; color: #aaa; }
-  .footer__brand { color: #E10600; font-weight: 600; }
+  .footer__brand { color: #00d4ff; font-weight: 600; }
 </style>
 </head>
 <body>
 <div class="page">
   <div class="masthead">
     <div class="wordmark">
-      <span class="wordmark__primary">FLAT-OUT</span>
+      <span class="wordmark__primary">JARVIS</span>
       <span class="wordmark__suffix">MEDIA</span>
     </div>
     <div class="meta">
@@ -202,8 +202,8 @@ const html = `<!doctype html>
   </div>
 
   <div class="footer">
-    <div class="footer__brand">FLAT-OUT MEDIA</div>
-    <div>flatoutmedia.org</div>
+    <div class="footer__brand">JARVIS MEDIA</div>
+    <div></div>
   </div>
 </div>
 </body></html>`;

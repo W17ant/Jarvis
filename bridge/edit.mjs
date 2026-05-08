@@ -1,10 +1,10 @@
-/** edit.mjs - Production edit pipeline for Flat-Out HUD.
+/** edit.mjs - Production edit pipeline for Jarvis HUD.
  *
- *  This is the *real* mode for FOM: scan a shoot folder for videos + images they actually
+ *  This is production mode: scan a shoot folder for videos + images they actually
  *  filmed, plan a cut-down + image insert sequence, render with CapCut-style text overlays
- *  using ffmpeg + drawtext + the FOM intro card. Zero Fal cost, all local.
+ *  using ffmpeg + drawtext + the intro card. Zero Fal cost, all local.
  *
- *  Voice: "Flat-Out, edit a 30 second teaser from yesterday's Audi RS6 shoot"
+ *  Voice: "Jarvis, edit a 30 second teaser from yesterday's Audi RS6 shoot"
  */
 
 import { readdir, stat, mkdir } from "node:fs/promises";
@@ -167,7 +167,7 @@ export function planEdit({ videos, images }, subject = "Audi RS6", targetSec = 3
   const SUBJECT_UPPER = subject.toUpperCase();
   const tokens = SUBJECT_UPPER.split(/\s+/).filter(Boolean);
 
-  /* Why: cues are derived from the actual subject + the FOM brand wordmark only.
+  /* Why: cues are derived from the actual subject + the agent brand wordmark only.
    * Earlier we hardcoded "MANCHESTER" / "DAWN" from the AI image prompt, which is wrong
    * once we move to real footage shot anywhere. Subject tokens give a clean editorial set. */
   const textCues = [];
@@ -175,7 +175,7 @@ export function planEdit({ videos, images }, subject = "Audi RS6", targetSec = 3
 
   /* First-half hero slides — one subject token per slide, alternating between text-on-video
    * and full-screen panel cards for max visual punch. Always one word per slide so nothing wraps. */
-  const HERO_VARIANTS = ["hero-1", "panel-red", "hero-3"];   // word 1: anchored white left, word 2: red panel flash, word 3: anchored white right
+  const HERO_VARIANTS = ["hero-1", "panel-cyan", "hero-3"];   // word 1: anchored white left, word 2: red panel flash, word 3: anchored white right
   const slotStarts = [2, 5, 8];
   const slotEnds   = [4, 7, 10];
   const heroTokens = tokens.slice(0, 3);
@@ -204,7 +204,7 @@ export function planEdit({ videos, images }, subject = "Audi RS6", targetSec = 3
   }
 
   // Closing handle anchored bottom-left
-  textCues.push({ start: beat(segments.length - 2), end: cumulative[segments.length] - 0.05, text: "@FLATOUTMEDIAUK", style: "handle" });
+  textCues.push({ start: beat(segments.length - 2), end: cumulative[segments.length] - 0.05, text: "", style: "handle" });
 
   return { segments, textCues, totalSec: cumulative[segments.length], subject, aspect };
 }
@@ -258,36 +258,36 @@ const OSWALD_BOLD = path.join(ASSET_DIR, "fonts", "Oswald-Bold.ttf");
 const TEXT_STYLES = {
   /* Text-on-video styles (transparent) — 3 anchored hero positions */
   "hero-1":           { size: 340, fill: "white",   font: ANTON,       xAlign: "left",   xPct: 0.06, yPct: 0.66 },
-  "hero-2":           { size: 340, fill: "#E10600", font: ANTON,       xAlign: "center", xPct: 0.50, yPct: 0.30 },
+  "hero-2":           { size: 340, fill: "#00d4ff", font: ANTON,       xAlign: "center", xPct: 0.50, yPct: 0.30 },
   "hero-3":           { size: 340, fill: "white",   font: ANTON,       xAlign: "right",  xPct: 0.94, yPct: 0.50 },
 
   /* Bold variants */
-  "hero-stroke":      { size: 340, fill: "#0A0A0A", stroke: "#E10600", strokeW: 12, font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.55 },
+  "hero-stroke":      { size: 340, fill: "#02060c", stroke: "#00d4ff", strokeW: 12, font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.55 },
   "hero-hollow":      { size: 340, fill: "transparent", stroke: "white", strokeW: 8, font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.55 },
 
   /* Panel cards — replace the video for a moment with a solid coloured background */
-  "panel-red":        { size: 280, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50, panelBg: "#E10600", fullScreen: true },
-  "panel-white":      { size: 280, fill: "#0A0A0A",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50, panelBg: "#FFFFFF", fullScreen: true },
-  "panel-black":      { size: 280, fill: "#E10600",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50, panelBg: "#000000", fullScreen: true },
+  "panel-cyan":        { size: 280, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50, panelBg: "#00d4ff", fullScreen: true },
+  "panel-white":      { size: 280, fill: "#02060c",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50, panelBg: "#FFFFFF", fullScreen: true },
+  "panel-black":      { size: 280, fill: "#00d4ff",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50, panelBg: "#000000", fullScreen: true },
 
   /* 3-line stacked wordmark — FLAT / OUT / MEDIA */
   "stack-1":          { size: 320, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.30 },
   "stack-2":          { size: 320, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50 },
-  "stack-3":          { size: 320, fill: "#E10600",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.70 },
+  "stack-3":          { size: 320, fill: "#00d4ff",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.70 },
 
   /* Vertically-stacked single-word slots for customText — 1, 2, 3, or 4 words */
   "tail-1of1":        { size: 280, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50 },
   "tail-1of2":        { size: 240, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.40 },
-  "tail-2of2":        { size: 240, fill: "#E10600",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.60 },
+  "tail-2of2":        { size: 240, fill: "#00d4ff",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.60 },
   "tail-1of3":        { size: 200, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.32 },
   "tail-2of3":        { size: 200, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.50 },
-  "tail-3of3":        { size: 200, fill: "#E10600",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.68 },
+  "tail-3of3":        { size: 200, fill: "#00d4ff",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.68 },
   "tail-1of4":        { size: 170, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.28 },
   "tail-2of4":        { size: 170, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.43 },
   "tail-3of4":        { size: 170, fill: "white",    font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.58 },
-  "tail-4of4":        { size: 170, fill: "#E10600",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.73 },
+  "tail-4of4":        { size: 170, fill: "#00d4ff",  font: ANTON, xAlign: "center", xPct: 0.50, yPct: 0.73 },
 
-  handle:             { size: 100, fill: "#E10600",  font: OSWALD_BOLD, xAlign: "left", xPct: 0.06, yPct: 0.88 },
+  handle:             { size: 100, fill: "#00d4ff",  font: OSWALD_BOLD, xAlign: "left", xPct: 0.06, yPct: 0.88 },
 };
 
 /** Render a single text cue as a PNG. Three modes:
@@ -502,7 +502,7 @@ export async function renderEdit(plan, runDir, musicTrack = null) {
     segPaths.push(out);
   }
 
-  // Step 2: bookend with FOM intro AND outro cards, normalised to match segment streams.
+  // Step 2: bookend with intro and outro cards, normalised to match segment streams.
   const introPath = path.join(ASSET_DIR, "intro-3s.mp4");
   const outroPath = path.join(ASSET_DIR, "outro-2s.mp4");
 
@@ -703,7 +703,7 @@ export async function buildProductionTeaser({ shootFolder, subject, customText, 
   if (musicTrack) console.log(`[edit] using music: ${musicTrack.file} (${musicTrack.bpm} BPM, ${musicTrack.mood})`);
   console.log(`[edit] plan: ${plan.segments.length} cuts, ${plan.textCues.length} text overlays, total ${plan.totalSec.toFixed(1)}s`);
 
-  // Ensure the FOM intro AND outro cards are built (cached after first run)
+  // Ensure the intro and outro cards are built (cached after first run)
   stage("preparing intro + outro cards", 30);
   await buildIntroCard();
   await buildOutroCard();

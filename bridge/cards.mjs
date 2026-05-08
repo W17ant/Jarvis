@@ -7,7 +7,7 @@
  *  without an SDK dependency. The bridge never persists card data anywhere.
  *
  *  Storage shape:
- *    service:    flat-out-jarvis-card
+ *    service:    jarvis-jarvis-card
  *    account:    <alias>     (e.g. "default" or "tesco-only")
  *    password:   JSON.stringify({ pan, expMonth, expYear, cvv, name, billing })
  *
@@ -25,7 +25,7 @@ import { execFile as _execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFile = promisify(_execFile);
 
-const KEYCHAIN_SERVICE = "flat-out-jarvis-card";
+const KEYCHAIN_SERVICE = "jarvis-jarvis-card";
 
 /** Look up a card alias from Keychain. Returns null if not found, throws on
  *  any other Keychain error (locked keychain, permission denied) so the caller

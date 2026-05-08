@@ -1,4 +1,4 @@
-/** hud.js - Flat-Out HUD: drives clock, calendar, speedo decorations, gauges, telemetry waveform.
+/** hud.js - Jarvis HUD: drives clock, calendar, speedo decorations, gauges, telemetry waveform.
  *  All values here are demo-realistic mocks. Phase 2 wires real data from jarvis backend. */
 
 import * as Storage from "./storage.js";
@@ -17,8 +17,15 @@ function tickClock() {
   const fmt = now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   $("clockDate").textContent = fmt.toUpperCase();
 
-  $("dayNumber").textContent = String(now.getDate()).padStart(2, "0");
-  $("monthName").textContent = now.toLocaleDateString("en-GB", { month: "long" }).toUpperCase();
+  /* dayNumber + monthName were the panel--month ring readouts. That panel
+   * was retired in the white-label cleanup, so the elements may be null —
+   * guard each write so tickClock() doesn't throw and break the rest of
+   * boot (the throw was killing connectBridge, leaving the HUD with no
+   * live data). */
+  const dayEl = $("dayNumber");
+  if (dayEl) dayEl.textContent = String(now.getDate()).padStart(2, "0");
+  const monthEl = $("monthName");
+  if (monthEl) monthEl.textContent = now.toLocaleDateString("en-GB", { month: "long" }).toUpperCase();
 }
 
 /* ---------- CALENDAR STRIP ---------- */
@@ -49,52 +56,9 @@ const SPEEDO_CFG = {
 
 function deg2rad(d) { return (d * Math.PI) / 180; }
 
-function buildTicks() {
-  const g = document.getElementById("speedoTicks");
-  if (!g) return;
-  const { cx, cy, r, startAngle, endAngle, majorEvery, redZoneFrom, max } = SPEEDO_CFG;
-  const sweep = endAngle - startAngle;
-  for (let i = 0; i <= max; i++) {
-    const t = i / max;
-    const a = deg2rad(startAngle + sweep * t);
-    const isMajor = i % majorEvery === 0;
-    const isRed = i >= redZoneFrom;
-    const tickLen = isMajor ? 18 : 8;
-    const x1 = cx + Math.cos(a) * r;
-    const y1 = cy + Math.sin(a) * r;
-    const x2 = cx + Math.cos(a) * (r - tickLen);
-    const y2 = cy + Math.sin(a) * (r - tickLen);
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", x1); line.setAttribute("y1", y1);
-    line.setAttribute("x2", x2); line.setAttribute("y2", y2);
-    let cls = "speedo__tick";
-    if (isMajor) cls += " speedo__tick--major";
-    if (isRed) cls += " speedo__tick--red";
-    line.setAttribute("class", cls);
-    line.setAttribute("stroke-width", isMajor ? 2.5 : 1.2);
-    g.appendChild(line);
-  }
-}
-
-function buildNumerals() {
-  const g = document.getElementById("speedoNumerals");
-  if (!g) return;
-  const { cx, cy, r, startAngle, endAngle, majorEvery, redZoneFrom, max } = SPEEDO_CFG;
-  const sweep = endAngle - startAngle;
-  const nr = r - 38;
-  for (let i = 0; i <= max; i += majorEvery) {
-    const t = i / max;
-    const a = deg2rad(startAngle + sweep * t);
-    const x = cx + Math.cos(a) * nr;
-    const y = cy + Math.sin(a) * nr + 4;
-    const txt = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    txt.setAttribute("x", x); txt.setAttribute("y", y);
-    txt.setAttribute("text-anchor", "middle");
-    txt.setAttribute("class", i >= redZoneFrom ? "speedo__numeral speedo__numeral--red" : "speedo__numeral");
-    txt.textContent = String(i);
-    g.appendChild(txt);
-  }
-}
+/* (buildTicks + buildNumerals removed — they generated 0-200 RPM scale + red
+ * zone for the FOM speedometer. White-label reactor has no scale or numerals.
+ * SPEEDO_CFG kept for backwards-compat readers but is no longer referenced. */
 
 /** Move the needle to a 0..max value, mapped onto the speedo arc.
  *  Why: just rotate(angle) — the CSS transform-origin handles the pivot at (300,300) via view-box. */
@@ -180,35 +144,421 @@ function setArcGauge(id, pct) {
   fill.style.strokeDashoffset = CPU_ARC_LEN * (1 - p / 100);
 }
 
+/* ----- Sparkline buffers + renderer (telemetry sci-fi look) -----
+ * 60-sample rolling buffer at 1.5s cadence = 90s of history per metric.
+ * Per-canvas state is cached on the element so we don't re-getContext or
+ * re-read CSS variables on every tick. Stroke colour comes from the live
+ * --accent CSS variable so per-profile palette overrides flow through. */
+const SPARK_BUFLEN = 60;
+const _sparkBuffers = { cpu: [], gpu: [], ram: [] };
+
+/** Read --accent from :root and parse to {r,g,b} for canvas rgba() use.
+ *  Cached for 1s so we don't read computedStyle on every paint. */
+let _accentRgbCache = null;
+let _accentRgbCacheAt = 0;
+function _accentRgb() {
+  const now = Date.now();
+  if (_accentRgbCache && now - _accentRgbCacheAt < 1000) return _accentRgbCache;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#00d4ff";
+  const m = raw.match(/^#?([0-9a-f]{6})$/i);
+  if (m) {
+    const n = parseInt(m[1], 16);
+    _accentRgbCache = { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  } else {
+    _accentRgbCache = { r: 0, g: 212, b: 255 };
+  }
+  _accentRgbCacheAt = now;
+  return _accentRgbCache;
+}
+
+/** Initialise a sparkline canvas: cache ctx, scale for device pixel ratio,
+ *  store CSS pixel dimensions on the element. Idempotent — safe to re-call. */
+function _initSparkCanvas(canvas) {
+  if (canvas._jrInited) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || canvas.width;
+  const cssH = canvas.clientHeight || canvas.height;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  canvas._jrCtx = ctx;
+  canvas._jrCssW = cssW;
+  canvas._jrCssH = cssH;
+  canvas._jrInited = true;
+}
+
+function _pushSpark(metric, value) {
+  if (value == null || Number.isNaN(value)) return;
+  const buf = _sparkBuffers[metric];
+  buf.push(Math.max(0, Math.min(100, value)));
+  if (buf.length > SPARK_BUFLEN) buf.shift();
+}
+
+function _drawSpark(metric) {
+  const canvas = document.querySelector(`canvas[data-metric="${metric}"]`);
+  if (!canvas) return;
+  const buf = _sparkBuffers[metric];
+  if (!buf.length) return;
+  _initSparkCanvas(canvas);
+  const ctx = canvas._jrCtx;
+  const w = canvas._jrCssW, h = canvas._jrCssH;
+  ctx.clearRect(0, 0, w, h);
+
+  const pad = 2;
+  const innerH = h - pad * 2;
+  const stepX = w / Math.max(1, SPARK_BUFLEN - 1);
+  const startX = (SPARK_BUFLEN - buf.length) * stepX;
+  const { r, g, b } = _accentRgb();
+
+  ctx.beginPath();
+  for (let i = 0; i < buf.length; i++) {
+    const x = startX + i * stepX;
+    const y = pad + (1 - buf[i] / 100) * innerH;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+  ctx.lineWidth = 1.2;
+  ctx.shadowColor = `rgba(${r}, ${g}, ${b}, 0.5)`;
+  ctx.shadowBlur = 4;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  ctx.lineTo(startX + (buf.length - 1) * stepX, h - pad);
+  ctx.lineTo(startX, h - pad);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.35)`);
+  grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0.02)`);
+  ctx.fillStyle = grad;
+  ctx.fill();
+}
+
+/** Drive the paired-dial telemetry layout: CPU °C, GPU °C, VRAM in-use,
+ *  NET ↓, NET ↑. CPU/GPU temps come from macmon (sudoless Apple Silicon
+ *  SMC reader). When macmon isn't installed both fall back to "—°".
+ *  Temp dials scaled 30→100°C as the "heat budget" range. NET dials
+ *  scaled 0..10 MB/s as the visible-fill range. */
+function _updateThermalUI(stats) {
+  const { gpu, loadAvg, cpuTempC, gpuTempC, net } = stats;
+
+  /* CPU °C dial */
+  const cpuTempVal = document.getElementById("cpuTempVal");
+  if (cpuTempC != null && cpuTempC > 0) {
+    if (cpuTempVal) cpuTempVal.textContent = `${Math.round(cpuTempC)}°`;
+    setArcGauge("cpuTempArc", Math.max(0, Math.min(100, ((cpuTempC - 30) / 70) * 100)));
+  } else {
+    if (cpuTempVal) cpuTempVal.textContent = "—°";
+    setArcGauge("cpuTempArc", 0);
+  }
+
+  /* GPU °C dial — same scale. */
+  const gpuTempVal = document.getElementById("gpuTempVal");
+  if (gpuTempC != null && gpuTempC > 0) {
+    if (gpuTempVal) gpuTempVal.textContent = `${Math.round(gpuTempC)}°`;
+    setArcGauge("gpuTempArc", Math.max(0, Math.min(100, ((gpuTempC - 30) / 70) * 100)));
+  } else {
+    if (gpuTempVal) gpuTempVal.textContent = "—°";
+    setArcGauge("gpuTempArc", 0);
+  }
+
+  /* VRAM dial — in-use against allocated. */
+  const vramVal = document.getElementById("vramVal");
+  if (gpu?.inUseGB != null) {
+    if (vramVal) vramVal.textContent = `${gpu.inUseGB}G`;
+    const allocGB = Math.max(0.1, gpu.allocGB || gpu.inUseGB || 1);
+    setArcGauge("vramArc", Math.min(100, (gpu.inUseGB / allocGB) * 100));
+  } else if (vramVal) {
+    vramVal.textContent = "—";
+  }
+
+  /* NET ↓ / NET ↑ dials — 0..10 MB/s = 0..100% fill. Readout shows live
+   * KB/s (or MB/s when ≥1024) so the operator sees actual numbers. */
+  const fmtRate = (kbs) => kbs >= 1024 ? `${(kbs / 1024).toFixed(1)}M` : `${Math.round(kbs)}K`;
+  const netDnVal = document.getElementById("netDnVal");
+  const netUpVal = document.getElementById("netUpVal");
+  const dn = net?.downKBs ?? 0, up = net?.upKBs ?? 0;
+  if (netDnVal) netDnVal.textContent = fmtRate(dn);
+  if (netUpVal) netUpVal.textContent = fmtRate(up);
+  /* 10 MB/s = 10240 KB/s = 100%. Log-ish feel via Math.min(100, kbs/102.4). */
+  setArcGauge("netDnArc", Math.min(100, dn / 102.4));
+  setArcGauge("netUpArc", Math.min(100, up / 102.4));
+
+  /* Stat row footer — text-only LOAD + DSK readouts (no dial). */
+  if (loadAvg != null) {
+    const loadEl = document.getElementById("loadVal");
+    if (loadEl) loadEl.textContent = loadAvg.toFixed(2);
+  }
+}
+
+/* CPU shape switched from a Number to { overall, perCore } so the reactor
+ * can draw one rim arc per physical core. Old call sites that did
+ * `s.cpu.toFixed()` continue to work via this normaliser. */
+function _cpuOverall(cpu) {
+  if (cpu == null) return 0;
+  return typeof cpu === "number" ? cpu : (cpu.overall ?? 0);
+}
+function _cpuPerCore(cpu) {
+  return cpu && typeof cpu === "object" && Array.isArray(cpu.perCore) ? cpu.perCore : [];
+}
+
+/* ─── Per-core reactor rim arcs ───
+ *  N cores → N short arcs evenly distributed around a ring at r=292. Each
+ *  arc spans (360/N − 4)° of the perimeter; its stroke-dasharray is set to
+ *  the visible portion = full × (corePct/100) so the arc fills proportionally
+ *  to that core's utilisation. P-cores are coloured cyan; E-cores (the last
+ *  two on Apple Silicon, which have lower clock + smaller cache) get a
+ *  contrasting tint so the operator can read load profile at a glance.
+ *
+ *  The arc paths themselves are SVG <path> elements with two segments —
+ *  a faint full-arc track behind, and the bright fill on top. Built once
+ *  on first call (we don't know core count until a stats payload lands),
+ *  then updated in place. */
+const RIM_R = 292;
+const RIM_CY = 300;
+let _coreArcsBuilt = false;
+function _coreArcGeometry(i, n) {
+  /* Each core gets a slice of (360/n)°. Leave 4° gap between slices. */
+  const sliceDeg = 360 / n;
+  const gapDeg = Math.min(4, sliceDeg * 0.18);
+  const startDeg = (i * sliceDeg) - 90 + gapDeg / 2;
+  const endDeg   = startDeg + sliceDeg - gapDeg;
+  const toXY = (deg) => {
+    const r = (deg * Math.PI) / 180;
+    return [RIM_CY + RIM_R * Math.cos(r), RIM_CY + RIM_R * Math.sin(r)];
+  };
+  const [x0, y0] = toXY(startDeg);
+  const [x1, y1] = toXY(endDeg);
+  /* Each slice is < 180° so large-arc-flag = 0. sweep-flag = 1 for clockwise. */
+  return { d: `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${RIM_R} ${RIM_R} 0 0 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`, sliceDeg };
+}
+/* ─── Instrument-cluster scaffolding ───
+ *  One-shot builders for static SVG geometry that's the same regardless of
+ *  data: calibration ticks (40 marks every 9°), voice waveform spokes
+ *  (64 radial lines from centre). Both built once on first stats payload —
+ *  per-tick code only mutates lengths/dasharrays. */
+
+let _icScaffoldBuilt = false;
+function _buildICScaffold() {
+  if (_icScaffoldBuilt) return;
+
+  /* Calibration ticks — 40 short hairlines around the outer rim at r=288→295. */
+  const ticks = document.getElementById("icCalTicks");
+  if (ticks) {
+    for (let i = 0; i < 40; i++) {
+      const deg = i * 9 - 90;
+      const r1 = 288, r2 = 295;
+      const rad = (deg * Math.PI) / 180;
+      const x1 = 300 + r1 * Math.cos(rad);
+      const y1 = 300 + r1 * Math.sin(rad);
+      const x2 = 300 + r2 * Math.cos(rad);
+      const y2 = 300 + r2 * Math.sin(rad);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x1.toFixed(2));
+      line.setAttribute("y1", y1.toFixed(2));
+      line.setAttribute("x2", x2.toFixed(2));
+      line.setAttribute("y2", y2.toFixed(2));
+      ticks.appendChild(line);
+    }
+  }
+
+  /* Voice waveform — 64 radial spokes from centre. Each spoke's length is
+   * driven per-tick from mic RMS / TTS amplitude (or a soft sine on idle). */
+  const wave = document.getElementById("icVoiceWave");
+  if (wave) {
+    for (let i = 0; i < 64; i++) {
+      const deg = (i * 360) / 64 - 90;
+      const rad = (deg * Math.PI) / 180;
+      const innerR = 70;   // outside the bright pin
+      const outerR = 100;  // baseline outer (gets longer when amplitude is high)
+      const x1 = 300 + innerR * Math.cos(rad);
+      const y1 = 300 + innerR * Math.sin(rad);
+      const x2 = 300 + outerR * Math.cos(rad);
+      const y2 = 300 + outerR * Math.sin(rad);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", x1.toFixed(2));
+      line.setAttribute("y1", y1.toFixed(2));
+      line.dataset.angle = String(deg);
+      line.dataset.cosA = Math.cos(rad).toFixed(4);
+      line.dataset.sinA = Math.sin(rad).toFixed(4);
+      line.setAttribute("x2", x2.toFixed(2));
+      line.setAttribute("y2", y2.toFixed(2));
+      wave.appendChild(line);
+    }
+  }
+  _icScaffoldBuilt = true;
+}
+
+/* Per-tick voice waveform update. Drives spoke lengths from a 0..1 amplitude
+ * signal. On idle, produce a soft drift via Math.sin so the wave never looks
+ * dead. Window.__speedo (existing helper) exposes mic RMS via setMicLevel. */
+function _updateVoiceWave(amp) {
+  const wave = document.getElementById("icVoiceWave");
+  if (!wave) return;
+  const lines = wave.children;
+  const t = Date.now() / 240;
+  const baseR = 70;
+  const peakR = 165;  // max outer reach when amp = 1
+  for (let i = 0; i < lines.length; i++) {
+    /* Per-spoke phase offset so the wave doesn't pulse uniformly. */
+    const wobble = 0.4 + 0.6 * Math.abs(Math.sin(t + i * 0.31));
+    const len = baseR + (peakR - baseR) * amp * wobble;
+    const cosA = parseFloat(lines[i].dataset.cosA);
+    const sinA = parseFloat(lines[i].dataset.sinA);
+    lines[i].setAttribute("x2", (300 + len * cosA).toFixed(2));
+    lines[i].setAttribute("y2", (300 + len * sinA).toFixed(2));
+  }
+}
+
+/* Continuous voice-wave RAF loop. Reads amplitude from the speedo controller
+ * (which already integrates mic RMS) plus a baseline drift on idle. Throttled
+ * to ~30fps because at 60fps with 64 line elements the M-series GPU was
+ * pegging at ~45% just for centerpiece animation — visually 30fps is
+ * indistinguishable for this pulse rate but halves GPU cost. */
+let _voiceWaveRaf = 0;
+let _voiceWaveLastT = 0;
+const VOICE_WAVE_FRAME_MS = 33;  // ~30fps target
+function _startVoiceWave() {
+  cancelAnimationFrame(_voiceWaveRaf);
+  const tick = (now) => {
+    if (now - _voiceWaveLastT >= VOICE_WAVE_FRAME_MS) {
+      _voiceWaveLastT = now;
+      let amp = 0.1 + 0.05 * Math.sin(now / 800);
+      const speedo = window.__speedo;
+      if (speedo && typeof speedo.getLevel === "function") {
+        const level = speedo.getLevel();
+        if (level > amp) amp = level;
+      }
+      _updateVoiceWave(amp);
+    }
+    _voiceWaveRaf = requestAnimationFrame(tick);
+  };
+  _voiceWaveRaf = requestAnimationFrame(tick);
+}
+/* Pause the voice-wave loop when the tab is hidden — Chrome already throttles
+ * RAF on hidden tabs but explicit cancel ensures GPU goes idle on the kiosk. */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) cancelAnimationFrame(_voiceWaveRaf);
+  else _startVoiceWave();
+});
+
+/* Rim chip update — accepts a metric key + value + threshold. When value
+ * crosses threshold, the chip snaps to is-hot (no fade — operational alarm
+ * vocabulary). */
+function _updateRimChip(id, value, hotAt) {
+  const v = document.getElementById(id);
+  if (!v) return;
+  v.textContent = value;
+  const chip = v.closest(".ic-chip");
+  if (chip && typeof hotAt === "number") {
+    const numeric = parseFloat(String(value).replace(/[^\d.-]/g, ""));
+    chip.classList.toggle("is-hot", !Number.isNaN(numeric) && numeric >= hotAt);
+  }
+}
+
+function _renderCoreArcs(perCore) {
+  if (!perCore.length) return;
+  const host = document.getElementById("rxCoreArcs");
+  if (!host) return;
+  const n = perCore.length;
+  /* Apple Silicon has P-cores first, E-cores last. Heuristic: M1/M2/M3
+   * Pro/Max have 2 E-cores, base M1 has 4. Mark the last 2-4 as E-cores
+   * via a class so styling can differentiate. */
+  const eCoreCount = n >= 8 ? 2 : (n >= 6 ? 2 : 4);
+  if (!_coreArcsBuilt || host.children.length !== n * 2) {
+    host.replaceChildren();
+    for (let i = 0; i < n; i++) {
+      const isE = i >= n - eCoreCount;
+      const { d } = _coreArcGeometry(i, n);
+      const track = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      track.setAttribute("d", d);
+      track.setAttribute("class", `rx-core-arc rx-core-arc--track ${isE ? "is-ecore" : "is-pcore"}`);
+      const fill = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      fill.setAttribute("d", d);
+      fill.setAttribute("class", `rx-core-arc rx-core-arc--fill ${isE ? "is-ecore" : "is-pcore"}`);
+      fill.dataset.coreIndex = String(i);
+      /* Why: getTotalLength forces a sync layout. Compute once at build,
+       * stash on the element, then per-tick paths only do attribute writes. */
+      fill._jrLen = fill.getTotalLength();
+      host.appendChild(track);
+      host.appendChild(fill);
+    }
+    _coreArcsBuilt = true;
+  }
+  /* Per-tick: write-only. No layout reads. */
+  const fills = host.querySelectorAll(".rx-core-arc--fill");
+  fills.forEach((el, i) => {
+    const pct = Math.max(0, Math.min(100, perCore[i] || 0));
+    const len = el._jrLen;
+    const visible = (len * pct) / 100;
+    el.style.strokeDasharray = `${visible} ${len}`;
+  });
+}
+
 function applyLiveStats(s) {
   lastStatsTs = Date.now();
-  setCpuGauge(s.cpu);
+  /* Build instrument-cluster scaffolding on first stats payload. */
+  _buildICScaffold();
+  const cpuOverall = _cpuOverall(s.cpu);
+  setCpuGauge(cpuOverall);
 
-  /* GPU panel — usage % drives the arc; thermal pressure drives the small sub-label colour. */
+  /* Per-core arcs around the reactor rim — drawn once on first sample
+   * (so we know how many cores), then updated in place each tick. */
+  _renderCoreArcs(_cpuPerCore(s.cpu));
+
+  /* Rim chips — CPU% on NW, GPU% on NE, NET on SW. AUDIO updates from voice state. */
+  _updateRimChip("icChipCore", `${Math.round(cpuOverall)}%`, 80);
+  if (s.gpu && s.gpu.usagePct != null) {
+    _updateRimChip("icChipSys", `${s.gpu.usagePct}%`, 80);
+  }
+  if (s.net) {
+    const down = s.net.downKBs || 0;
+    const label = down >= 1024 ? `${(down / 1024).toFixed(1)} MB/s` : `${down.toFixed(1)} KB/s`;
+    _updateRimChip("icChipNet", label);
+  }
+
+  /* Push & redraw sparklines — one canvas per metric. */
+  _pushSpark("cpu", cpuOverall);
+  _drawSpark("cpu");
+  const cpuSparkV = document.getElementById("cpuSparkV");
+  if (cpuSparkV) cpuSparkV.textContent = `${Math.round(cpuOverall)}%`;
+
+  /* GPU panel — usage % drives the arc + sparkline; thermal pressure drives the chip. */
   if (s.gpu) {
     const pct = s.gpu.usagePct;
     setArcGauge("gpuArc", pct);
-    if ($("gpuValue")) $("gpuValue").textContent = pct == null ? "— %" : `${pct} %`;
-    const therm = $("gpuTherm");
-    if (therm) {
-      therm.textContent = (s.gpu.thermal || "—").toUpperCase();
-      therm.classList.remove("is-light", "is-moderate", "is-heavy");
-      if (s.gpu.thermal === "light")    therm.classList.add("is-light");
-      if (s.gpu.thermal === "moderate") therm.classList.add("is-moderate");
-      if (s.gpu.thermal === "heavy")    therm.classList.add("is-heavy");
+    if ($("gpuValue")) $("gpuValue").textContent = pct == null ? "—%" : `${pct}%`;
+    if (pct != null) {
+      _pushSpark("gpu", pct);
+      _drawSpark("gpu");
+      const v = document.getElementById("gpuSparkV");
+      if (v) v.textContent = `${pct}%`;
     }
     if ($("gpuMemValue") && s.gpu.allocGB != null) {
       $("gpuMemValue").textContent = `${s.gpu.allocGB} GB`;
     }
   }
+  /* Paired-dial row: CPU °C, GPU °C, VRAM, NET ↓, NET ↑. Stat row uses
+   * loadAvg + disk for text-only readouts. */
+  _updateThermalUI({
+    gpu: s.gpu,
+    loadAvg: s.loadAvg ?? (cpuOverall / 25),
+    cpuTempC: s.cpuTempC,
+    gpuTempC: s.gpuTempC,
+    net: s.net,
+  });
 
   if (s.mem) {
     const ramPct = (s.mem.usedGB / Math.max(1, s.mem.totalGB)) * 100;
     setArcGauge("ramArc", ramPct);
+    _pushSpark("ram", ramPct);
+    _drawSpark("ram");
+    const ramSparkV = document.getElementById("ramSparkV");
+    if (ramSparkV) ramSparkV.textContent = `${Math.round(ramPct)}%`;
     /* Why: the round dial only has room for ~4 chars at 14px. Show used GB rounded
      * (the arc fill already encodes the percentage visually) — "57G" beats "56.9 / 69 GB"
      * for at-a-glance readability in the small pod. */
-    $("ramValue").textContent = `${Math.round(s.mem.usedGB)}G`;
+    $("ramValue").textContent = `${Math.round(ramPct)}%`;
   }
   if (s.net) {
     const down = s.net.downKBs;
@@ -229,13 +579,26 @@ function connectBridge() {
   } catch (e) { return; }
 
   bridgeWS.addEventListener("open", () => {
-    console.log("[Flat-Out HUD] bridge connected");
+    console.log("[Jarvis HUD] bridge connected");
     bridgeWS.send(JSON.stringify({ id: "weather-init", type: "weather", payload: {} }));
   });
 
   bridgeWS.addEventListener("message", (ev) => {
-    const m = JSON.parse(ev.data);
+    /* Defensive parse: a malformed bridge frame must not break the rest of
+     * the message loop. Log + drop so subsequent messages keep flowing. */
+    let m;
+    try { m = JSON.parse(ev.data); }
+    catch (err) { console.warn("[Jarvis HUD] dropped malformed bridge frame:", err.message); return; }
+    if (!m || typeof m !== "object") return;
     if (m.type === "stats") applyLiveStats(m.data);
+    if (m.type === "brand.updated") {
+      /* Brand identity changed via the settings editor. Soft-reload the HUD
+       * so colours / agent name / wake variants re-bootstrap without the
+       * operator having to refresh manually. The brand bootstrap script in
+       * index.html re-runs on reload and re-applies CSS variables. */
+      console.log("[Jarvis HUD] brand updated — reloading to apply");
+      setTimeout(() => window.location.reload(), 250);
+    }
     if (m.type === "weather.reply") applyWeather(m.data);
     /* Patch B: typed-confirm modal for £25-30 purchases. The LLM can't authorise
      * these — the operator must type the exact amount. We mount the modal on
@@ -258,7 +621,7 @@ function connectBridge() {
   });
 
   bridgeWS.addEventListener("close", () => {
-    console.warn("[Flat-Out HUD] bridge disconnected, retrying in 3s");
+    console.warn("[Jarvis HUD] bridge disconnected, retrying in 3s");
     setTimeout(connectBridge, 3000);
   });
 
@@ -295,7 +658,7 @@ function applyWeather(w) {
        * any future wmoIcon mapping that points at a missing file is obvious
        * in the console rather than silently broken. */
       iconEl.onerror = () => {
-        console.warn(`[Flat-Out] weather icon failed: ${iconName}.svg — falling back to cloudy.svg`);
+        console.warn(`[Jarvis] weather icon failed: ${iconName}.svg — falling back to cloudy.svg`);
         iconEl.onerror = null;
         iconEl.src = "assets/weather-icons/cloudy.svg";
       };
@@ -383,7 +746,7 @@ async function wireCamera() {
    * and profile switching in P2.1 just works without touching hud.js. */
   const mode = Storage.get("cameraMode", "off");
   if (mode === "off") {
-    console.log("[Flat-Out HUD] camera mode 'off' — skipping getUserMedia");
+    console.log("[Jarvis HUD] camera mode 'off' — skipping getUserMedia");
     return;
   }
   // Webcam resolution scales with performance tier (lite saves a lot of GPU on copies)
@@ -395,13 +758,13 @@ async function wireCamera() {
     });
     v.srcObject = stream;
   } catch (e) {
-    console.warn("[Flat-Out HUD] camera unavailable:", e.message);
+    console.warn("[Jarvis HUD] camera unavailable:", e.message);
     cam.style.display = "none";
     return;
   }
   // Lite tier: skip MediaPipe entirely (CSS rotation animation handles the reticle)
   if (tier.faceFps === 0) {
-    console.log("[Flat-Out HUD] face tracking disabled by tier");
+    console.log("[Jarvis HUD] face tracking disabled by tier");
     return;
   }
 
@@ -421,7 +784,7 @@ async function wireCamera() {
       runningMode: "VIDEO",
       minDetectionConfidence: 0.5,
     });
-    console.log("[Flat-Out HUD] face detector ready");
+    console.log("[Jarvis HUD] face detector ready");
     if (reticle) {
       // Take over the reticle: kill the CSS rotation, drive position from face bbox
       reticle.style.animation = "none";
@@ -463,7 +826,7 @@ async function wireCamera() {
     };
     requestAnimationFrame(tick);
   } catch (e) {
-    console.warn("[Flat-Out HUD] face detector unavailable, using CSS reticle:", e.message);
+    console.warn("[Jarvis HUD] face detector unavailable, using CSS reticle:", e.message);
   }
 }
 
@@ -483,7 +846,7 @@ async function wireLauncher() {
       if (Array.isArray(j.items)) items = j.items;
     }
   } catch (e) {
-    console.warn("[Flat-Out HUD] launcher fetch failed, using fallback:", e.message);
+    console.warn("[Jarvis HUD] launcher fetch failed, using fallback:", e.message);
   }
   /* Bare-minimum fallback so the panel renders even with no bridge. */
   if (!items.length) {
@@ -503,7 +866,7 @@ async function wireLauncher() {
     li.addEventListener("click", async () => {
       const app = li.dataset.app;
       if (!app) return;
-      console.log(`[Flat-Out HUD] launch request: ${app}`);
+      console.log(`[Jarvis HUD] launch request: ${app}`);
       try {
         const r = await fetch("http://localhost:8766/launch", {
           method: "POST",
@@ -511,8 +874,8 @@ async function wireLauncher() {
           body: JSON.stringify({ app }),
         });
         const j = await r.json();
-        if (!j.ok) console.warn("[Flat-Out HUD] launch failed:", j.error);
-      } catch (e) { console.warn("[Flat-Out HUD] launch fetch failed:", e.message); }
+        if (!j.ok) console.warn("[Jarvis HUD] launch failed:", j.error);
+      } catch (e) { console.warn("[Jarvis HUD] launch fetch failed:", e.message); }
     });
     list.appendChild(li);
   }
@@ -706,7 +1069,7 @@ function wireFullscreen() {
     try {
       if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
       else await document.exitFullscreen();
-    } catch (e) { console.warn("[Flat-Out HUD] fullscreen blocked:", e.message); }
+    } catch (e) { console.warn("[Jarvis HUD] fullscreen blocked:", e.message); }
   };
   document.addEventListener("keydown", (e) => {
     if (e.key === "f" || e.key === "F") toggle();
@@ -743,18 +1106,18 @@ function ensurePurchaseModal() {
   const style = document.createElement("style");
   style.textContent = `
     #purchaseConfirmModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10000; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
-    #purchaseConfirmModal .pcm-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); padding: 32px 36px; min-width: 460px; max-width: 600px; box-shadow: 0 0 60px rgba(255,59,59,0.35); }
-    #purchaseConfirmModal h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 16px; font-size: 14px; letter-spacing: 0.16em; text-transform: uppercase; }
+    #purchaseConfirmModal .pcm-frame { background: #0b0b0b; border: 2px solid var(--accent); padding: 32px 36px; min-width: 460px; max-width: 600px; box-shadow: 0 0 60px rgba(0,212,255,0.35); }
+    #purchaseConfirmModal h2 { color: var(--accent); margin: 0 0 16px; font-size: 14px; letter-spacing: 0.16em; text-transform: uppercase; }
     #purchaseConfirmModal .pcm-row { color: #eaeaea; margin: 6px 0; font-size: 13px; }
     #purchaseConfirmModal .pcm-row strong { color: #fff; font-weight: 600; }
-    #purchaseConfirmModal .pcm-amount { font-size: 28px; color: var(--brand-primary, #ff3b3b); margin: 18px 0 6px; letter-spacing: 0.04em; }
+    #purchaseConfirmModal .pcm-amount { font-size: 28px; color: var(--accent); margin: 18px 0 6px; letter-spacing: 0.04em; }
     #purchaseConfirmModal .pcm-hint { color: #888; font-size: 11px; margin-bottom: 12px; }
     #purchaseConfirmModal input { background: #000; color: #fff; border: 1px solid #333; padding: 10px 12px; width: 100%; font-family: inherit; font-size: 18px; box-sizing: border-box; }
-    #purchaseConfirmModal input:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
-    #purchaseConfirmModal .pcm-error { color: var(--brand-primary, #ff3b3b); font-size: 12px; min-height: 16px; margin: 8px 0; }
+    #purchaseConfirmModal input:focus { outline: none; border-color: var(--accent); }
+    #purchaseConfirmModal .pcm-error { color: var(--accent); font-size: 12px; min-height: 16px; margin: 8px 0; }
     #purchaseConfirmModal .pcm-buttons { display: flex; gap: 12px; margin-top: 16px; }
     #purchaseConfirmModal button { flex: 1; padding: 12px; background: #181818; color: #fff; border: 1px solid #333; cursor: pointer; font-family: inherit; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
-    #purchaseConfirmModal button.primary { background: var(--brand-primary, #ff3b3b); color: #000; border-color: var(--brand-primary, #ff3b3b); font-weight: 700; }
+    #purchaseConfirmModal button.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
     #purchaseConfirmModal button:hover { filter: brightness(1.15); }
     #purchaseConfirmModal button:disabled { opacity: 0.4; cursor: not-allowed; }
   `;
@@ -882,7 +1245,7 @@ function flashPurchaseAuditBadge(data) {
   if (!host) {
     host = document.createElement("div");
     host.id = "purchaseAuditBadge";
-    host.style.cssText = "position:fixed;right:18px;bottom:18px;background:#0a0a0a;border:1px solid var(--brand-primary,#ff3b3b);color:#eaeaea;padding:10px 14px;font-family:var(--mono,monospace);font-size:11px;letter-spacing:0.08em;z-index:9999;max-width:340px;box-shadow:0 0 24px rgba(255,59,59,0.25);transition:opacity 250ms;";
+    host.style.cssText = "position:fixed;right:18px;bottom:18px;background:#0a0a0a;border:1px solid var(--accent);color:#eaeaea;padding:10px 14px;font-family:var(--mono,monospace);font-size:11px;letter-spacing:0.08em;z-index:9999;max-width:340px;box-shadow:0 0 24px rgba(0,212,255,0.25);transition:opacity 250ms;";
     document.body.appendChild(host);
   }
   const verb = data.ok ? (data.simulated ? "SIM" : "PAID") : "BLOCKED";
@@ -914,22 +1277,22 @@ function ensureAgentModal() {
   const style = document.createElement("style");
   style.textContent = `
     #agentModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10000; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
-    #agentModal .am-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); padding: 28px 32px; width: 720px; max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: 0 0 60px rgba(255,59,59,0.3); }
-    #agentModal h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #agentModal .am-frame { background: #0b0b0b; border: 2px solid var(--accent); padding: 28px 32px; width: 720px; max-width: 92vw; max-height: 86vh; overflow-y: auto; box-shadow: 0 0 60px rgba(0,212,255,0.3); }
+    #agentModal h2 { color: var(--accent); margin: 0 0 4px; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; }
     #agentModal .am-sub { color: #888; font-size: 11px; margin-bottom: 24px; }
     #agentModal h3 { color: #fff; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; margin: 22px 0 10px; padding-top: 14px; border-top: 1px solid #1f1f1f; }
     #agentModal h3:first-of-type { padding-top: 0; border-top: none; margin-top: 0; }
     #agentModal label { display: block; color: #ccc; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
     #agentModal input, #agentModal select { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 8px 10px; width: 100%; font-family: inherit; font-size: 12px; box-sizing: border-box; margin-bottom: 10px; }
-    #agentModal input:focus, #agentModal select:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #agentModal input:focus, #agentModal select:focus { outline: none; border-color: var(--accent); }
     #agentModal .am-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
     #agentModal .am-row.two { grid-template-columns: 1fr 1fr; }
     #agentModal .am-status { font-size: 10px; color: #777; margin: 0 0 8px; min-height: 14px; }
     #agentModal .am-status.ok { color: #00ff88; }
-    #agentModal .am-status.err { color: var(--brand-primary, #ff3b3b); }
+    #agentModal .am-status.err { color: var(--accent); }
     #agentModal .am-buttons { display: flex; gap: 12px; justify-content: flex-end; margin-top: 18px; }
     #agentModal button { padding: 10px 20px; background: #181818; color: #fff; border: 1px solid #333; cursor: pointer; font-family: inherit; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
-    #agentModal button.primary { background: var(--brand-primary, #ff3b3b); color: #000; border-color: var(--brand-primary, #ff3b3b); font-weight: 700; }
+    #agentModal button.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
     #agentModal button:hover { filter: brightness(1.18); }
     #agentModal .am-journal { max-height: 240px; overflow-y: auto; background: #050505; border: 1px solid #1c1c1c; padding: 10px 12px; }
     #agentModal .am-journal-row { color: #ccc; font-size: 11px; padding: 4px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 56px 70px 1fr 130px; gap: 8px; align-items: baseline; }
@@ -937,7 +1300,7 @@ function ensureAgentModal() {
     #agentModal .am-journal-row .verb { font-weight: 700; letter-spacing: 0.08em; }
     #agentModal .am-journal-row .verb.ok { color: #00ff88; }
     #agentModal .am-journal-row .verb.sim { color: #ffaa00; }
-    #agentModal .am-journal-row .verb.bad { color: var(--brand-primary, #ff3b3b); }
+    #agentModal .am-journal-row .verb.bad { color: var(--accent); }
     #agentModal .am-journal-row .amt { color: #888; text-align: right; font-variant-numeric: tabular-nums; }
     #agentModal .am-journal-empty { color: #555; font-size: 11px; text-align: center; padding: 20px; }
     #agentModal .am-summary { color: #999; font-size: 10px; margin-top: 8px; letter-spacing: 0.05em; }
@@ -1344,13 +1707,13 @@ function toggleDemoMode() {
   /* Persist across HUD reloads so a kiosk left in demo mode for a session
    * doesn't reset on Cmd+R. localStorage is per-origin so each install is
    * independent. */
-  try { localStorage.setItem("flatout.demoMode", wasDemo ? "1" : "0"); } catch {}
-  console.log(`[Flat-Out] demo mode ${wasDemo ? "ON" : "OFF"}`);
+  try { localStorage.setItem("jarvis.demoMode", wasDemo ? "1" : "0"); } catch {}
+  console.log(`[Jarvis] demo mode ${wasDemo ? "ON" : "OFF"}`);
 }
 
 /* Restore on reload. */
 try {
-  if (localStorage.getItem("flatout.demoMode") === "1") {
+  if (localStorage.getItem("jarvis.demoMode") === "1") {
     /* Defer to after DOMContentLoaded so the badge can be appended cleanly. */
     document.addEventListener("DOMContentLoaded", () => {
       document.body.classList.add("is-demo");
@@ -1377,9 +1740,9 @@ document.addEventListener("keydown", (e) => {
  *  sees their state without opening settings. */
 
 const A11Y_TOGGLES = [
-  { key: "M", cls: "is-reduced-motion", label: "REDUCED MOTION", storage: "flatout.reducedMotion" },
-  { key: "C", cls: "is-high-contrast",  label: "HIGH CONTRAST",  storage: "flatout.highContrast" },
-  { key: "T", cls: "is-bigger-text",    label: "BIGGER TEXT",    storage: "flatout.biggerText" },
+  { key: "M", cls: "is-reduced-motion", label: "REDUCED MOTION", storage: "jarvis.reducedMotion" },
+  { key: "C", cls: "is-high-contrast",  label: "HIGH CONTRAST",  storage: "jarvis.highContrast" },
+  { key: "T", cls: "is-bigger-text",    label: "BIGGER TEXT",    storage: "jarvis.biggerText" },
 ];
 
 let _a11yBadgeHost = null;
@@ -1409,7 +1772,7 @@ function toggleA11y(toggle) {
   const on = document.body.classList.toggle(toggle.cls);
   try { localStorage.setItem(toggle.storage, on ? "1" : "0"); } catch {}
   refreshA11yBadges();
-  console.log(`[Flat-Out] ${toggle.label} ${on ? "ON" : "OFF"}`);
+  console.log(`[Jarvis] ${toggle.label} ${on ? "ON" : "OFF"}`);
 }
 
 /* Restore saved state on boot. */
@@ -1461,15 +1824,15 @@ function ensureHelpModal() {
   const style = document.createElement("style");
   style.textContent = `
     #helpModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10001; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
-    #helpModal .hm-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); padding: 24px 28px; width: 760px; max-width: 92vw; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(255,59,59,0.3); }
-    #helpModal h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #helpModal .hm-frame { background: #0b0b0b; border: 2px solid var(--accent); padding: 24px 28px; width: 760px; max-width: 92vw; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(0,212,255,0.3); }
+    #helpModal h2 { color: var(--accent); margin: 0 0 4px; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; }
     #helpModal .hm-sub { color: #888; font-size: 11px; margin-bottom: 14px; }
     #helpModal input.hm-search { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 10px 12px; width: 100%; font-family: inherit; font-size: 14px; box-sizing: border-box; margin-bottom: 14px; }
-    #helpModal input.hm-search:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #helpModal input.hm-search:focus { outline: none; border-color: var(--accent); }
     #helpModal .hm-list { overflow-y: auto; flex: 1; min-height: 200px; }
     #helpModal .hm-row { color: #ddd; font-size: 12px; padding: 8px 0; border-bottom: 1px dashed #1a1a1a; display: grid; grid-template-columns: 220px 1fr 80px; gap: 12px; align-items: baseline; }
     #helpModal .hm-row:last-child { border-bottom: none; }
-    #helpModal .hm-name { color: var(--brand-primary, #ff3b3b); font-weight: 600; letter-spacing: 0.04em; }
+    #helpModal .hm-name { color: var(--accent); font-weight: 600; letter-spacing: 0.04em; }
     #helpModal .hm-desc { color: #aaa; line-height: 1.4; }
     #helpModal .hm-flags { color: #555; font-size: 9px; letter-spacing: 0.12em; text-align: right; text-transform: uppercase; }
     #helpModal .hm-flag-confirm { color: #ffaa00; }
@@ -1609,10 +1972,10 @@ function ensureCrewLanesContainer() {
     const s = document.createElement("style");
     s.id = "crewLanesStyles";
     s.textContent = `
-      .crew-panel { background: rgba(11,11,11,0.94); border: 1px solid var(--brand-primary, #ff3b3b); padding: 10px 14px 12px; min-width: 340px; max-width: 420px; pointer-events: auto; box-shadow: 0 0 24px rgba(255,59,59,0.22); animation: crewPanelIn 220ms ease forwards; }
+      .crew-panel { background: rgba(11,11,11,0.94); border: 1px solid var(--accent); padding: 10px 14px 12px; min-width: 340px; max-width: 420px; pointer-events: auto; box-shadow: 0 0 24px rgba(0, 212, 255, 0.22); animation: crewPanelIn 220ms ease forwards; }
       @keyframes crewPanelIn { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
       .crew-panel.is-fading { opacity: 0; transition: opacity 600ms ease; }
-      .crew-panel-head { color: var(--brand-primary, #ff3b3b); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: baseline; }
+      .crew-panel-head { color: var(--accent); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: baseline; }
       .crew-panel-mode { color: #888; font-size: 9px; letter-spacing: 0.12em; }
       .crew-lane { padding: 6px 0; border-top: 1px dashed #1a1a1a; }
       .crew-lane:first-of-type { border-top: none; padding-top: 4px; }
@@ -1620,7 +1983,7 @@ function ensureCrewLanesContainer() {
       .crew-lane-status { font-size: 9px; letter-spacing: 0.12em; padding: 1px 5px; border: 1px solid #333; color: #888; min-width: 56px; text-align: center; }
       .crew-lane-status.is-running { border-color: #ffaa00; color: #ffaa00; animation: crewPulse 1.6s infinite; }
       .crew-lane-status.is-done { border-color: #00ff88; color: #00ff88; }
-      .crew-lane-status.is-failed { border-color: var(--brand-primary, #ff3b3b); color: var(--brand-primary, #ff3b3b); }
+      .crew-lane-status.is-failed { border-color: var(--accent); color: var(--accent); }
       @keyframes crewPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
       .crew-lane-role { color: #fff; font-size: 11px; flex: 1; }
       .crew-lane-provider { color: #555; font-size: 9px; letter-spacing: 0.1em; }
@@ -1629,7 +1992,7 @@ function ensureCrewLanesContainer() {
       .crew-lane-tool-chip { background: rgba(255,170,0,0.12); color: #ffaa00; border: 1px solid rgba(255,170,0,0.3); font-size: 8px; padding: 0 4px; letter-spacing: 0.06em; }
       .crew-panel-foot { color: #555; font-size: 9px; letter-spacing: 0.06em; margin-top: 8px; padding-top: 6px; border-top: 1px solid #1a1a1a; display: flex; justify-content: space-between; }
       .crew-panel-cancel { color: #888; cursor: pointer; text-decoration: underline; }
-      .crew-panel-cancel:hover { color: var(--brand-primary, #ff3b3b); }
+      .crew-panel-cancel:hover { color: var(--accent); }
     `;
     document.head.appendChild(s);
   }
@@ -1794,11 +2157,11 @@ let _paletteEl = null;
 let _paletteHistory = [];
 
 function loadPaletteHistory() {
-  try { _paletteHistory = JSON.parse(localStorage.getItem("flatout.paletteHistory") || "[]"); }
+  try { _paletteHistory = JSON.parse(localStorage.getItem("jarvis.paletteHistory") || "[]"); }
   catch { _paletteHistory = []; }
 }
 function savePaletteHistory() {
-  try { localStorage.setItem("flatout.paletteHistory", JSON.stringify(_paletteHistory.slice(0, 20))); } catch {}
+  try { localStorage.setItem("jarvis.paletteHistory", JSON.stringify(_paletteHistory.slice(0, 20))); } catch {}
 }
 
 function ensurePalette() {
@@ -1809,16 +2172,16 @@ function ensurePalette() {
   const style = document.createElement("style");
   style.textContent = `
     #commandPalette { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10002; display: flex; align-items: flex-start; justify-content: center; padding-top: 18vh; font-family: var(--mono, "JetBrains Mono", monospace); }
-    #commandPalette .cp-frame { background: #0b0b0b; border: 2px solid var(--brand-primary, #ff3b3b); width: 720px; max-width: 92vw; max-height: 70vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(255,59,59,0.35); }
+    #commandPalette .cp-frame { background: #0b0b0b; border: 2px solid var(--accent); width: 720px; max-width: 92vw; max-height: 70vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(0,212,255,0.35); }
     #commandPalette .cp-prompt { padding: 14px 18px; border-bottom: 1px solid #1c1c1c; }
     #commandPalette input.cp-input { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 12px 14px; width: 100%; font-family: inherit; font-size: 16px; box-sizing: border-box; }
-    #commandPalette input.cp-input:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #commandPalette input.cp-input:focus { outline: none; border-color: var(--accent); }
     #commandPalette .cp-mode { color: #888; font-size: 10px; letter-spacing: 0.16em; margin-top: 6px; text-transform: uppercase; }
-    #commandPalette .cp-mode strong { color: var(--brand-primary, #ff3b3b); }
+    #commandPalette .cp-mode strong { color: var(--accent); }
     #commandPalette .cp-list { flex: 1; overflow-y: auto; padding: 6px 0; }
     #commandPalette .cp-item { padding: 8px 18px; cursor: pointer; display: grid; grid-template-columns: 200px 1fr; gap: 14px; align-items: baseline; color: #ddd; font-size: 12px; border-left: 2px solid transparent; }
-    #commandPalette .cp-item:hover, #commandPalette .cp-item.is-active { background: rgba(255,59,59,0.08); border-left-color: var(--brand-primary, #ff3b3b); }
-    #commandPalette .cp-name { color: var(--brand-primary, #ff3b3b); font-weight: 600; letter-spacing: 0.04em; }
+    #commandPalette .cp-item:hover, #commandPalette .cp-item.is-active { background: rgba(0,212,255,0.08); border-left-color: var(--accent); }
+    #commandPalette .cp-name { color: var(--accent); font-weight: 600; letter-spacing: 0.04em; }
     #commandPalette .cp-desc { color: #888; line-height: 1.4; }
     #commandPalette .cp-empty { color: #555; padding: 30px; text-align: center; font-size: 11px; }
     #commandPalette .cp-foot { color: #555; font-size: 9px; padding: 8px 18px; border-top: 1px solid #1c1c1c; letter-spacing: 0.1em; text-transform: uppercase; }
@@ -1904,7 +2267,7 @@ function ensurePalette() {
     if (window.__paletteDispatch) {
       window.__paletteDispatch(text);
     } else {
-      console.warn("[Flat-Out] palette dispatch hook not wired");
+      console.warn("[Jarvis] palette dispatch hook not wired");
     }
   }
 
@@ -1994,13 +2357,13 @@ async function openPalette() {
  *  drives the Storage namespace prefix, the brand colour, the identity in
  *  the audit log. Picking it should be the FIRST action of a session, not
  *  buried in a settings modal. The picker can be skipped by setting
- *  `flatout.skipLockScreen = "1"` for a single-operator install.
+ *  `jarvis.skipLockScreen = "1"` for a single-operator install.
  *
  *  Picker logic:
  *  - More than one profile registered (otherwise no point asking)
  *  - Last activity timestamp > 30 min ago (otherwise it's a quick reload —
  *    operator is already working, don't disrupt)
- *  - Skip if `flatout.skipLockScreen` is set */
+ *  - Skip if `jarvis.skipLockScreen` is set */
 
 const LOCK_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -2009,12 +2372,12 @@ async function maybeShowProfileLockScreen() {
    * import cycle with the ESM profiles.js module — boot order matters. */
   let profiles = [];
   try {
-    const raw = localStorage.getItem("flatout.profiles");
+    const raw = localStorage.getItem("jarvis.profiles");
     profiles = raw ? JSON.parse(raw) : [];
   } catch {}
   if (!Array.isArray(profiles) || profiles.length < 2) return;
-  if (localStorage.getItem("flatout.skipLockScreen") === "1") return;
-  const lastActivity = Number(localStorage.getItem("flatout.lastActivity") || 0);
+  if (localStorage.getItem("jarvis.skipLockScreen") === "1") return;
+  const lastActivity = Number(localStorage.getItem("jarvis.lastActivity") || 0);
   if (lastActivity && (Date.now() - lastActivity) < LOCK_TIMEOUT_MS) return;
   /* Show the picker. Returns a promise that resolves when the operator picks
    * (or skips with the bypass shortcut). */
@@ -2023,22 +2386,22 @@ async function maybeShowProfileLockScreen() {
 
 function renderLockScreen(profiles) {
   return new Promise((resolve) => {
-    const activeId = localStorage.getItem("flatout.activeProfile") || "default";
+    const activeId = localStorage.getItem("jarvis.activeProfile") || "default";
     const root = el("div", { id: "lockScreen" });
     const style = document.createElement("style");
     style.textContent = `
       #lockScreen { position: fixed; inset: 0; background: #000; z-index: 11000; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
-      #lockScreen h1 { color: var(--brand-primary, #ff3b3b); margin: 0 0 6px; font-size: 22px; letter-spacing: 0.32em; text-transform: uppercase; }
+      #lockScreen h1 { color: var(--accent); margin: 0 0 6px; font-size: 22px; letter-spacing: 0.32em; text-transform: uppercase; }
       #lockScreen .ls-sub { color: #888; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 38px; }
       #lockScreen .ls-grid { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; max-width: 1080px; }
       #lockScreen .ls-card { background: #0b0b0b; border: 2px solid #1c1c1c; padding: 28px 32px; min-width: 220px; cursor: pointer; transition: transform 120ms ease, border-color 120ms ease; text-align: center; }
-      #lockScreen .ls-card:hover, #lockScreen .ls-card.is-active { border-color: var(--brand-primary, #ff3b3b); transform: translateY(-3px); box-shadow: 0 12px 40px rgba(255,59,59,0.35); }
+      #lockScreen .ls-card:hover, #lockScreen .ls-card.is-active { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 12px 40px rgba(0,212,255,0.35); }
       #lockScreen .ls-card .ls-name { color: #fff; font-size: 18px; letter-spacing: 0.1em; margin-bottom: 6px; }
       #lockScreen .ls-card .ls-id { color: #555; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
-      #lockScreen .ls-card .ls-active-tag { color: var(--brand-primary, #ff3b3b); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 12px; }
+      #lockScreen .ls-card .ls-active-tag { color: var(--accent); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; margin-top: 12px; }
       #lockScreen .ls-foot { color: #555; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 38px; }
       #lockScreen .ls-foot a { color: #888; text-decoration: none; cursor: pointer; }
-      #lockScreen .ls-foot a:hover { color: var(--brand-primary, #ff3b3b); }
+      #lockScreen .ls-foot a:hover { color: var(--accent); }
     `;
     root.appendChild(style);
     root.appendChild(el("h1", { text: "Who's at the wheel?" }));
@@ -2060,7 +2423,7 @@ function renderLockScreen(profiles) {
     const foot = el("div", { className: "ls-foot" });
     const bypass = el("a", { text: "Skip this screen for next time" });
     bypass.addEventListener("click", () => {
-      try { localStorage.setItem("flatout.skipLockScreen", "1"); } catch {}
+      try { localStorage.setItem("jarvis.skipLockScreen", "1"); } catch {}
       cleanup();
       resolve();
     });
@@ -2070,8 +2433,8 @@ function renderLockScreen(profiles) {
 
     function cleanup() { root.remove(); }
     function choose(id) {
-      try { localStorage.setItem("flatout.activeProfile", id); } catch {}
-      try { localStorage.setItem("flatout.lastActivity", String(Date.now())); } catch {}
+      try { localStorage.setItem("jarvis.activeProfile", id); } catch {}
+      try { localStorage.setItem("jarvis.lastActivity", String(Date.now())); } catch {}
       /* Reload — Storage namespacing changes mean the safest path is a full
        * page reload rather than trying to re-init every module that already
        * read from localStorage. */
@@ -2100,7 +2463,7 @@ function renderLockScreen(profiles) {
 /* Track activity on any keypress / click so the lock-screen knows when to
  * stay quiet on a quick reload vs pop on a fresh session. */
 function bumpActivity() {
-  try { localStorage.setItem("flatout.lastActivity", String(Date.now())); } catch {}
+  try { localStorage.setItem("jarvis.lastActivity", String(Date.now())); } catch {}
 }
 document.addEventListener("keydown", bumpActivity, { capture: true, passive: true });
 document.addEventListener("click", bumpActivity, { capture: true, passive: true });
@@ -2123,7 +2486,7 @@ document.addEventListener("keydown", (e) => {
 /* ---------- HISTORY DRAWER (H) ----------
  *  Slide-out from the right edge listing every conversation turn the bridge
  *  has persisted (conversation_turns table — populated by askLLM and
- *  askLLMStream). Each row: timestamp, role badge (HEARD / FLAT-OUT), the
+ *  askLLMStream). Each row: timestamp, role badge (HEARD / JARVIS), the
  *  content, plus chips for any tools that fired during that turn.
  *
  *  Why a drawer not a modal: history is something the operator skims while
@@ -2141,22 +2504,22 @@ function ensureHistoryDrawer() {
   root.hidden = true;
   const style = document.createElement("style");
   style.textContent = `
-    #historyDrawer { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; max-width: 95vw; background: #050505; border-left: 2px solid var(--brand-primary, #ff3b3b); z-index: 9998; display: flex; flex-direction: column; font-family: var(--mono, "JetBrains Mono", monospace); transform: translateX(0); transition: transform 220ms ease; box-shadow: -10px 0 40px rgba(0,0,0,0.6); }
+    #historyDrawer { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; max-width: 95vw; background: #050505; border-left: 2px solid var(--accent); z-index: 9998; display: flex; flex-direction: column; font-family: var(--mono, "JetBrains Mono", monospace); transform: translateX(0); transition: transform 220ms ease; box-shadow: -10px 0 40px rgba(0,0,0,0.6); }
     #historyDrawer[hidden] { display: flex; transform: translateX(110%); pointer-events: none; }
     #historyDrawer .hd-head { padding: 18px 22px 10px; border-bottom: 1px solid #1c1c1c; }
-    #historyDrawer h2 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #historyDrawer h2 { color: var(--accent); margin: 0 0 4px; font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; }
     #historyDrawer .hd-sub { color: #888; font-size: 10px; margin-bottom: 12px; }
     #historyDrawer input.hd-search { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 8px 10px; width: 100%; font-family: inherit; font-size: 12px; box-sizing: border-box; }
-    #historyDrawer input.hd-search:focus { outline: none; border-color: var(--brand-primary, #ff3b3b); }
+    #historyDrawer input.hd-search:focus { outline: none; border-color: var(--accent); }
     #historyDrawer .hd-list { flex: 1; overflow-y: auto; padding: 8px 18px 18px; }
     #historyDrawer .hd-turn { padding: 10px 0; border-bottom: 1px dashed #1a1a1a; }
     #historyDrawer .hd-turn:last-child { border-bottom: none; }
     #historyDrawer .hd-meta { display: flex; gap: 8px; align-items: baseline; font-size: 9px; letter-spacing: 0.1em; color: #555; margin-bottom: 4px; text-transform: uppercase; }
-    #historyDrawer .hd-role { color: var(--brand-primary, #ff3b3b); font-weight: 700; }
+    #historyDrawer .hd-role { color: var(--accent); font-weight: 700; }
     #historyDrawer .hd-role.user { color: #ccc; }
     #historyDrawer .hd-content { color: #ddd; font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
     #historyDrawer .hd-tools { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
-    #historyDrawer .hd-tool-chip { background: rgba(255,59,59,0.12); color: var(--brand-primary, #ff3b3b); border: 1px solid rgba(255,59,59,0.3); font-size: 9px; padding: 1px 6px; letter-spacing: 0.08em; }
+    #historyDrawer .hd-tool-chip { background: rgba(0,212,255,0.12); color: var(--accent); border: 1px solid rgba(0,212,255,0.3); font-size: 9px; padding: 1px 6px; letter-spacing: 0.08em; }
     #historyDrawer .hd-empty { color: #555; padding: 32px 0; text-align: center; font-size: 11px; }
     #historyDrawer .hd-footer { color: #555; font-size: 9px; padding: 8px 22px; border-top: 1px solid #1c1c1c; letter-spacing: 0.08em; text-transform: uppercase; }
   `;
@@ -2201,14 +2564,14 @@ function renderHistoryList(root, filter = "") {
     return;
   }
   /* Render newest first (the bridge already sorts that way). */
-  const currentSession = (() => { try { return localStorage.getItem("flatout.sessionId"); } catch { return null; } })();
+  const currentSession = (() => { try { return localStorage.getItem("jarvis.sessionId"); } catch { return null; } })();
   for (const t of matches) {
     const row = el("div", { className: "hd-turn" });
     const meta = el("div", { className: "hd-meta" });
     const ts = new Date(t.ts);
     const mark = ts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     const date = ts.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-    const roleLabel = t.role === "assistant" ? "FLAT-OUT" : "HEARD";
+    const roleLabel = t.role === "assistant" ? "JARVIS" : "HEARD";
     const roleSpan = el("span", { className: `hd-role ${t.role === "user" ? "user" : ""}`, text: roleLabel });
     meta.appendChild(roleSpan);
     meta.appendChild(el("span", { text: `${date} ${mark}` }));
@@ -2278,7 +2641,7 @@ document.addEventListener("keydown", (e) => {
  *  normally; the panel hangs around in the corner as a reference. */
 
 const ONBOARDING_TIPS = [
-  { say: '"Hey Flat-Out, what\'s in the diary today?"',  why: "Today's calendar — get_upcoming_events" },
+  { say: '"Hey Jarvis, what\'s in the diary today?"',  why: "Today's calendar — get_upcoming_events" },
   { say: '"Open Google Maps for Manchester."',           why: "Fast URL launcher — open_url" },
   { say: '"Text Adam I\'ll be ten minutes late."',       why: "iMessage with confirmation gate" },
   { say: '"Set a 25-minute timer for the chicken."',     why: "In-HUD countdown + chime" },
@@ -2287,18 +2650,18 @@ const ONBOARDING_TIPS = [
   { say: '"Shut down."',                                  why: "Mutes mic + dims HUD" },
 ];
 
-const ONBOARDING_KEY_PREFIX = "flatout.onboardingSeen.";
+const ONBOARDING_KEY_PREFIX = "jarvis.onboardingSeen.";
 
 function shouldShowOnboarding() {
   try {
-    const profileId = localStorage.getItem("flatout.activeProfile") || "default";
+    const profileId = localStorage.getItem("jarvis.activeProfile") || "default";
     return localStorage.getItem(ONBOARDING_KEY_PREFIX + profileId) !== "1";
   } catch { return false; }
 }
 
 function markOnboardingSeen() {
   try {
-    const profileId = localStorage.getItem("flatout.activeProfile") || "default";
+    const profileId = localStorage.getItem("jarvis.activeProfile") || "default";
     localStorage.setItem(ONBOARDING_KEY_PREFIX + profileId, "1");
   } catch {}
 }
@@ -2315,10 +2678,10 @@ function renderOnboarding() {
   root.id = "onboardingTips";
   const style = document.createElement("style");
   style.textContent = `
-    #onboardingTips { position: fixed; bottom: 18px; left: 18px; z-index: 9990; background: rgba(11, 11, 11, 0.92); border: 1px solid var(--brand-primary, #ff3b3b); padding: 14px 18px 12px; max-width: 360px; font-family: var(--mono, "JetBrains Mono", monospace); cursor: pointer; box-shadow: 0 0 30px rgba(255, 59, 59, 0.22); animation: onboardingSlide 320ms ease forwards; }
+    #onboardingTips { position: fixed; bottom: 18px; left: 18px; z-index: 9990; background: rgba(11, 11, 11, 0.92); border: 1px solid var(--accent); padding: 14px 18px 12px; max-width: 360px; font-family: var(--mono, "JetBrains Mono", monospace); cursor: pointer; box-shadow: 0 0 30px rgba(0, 212, 255, 0.22); animation: onboardingSlide 320ms ease forwards; }
     #onboardingTips.is-fading { opacity: 0; transition: opacity 600ms ease; }
     @keyframes onboardingSlide { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-    #onboardingTips h4 { color: var(--brand-primary, #ff3b3b); margin: 0 0 4px; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; }
+    #onboardingTips h4 { color: var(--accent); margin: 0 0 4px; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; }
     #onboardingTips .obt-sub { color: #888; font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 10px; }
     #onboardingTips .obt-row { padding: 4px 0; border-bottom: 1px dashed #1a1a1a; }
     #onboardingTips .obt-row:last-child { border-bottom: none; }
@@ -2368,8 +2731,11 @@ async function boot() {
   /* First-run onboarding tips — per-profile. Quiet pinned panel; never shown
    * twice for the same operator. */
   maybeShowOnboarding();
-  buildTicks();
-  buildNumerals();
+  /* buildTicks/buildNumerals belonged to the rev-gauge centerpiece — the
+   * white-label rebuild dropped the 0–200 RPM scale + needle for a clean
+   * arc reactor, so neither generator runs. */
+  // buildTicks();
+  // buildNumerals();
   renderCalendar();
   renderWeather();             // initial mocked forecast — replaced when bridge weather arrives
   setMonthRing();
@@ -2382,6 +2748,10 @@ async function boot() {
   wireFullscreen();
   wireCamera();
   connectBridge();             // live stats + weather + LLM proxy
+  _buildICScaffold();          // Instrument-cluster geometry — eagerly built so the
+                                // calibration ticks + voice waveform are visible
+                                // before the first /stats payload arrives.
+  _startVoiceWave();           // 60fps voice-waveform RAF loop (idle drift + mic RMS)
   startCommsPoll();            // dynamic COMMS panel (mail / frame.io / leads / latest shoot)
   startHealthPoll();           // service-health pips top-right of calendar strip
   startDiaryPoll();             // dynamic DIARY widget (today's calendar in the clock panel)

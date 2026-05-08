@@ -36,16 +36,76 @@ fi
 step() { printf "\n\033[1;36m▶ %s\033[0m\n" "$*"; }
 ok()   { printf "  \033[1;32m✓\033[0m %s\n" "$*"; }
 warn() { printf "  \033[1;33m!\033[0m %s\n" "$*"; }
+err()  { printf "  \033[1;31m✗\033[0m %s\n" "$*"; }
 
-# Why: print the FOM ASCII banner if the terminal is wide enough — same brand carry-through as the kiosk.
-if [[ -f assets/fom-ascii.txt ]] && [[ "$(tput cols 2>/dev/null || echo 80)" -ge 145 ]]; then
-  printf '\033[31m'  # FOM red
-  cat assets/fom-ascii.txt
-  printf '\033[0m\n'
+# Why: print the brand ASCII banner if the terminal is wide enough.
+# Falls back to fom-ascii.txt for legacy installs that haven't migrated yet.
+if [[ "$(tput cols 2>/dev/null || echo 80)" -ge 145 ]]; then
+  if [[ -f assets/jarvis-ascii.txt ]]; then
+    printf '\033[36m'  # Arc-reactor cyan
+    cat assets/jarvis-ascii.txt
+    printf '\033[0m\n'
+  elif [[ -f assets/fom-ascii.txt ]]; then
+    printf '\033[31m'
+    cat assets/fom-ascii.txt
+    printf '\033[0m\n'
+  fi
 fi
 
 CHECK_ONLY=0
-[[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
+FORCE=0
+for arg in "$@"; do
+  case "$arg" in
+    --check) CHECK_ONLY=1 ;;
+    --force-brand-change) FORCE=1 ;;
+  esac
+done
+
+# ─── 0. Brand-lock guard ───────────────────────────────────────────────────────
+# Why: this codebase is white-label. The FOM kiosk and any other branded
+# install must be pinned to a brand-specific branch (e.g. flatout-media)
+# rather than tracking main. If the configured brand here doesn't match the
+# brand on the upstream tip we'd be about to fast-forward to, we abort —
+# silently rebranding a production kiosk to "Jarvis" because someone ran
+# the wrong update is exactly the failure mode this guard exists to stop.
+#
+# Bypass: --force-brand-change (intentional rebrand) or delete .brand-lock.
+step "Brand-lock check"
+LOCK_FILE="$HERE/.brand-lock"
+LOCAL_BRAND=""
+if [[ -f config/brand.json ]]; then
+  LOCAL_BRAND=$(node -e "try { console.log(require('./config/brand.json').agent.name || ''); } catch {}" 2>/dev/null)
+fi
+if [[ -z "$LOCAL_BRAND" ]]; then
+  warn "no config/brand.json agent.name — skipping brand-lock check"
+else
+  ok "local brand: $LOCAL_BRAND"
+fi
+if [[ -f "$LOCK_FILE" ]]; then
+  LOCKED_BRAND=$(tr -d '[:space:]' < "$LOCK_FILE")
+  if [[ "$LOCKED_BRAND" != "$LOCAL_BRAND" ]]; then
+    err "brand-lock mismatch: .brand-lock says \"$LOCKED_BRAND\" but local brand is \"$LOCAL_BRAND\""
+    err "either fix .brand-lock or restore the install before continuing."
+    exit 2
+  fi
+  # Peek at the upstream brand without merging — refuses if it differs.
+  git fetch --quiet 2>/dev/null || true
+  UPSTREAM_REF="$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo '')"
+  if [[ -n "$UPSTREAM_REF" ]]; then
+    UPSTREAM_BRAND=$(git show "$UPSTREAM_REF:config/brand.json" 2>/dev/null \
+      | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{ try{ console.log(JSON.parse(s).agent.name||''); }catch{} });" 2>/dev/null || echo '')
+    if [[ -n "$UPSTREAM_BRAND" && "$UPSTREAM_BRAND" != "$LOCKED_BRAND" && $FORCE -eq 0 ]]; then
+      err "upstream branch ($UPSTREAM_REF) is brand \"$UPSTREAM_BRAND\" but this install is locked to \"$LOCKED_BRAND\"."
+      err "pulling would rebrand this kiosk. ABORTING."
+      err ""
+      err "  if you really mean to switch brands:    ./tools/update.sh --force-brand-change"
+      err "  if you should be on a different branch: git checkout <brand-branch> && git branch --set-upstream-to=origin/<brand-branch>"
+      err "  if the lock is stale:                   echo \"$UPSTREAM_BRAND\" > .brand-lock"
+      exit 2
+    fi
+    ok "upstream brand matches: $UPSTREAM_BRAND"
+  fi
+fi
 
 # ─── 1. Backup memory.db ───────────────────────────────────────────────────────
 step "Backing up memory.db"
@@ -212,22 +272,32 @@ fi
 step "Restart"
 if [[ $CHECK_ONLY -eq 1 ]]; then
   ok "(skipped — would restart launchd agent or kill+respawn services)"
-elif [[ -f "$HOME/Library/LaunchAgents/com.flatoutmedia.hud.plist" ]]; then
-  launchctl bootout "gui/$UID/com.flatoutmedia.hud" 2>/dev/null || true
-  launchctl bootstrap "gui/$UID" "$HOME/Library/LaunchAgents/com.flatoutmedia.hud.plist"
-  ok "launchd agent reloaded — services restarting"
 else
-  # No launchd agent — call ./launch.sh restart directly. That kills every
-  # bound port (covers stale-but-unresponsive bridges) and starts everything
-  # fresh, with the binding-rebuild self-heal already wired in. Cleaner than
-  # punting "pkill ... && ./launch.sh" to the operator and less error-prone.
-  if [[ -x "$HERE/launch.sh" ]]; then
-    "$HERE/launch.sh" restart
-    ok "services restarted via ./launch.sh restart"
-    ok "refresh the kiosk in Chrome with ⌘ Cmd + R"
+  # Why: legacy FOM installs use com.flatoutmedia.hud, white-label installs use
+  # com.jarvis.hud. We reload whichever one exists so old kiosks keep working
+  # through the rebrand transition.
+  AGENT_PLIST=""
+  for cand in com.jarvis.hud.plist com.flatoutmedia.hud.plist; do
+    [[ -f "$HOME/Library/LaunchAgents/$cand" ]] && { AGENT_PLIST="$HOME/Library/LaunchAgents/$cand"; break; }
+  done
+  if [[ -n "$AGENT_PLIST" ]]; then
+    AGENT_LABEL="$(basename "$AGENT_PLIST" .plist)"
+    launchctl bootout "gui/$UID/$AGENT_LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$UID" "$AGENT_PLIST"
+    ok "launchd agent ($AGENT_LABEL) reloaded — services restarting"
   else
-    warn "launchd agent not installed and ./launch.sh missing — restart manually:"
-    warn "    cd $HERE && ./launch.sh restart"
+    # No launchd agent — call ./launch.sh restart directly. That kills every
+    # bound port (covers stale-but-unresponsive bridges) and starts everything
+    # fresh, with the binding-rebuild self-heal already wired in. Cleaner than
+    # punting "pkill ... && ./launch.sh" to the operator and less error-prone.
+    if [[ -x "$HERE/launch.sh" ]]; then
+      "$HERE/launch.sh" restart
+      ok "services restarted via ./launch.sh restart"
+      ok "refresh the kiosk in Chrome with ⌘ Cmd + R"
+    else
+      warn "launchd agent not installed and ./launch.sh missing — restart manually:"
+      warn "    cd $HERE && ./launch.sh restart"
+    fi
   fi
 fi
 
@@ -245,7 +315,7 @@ ${RED}                       UPDATE COMPLETE${NC}
 ${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}
 
 ${CYN}1. Refresh the HUD${NC}
-   Click the Flat-Out browser window and press ${GRN}Cmd+R${NC}.
+   Click the Jarvis browser window and press ${GRN}Cmd+R${NC}.
    Picks up new HUD code, the launcher menu changes, and the new
    weather-icon fallback. Without this the HUD still runs the old JS.
 
@@ -276,9 +346,9 @@ ${CYN}4. New keyboard shortcut: ${GRN}Shift+Cmd+J${NC}
    Same shortcut closes it.
 
 ${CYN}5. Tail logs if something looks off${NC}
-   ${GRN}tail -f /tmp/flat-out-bridge.log${NC}        Bridge — main chat path
-   ${GRN}tail -f /tmp/flat-out-kokoro.log${NC}        TTS server
-   ${GRN}tail -f /tmp/flat-out-static.log${NC}        Static HUD server
+   ${GRN}tail -f /tmp/jarvis-bridge.log${NC}        Bridge — main chat path
+   ${GRN}tail -f /tmp/jarvis-kokoro.log${NC}        TTS server
+   ${GRN}tail -f /tmp/jarvis-static.log${NC}        Static HUD server
 
 ${CYN}6. Roll back if you need to${NC}
    git stash list                       List anything the updater stashed

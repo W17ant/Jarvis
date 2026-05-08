@@ -77,12 +77,12 @@ export function resetIdleTimer() {
       conversationMode = false;
       _wakeBtnLabel(LABEL_WAKE_LISTENING);
       _clearHistory();
-      console.log("[Flat-Out] conversation timed out — back to wake-word listening");
+      console.log("[Jarvis] conversation timed out — back to wake-word listening");
     }
   }, CONVERSATION_IDLE_MS);
 }
 
-/** Operator said the wake word with no follow-up ("Hey Flat-Out." then
+/** Operator said the wake word with no follow-up ("Hey Jarvis." then
  *  silence). Speak a random acknowledgement and enter conversation mode
  *  so they can ask the actual question on the next utterance. */
 export async function acknowledgeBareWake() {

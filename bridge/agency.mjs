@@ -89,7 +89,7 @@ export async function generateSocialCaptions({ subject, angle = "", platforms, c
   if (!subject) return { ok: false, error: "subject required" };
   const want = Array.isArray(platforms) && platforms.length ? platforms : ["instagram", "linkedin", "tiktok"];
 
-  const system = `You are a content writer for Flat-Out Media, an automotive PR/content agency. Write social captions that match each platform's native voice. Return ONLY a JSON object with the requested platform keys.
+  const system = `You are a content writer for Jarvis AI, an automotive PR/content agency. Write social captions that match each platform's native voice. Return ONLY a JSON object with the requested platform keys.
 
 Tone rules per platform:
 - instagram: visual-first, 1-2 short sentences, evocative not promotional, 4-8 niche hashtags at the end on a separate line
@@ -204,7 +204,7 @@ export async function askInternal({ question } = {}) {
   const hits = (recall.results || []);
   const grounded = hits.length > 0;
 
-  const system = `You answer "how do we usually do X" questions for a junior member of an automotive PR/content agency (Flat-Out Media). Lean HEAVY on the team's stored notes when you have them — that's the actual house style. If the notes don't cover the question, say "no specific team notes yet" and offer general best practice.`;
+  const system = `You answer "how do we usually do X" questions for a junior member of an automotive PR/content agency (Jarvis AI). Lean HEAVY on the team's stored notes when you have them — that's the actual house style. If the notes don't cover the question, say "no specific team notes yet" and offer general best practice.`;
   const user = `Question: ${question}
 ${grounded ? `Stored team notes (${hits.length} relevant entries):\n${hits.map(h => `- [${h.kind}] ${h.text}`).join("\n")}\n` : "No relevant stored notes — answer from general best practice and flag this clearly.\n"}
 Reply concisely (2-4 short paragraphs). British English.`;
@@ -384,11 +384,11 @@ Reply with JSON:
  * body + boilerplate, then we render the existing 'press-release' template.
  *
  * Boilerplate + dateline city + press contact derive from config/brand.json so a
- * white-label install (Acme Studios, etc.) doesn't leak Flat-Out's identity into the
+ * white-label install (Acme Studios, etc.) doesn't leak Jarvis's identity into the
  * draft. Operator can still override any of these per call. */
 function deriveBoilerplate(brand) {
   const agency = brand?.agency || {};
-  const name = agency.name || "Flat-Out Media";
+  const name = agency.name || "Jarvis AI";
   const tagline = agency.tagline || "we live and breathe automotive";
   const domain = agency.domain || "";
   /* primarySocialHandle picks Instagram → X → TikTok → Facebook from agency.socials,
@@ -402,7 +402,7 @@ function deriveBoilerplate(brand) {
 function derivePressContact(brand) {
   const agency = brand?.agency || {};
   if (agency.pressEmail) return agency.pressEmail;
-  /* Why: many operators set agency.domain like "flatoutmedia.org" but no pressEmail.
+  /* Why: many operators set agency.domain like "" but no pressEmail.
    * Synthesise "press@<domain>" as a sensible default. */
   if (agency.domain) return `press@${agency.domain.replace(/^https?:\/\//, "").replace(/^www\./, "")}`;
   return "press@example.com";
@@ -534,7 +534,7 @@ Tailor decisions to:
 Be SPECIFIC about quantities ("3× extra V-mount") and reasoning ("28-70 for setup, 70-200 for hero"). Don't pad.`;
 
   const user = `Brief:
-- Project: ${project || "(unspecified — make reasonable assumptions for a typical FOM automotive shoot)"}
+- Project: ${project || "(unspecified — make reasonable assumptions for a typical automotive shoot)"}
 - Vehicle: ${vehicleType || "(unspecified)"}
 - Location: ${location || "(unspecified)"}
 - Indoor / outdoor: ${indoor === true ? "indoor" : indoor === false ? "outdoor" : "(unspecified — assume mixed)"}

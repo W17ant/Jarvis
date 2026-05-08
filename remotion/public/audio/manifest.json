@@ -1,21 +1,21 @@
 [
   {
     "id": "title",
-    "text": "Flat-Out. The automotive AI kiosk built for your studio.",
+    "text": "Jarvis. The automotive AI kiosk built for your studio.",
     "file": "audio/title.wav",
     "seconds": 3.7546666666666666,
     "frames": 113
   },
   {
     "id": "hook",
-    "text": "Imagine a kiosk that listens, sees, edits, and remembers — purpose-built for an automotive PR and content agency. Here's what Flat-Out can do, and how to install it on your M5 Max in under thirty minutes.",
+    "text": "Imagine a kiosk that listens, sees, edits, and remembers — purpose-built for an automotive PR and content agency. Here's what Jarvis can do, and how to install it on your M5 Max in under thirty minutes.",
     "file": "audio/hook.wav",
     "seconds": 12.266666666666667,
     "frames": 368
   },
   {
     "id": "voice",
-    "text": "Say: hey Flat-Out, cut a thirty-second teaser of yesterday's Aston shoot. The kiosk picks up the wake phrase, transcribes locally, and starts rendering. Sentence-level streaming gets the first reply in your ear in about a second. Say stop and it'll cut you off mid-sentence.",
+    "text": "Say: hey Jarvis, cut a thirty-second teaser of yesterday's Aston shoot. The kiosk picks up the wake phrase, transcribes locally, and starts rendering. Sentence-level streaming gets the first reply in your ear in about a second. Say stop and it'll cut you off mid-sentence.",
     "file": "audio/voice.wav",
     "seconds": 14.613333333333333,
     "frames": 439
@@ -29,7 +29,7 @@
   },
   {
     "id": "edit",
-    "text": "Voice-driven cinematic edits. Drop a shoot folder, ask for a teaser, and Flat-Out plans the cut points, applies your brand pack tail-card, beat-syncs to a music track, and lands a finished MP4 in your Downloads.",
+    "text": "Voice-driven cinematic edits. Drop a shoot folder, ask for a teaser, and Jarvis plans the cut points, applies your brand pack tail-card, beat-syncs to a music track, and lands a finished MP4 in your Downloads.",
     "file": "audio/edit.wav",
     "seconds": 11.882666666666667,
     "frames": 357
@@ -43,21 +43,21 @@
   },
   {
     "id": "memory",
-    "text": "Persistent memory means you never re-explain who Sarah at the press office is, or what the FOM look means. Plus, Flat-Out exposes its tools through the Model Context Protocol, so Claude Desktop, Cursor and Continue can drive the same kiosk from anywhere.",
+    "text": "Persistent memory means you never re-explain who Sarah at the press office is, or what the FOM look means. Plus, Jarvis exposes its tools through the Model Context Protocol, so Claude Desktop, Cursor and Continue can drive the same kiosk from anywhere.",
     "file": "audio/memory.wav",
     "seconds": 14.549333333333333,
     "frames": 437
   },
   {
     "id": "install",
-    "text": "Installing takes a coffee. Open Terminal. Clone the repo. Run install dot sh — the script grabs Ollama, Whisper, Kokoro and Qwen for you. Run setup wizard — pick your hardware tier, your voice, and your shoots folder. Done. Run launch dot sh kiosk, and Flat-Out is live.",
+    "text": "Installing takes a coffee. Open Terminal. Clone the repo. Run install dot sh — the script grabs Ollama, Whisper, Kokoro and Qwen for you. Run setup wizard — pick your hardware tier, your voice, and your shoots folder. Done. Run launch dot sh kiosk, and Jarvis is live.",
     "file": "audio/install.wav",
     "seconds": 14.976,
     "frames": 450
   },
   {
     "id": "outro",
-    "text": "Flat-Out. Built for the agency that lives and breathes automotive. Ready when you are.",
+    "text": "Jarvis. Built for the agency that lives and breathes automotive. Ready when you are.",
     "file": "audio/outro.wav",
     "seconds": 4.906666666666666,
     "frames": 148

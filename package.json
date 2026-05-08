@@ -1,9 +1,9 @@
 {
-  "name": "flat-out-hud",
+  "name": "jarvis-ai",
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "description": "Voice-driven AI kiosk for an automotive PR & content agency. Local Qwen + Whisper + Kokoro. 76+ tools, MCP server.",
+  "description": "Jarvis — white-label voice-first AI assistant. Local Qwen + Whisper + Kokoro, MCP server, code agent, mail/calendar/tasks bridges.",
   "author": {
     "name": "Antony O'Neill",
     "email": "antony@aoneill.co.uk",

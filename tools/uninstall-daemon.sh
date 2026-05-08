@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# uninstall-daemon.sh - Remove the Flat-Out HUD launchd LaunchAgent.
+# uninstall-daemon.sh - Remove the Jarvis HUD launchd LaunchAgent.
 #
 # Usage:
 #   ./tools/uninstall-daemon.sh
 
 set -euo pipefail
-LABEL="com.flatoutmedia.hud"
+LABEL="com.jarvis.hud"
 TARGET="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 # bootout if loaded — don't fail if it isn't

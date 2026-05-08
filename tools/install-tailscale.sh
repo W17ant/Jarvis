@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-tailscale.sh - One-shot Tailscale setup for remote access to the FOM kiosk.
+# install-tailscale.sh - One-shot Tailscale setup for remote access to the kiosk.
 #
 # Why: gives the operator a way to reach the HUD + bridge from their phone or any
 # device on the same Tailscale account, without exposing anything to the public
