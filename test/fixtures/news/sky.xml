@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sky News Home</title>
+    <link>https://news.sky.com</link>
+    <item>
+      <title><![CDATA[UK weather: storms expected across the south]]></title>
+      <link>https://news.sky.com/story/uk-weather-storms-1</link>
+      <pubDate>Mon, 11 May 2026 09:00:00 GMT</pubDate>
+      <guid>https://news.sky.com/story/uk-weather-storms-1</guid>
+    </item>
+    <item>
+      <title><![CDATA[Markets rally on rate-cut hopes]]></title>
+      <link>https://news.sky.com/story/markets-rally-2</link>
+      <pubDate>Mon, 11 May 2026 08:30:00 GMT</pubDate>
+      <guid>https://news.sky.com/story/markets-rally-2</guid>
+    </item>
+  </channel>
+</rss>

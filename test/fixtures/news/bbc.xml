@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>BBC News - Home</title>
+    <link>https://www.bbc.co.uk/news</link>
+    <item>
+      <title>UK weather: Storms expected across the south of England</title>
+      <description>Forecasters warn of heavy rain.</description>
+      <link>https://www.bbc.co.uk/news/uk-1</link>
+      <pubDate>Mon, 11 May 2026 09:05:00 GMT</pubDate>
+      <guid isPermaLink="false">bbc-uk-1</guid>
+    </item>
+    <item>
+      <title>Premier League title race goes to final day</title>
+      <link>https://www.bbc.co.uk/sport/football/final-day-2</link>
+      <pubDate>Mon, 11 May 2026 07:50:00 GMT</pubDate>
+      <guid isPermaLink="false">bbc-sport-2</guid>
+    </item>
+  </channel>
+</rss>

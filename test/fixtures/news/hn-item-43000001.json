@@ -1,0 +1,10 @@
+{
+  "by": "alice",
+  "descendants": 42,
+  "id": 43000001,
+  "score": 312,
+  "time": 1747920000,
+  "title": "Show HN: A faster RSS parser written in Rust",
+  "type": "story",
+  "url": "https://example.com/rust-rss"
+}
