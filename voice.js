@@ -815,8 +815,63 @@ function wireBridgeEvents() {
   Bridge.on("pdf.complete",           BridgeEvents.handlePdfComplete);
   Bridge.on("yt.thumbnail.complete",  BridgeEvents.handleThumbnailComplete);
   Bridge.on("inbox.dropped",          BridgeEvents.handleInboxDropped);
+  Bridge.on("inbox.new_email",        handleProactiveNewEmail);
   Bridge.on("state.sleep",            handleEnterSleep);
   TimerHud.register(Bridge);
+}
+
+/* ---------- PROACTIVE SHOULDER-TAP ----------
+ *
+ * Bridge fires inbox.new_email when its 45s inbox warm detects email IDs
+ * not seen on previous polls. We speak a brief announcement IF it is safe
+ * — every suppression rule below exists because an unguarded interrupt
+ * destroys the kiosk vibe immediately:
+ *
+ *   - listening: operator is mid-utterance, do not talk over them
+ *   - isAssistantBusy: Daniel is already speaking, queueing would stack
+ *     announcements on top of an active reply
+ *   - Conversation.isActive: operator is in a triage flow ("brief me"
+ *     followed by "snooze the second"), interrupting that with "new
+ *     email" derails the loop
+ *   - debounce: 60s minimum between proactive announcements so a burst
+ *     of inbound mail does not chain announcements
+ *
+ * Bridge-side already caps to MAX_ANNOUNCEMENTS_PER_POLL items and skips
+ * the first poll entirely so boot does not announce the unread backlog. */
+let _lastProactiveTs = 0;
+const PROACTIVE_DEBOUNCE_MS = 60_000;
+
+async function handleProactiveNewEmail({ data }) {
+  if (!data?.items || data.items.length === 0) return;
+  const now = Date.now();
+  if (now - _lastProactiveTs < PROACTIVE_DEBOUNCE_MS) return;
+  if (isAssistantBusy()) return;
+  if (Conversation.isActive()) return;
+  if (listening) return;
+  _lastProactiveTs = now;
+
+  /* Display name parsing — Mail.app returns "Display Name <email@x>".
+   * Strip the angle-bracket part; fall back to the raw email or a
+   * generic if neither parsed. */
+  function senderName(raw) {
+    const s = String(raw || "").trim();
+    if (!s) return "an unknown sender";
+    const angleIdx = s.indexOf("<");
+    const stripped = (angleIdx > 0 ? s.slice(0, angleIdx) : s).trim();
+    return stripped || s;
+  }
+
+  const items = data.items;
+  let text;
+  if (items.length === 1) {
+    text = `New email from ${senderName(items[0].who)}, sir.`;
+  } else {
+    const total = data.totalNew || items.length;
+    /* "you have got" reads cleaner than the contraction through Kokoro. */
+    text = `You have got ${total} new emails, sir. Most recent from ${senderName(items[0].who)}.`;
+  }
+  try { await speak(text); }
+  catch (e) { console.warn(`[proactive] speak failed: ${e.message}`); }
 }
 
 /** Bridge dispatched the enter_sleep_mode tool — mute the mic, dim the HUD,

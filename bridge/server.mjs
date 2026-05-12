@@ -19,6 +19,7 @@ import { runShell, writeFileSandboxed, shellAllowlist } from "./shell.mjs";
 import * as Memory from "./memory.mjs";
 import * as Vision from "./vision.mjs";
 import * as MacControl from "./mac-control.mjs";
+import * as Proactive from "./proactive.mjs";
 import * as Agency from "./agency.mjs";
 import * as Youtube from "./youtube.mjs";
 import * as Fal from "./fal.mjs";
@@ -2019,11 +2020,25 @@ try { News.start(); } catch (e) { console.warn(`[server] News.start failed: ${e.
  * keep using the normal call path and just happen to hit a warm entry. */
 try {
   Prewarm.start({
-    warmInbox:    () => Inbox.aggregate({ days: 1, mailMax: 15, force: true }),
+    /* Wrap warmInbox so each refresh feeds Proactive's delta detector.
+     * First pass populates the seen-set silently; subsequent passes
+     * broadcast inbox.new_email events for items not seen before. The
+     * 45s prewarm cadence sets the upper bound on detection latency —
+     * good enough for kiosk-class shoulder-tap without thrashing
+     * Mail.app's AppleScript bridge. */
+    warmInbox: async () => {
+      const result = await Inbox.aggregate({ days: 1, mailMax: 15, force: true });
+      try { Proactive.checkForNewEmails(result, broadcastToClients); }
+      catch (e) { console.warn(`[proactive] check failed: ${e.message}`); }
+      return result;
+    },
     warmWeather:  () => getWeather(CONFIG.operator.latitude, CONFIG.operator.longitude, 6, { force: true }),
     warmCalendar: () => getUpcomingEvents({ days: 1, force: true }),
   });
 } catch (e) { console.warn(`[server] Prewarm.start failed: ${e.message}`); }
+/* Honour CONFIG.proactiveEmail (default true). Flip to false in config.json
+ * to disable the inbound-email shoulder-tap layer without removing the code. */
+Proactive.setEnabled(CONFIG.proactiveEmail !== false);
 /* Wire the personal-assistant timer broadcaster — fires timer.set/timer.fire/timer.cancel
  * events the HUD listens for to render the countdown badge + speak the label on fire. */
 Personal.setBroadcaster(broadcastToClients);
