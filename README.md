@@ -1,6 +1,16 @@
-# Jarvis — voice-first AI assistant
+# Jarvis
 
-> Local. Private. Yours. Wake it. Ask it. Watch it work.
+[![Version](https://img.shields.io/badge/version-0.3.0-00d4ff?style=flat-square)](CHANGELOG.md)
+[![CI](https://github.com/W17ANT/Jarvis/actions/workflows/ci.yml/badge.svg)](https://github.com/W17ANT/Jarvis/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-00d4ff?style=flat-square)](LICENSE)
+[![Apple Silicon](https://img.shields.io/badge/macOS-Apple%20Silicon-0077a8?style=flat-square&logo=apple&logoColor=white)](https://en.wikipedia.org/wiki/Apple_silicon)
+[![Local-first](https://img.shields.io/badge/runtime-local%20first-00d4ff?style=flat-square)](docs/privacy.md)
+[![Tests](https://img.shields.io/badge/tests-205%20%E2%9C%93-5fd97a?style=flat-square)](https://github.com/W17ANT/Jarvis/actions/workflows/ci.yml)
+
+**A voice-first AI assistant with an instrument-cluster HUD.**
+*Local LLM. Real CPU/GPU temps. Kiosk-mode. White-label.*
+
+> Iron Man's interface, your Mac's brain. MIT.
 
 ```
               ╦  ╔═╗ ╦═╗ ╦  ╦ ╦ ╔═╗
@@ -8,9 +18,43 @@
               ╩  ╩ ╩ ╩╚═  ╚╝  ╩ ╚═╝
 ```
 
-**Built by [Antony O'Neill](https://www.linkedin.com/in/antonyoneilladl/) · [aoneill.co.uk](https://aoneill.co.uk)**
+[**Quickstart →**](https://aoneill.co.uk/arc/quickstart/) · [**White-label install →**](docs/install-for-clients.md) · [**Privacy →**](docs/privacy.md) · [**60+ tools →**](docs/tool-reference.md) · [**Plugin authoring →**](docs/plugin-authoring.md) · [**Vision & roadmap →**](docs/vision-and-roadmap.md)
 
-A complete on-prem AI assistant: local Qwen brain, local Whisper STT, local Kokoro TTS, no cloud round-trip for inference, no data leaving your machine. Arc-reactor cyan HUD on any 27"+ display. 60 tools spanning vision, document generation, mail, calendar, code agent, persistent memory, MCP server, and an agentic web-use loop. White-label by design — every brand string lives in `config/brand.json`.
+**Built by [Antony O'Neill](https://www.linkedin.com/in/antonyoneilladl/) · [aoneill.co.uk](https://aoneill.co.uk) · MIT licensed**
+
+---
+
+## What it is
+
+A complete on-prem voice-first AI workstation for Apple Silicon. Wake it with your custom phrase. It listens, thinks, talks back, and runs tools — all without a cloud round-trip by default. The HUD looks like an arc-reactor instrument cluster on a 27"+ display: real CPU/GPU temps via [macmon](https://github.com/vladkens/macmon), live mic waveform centerpiece, paired core-telemetry dials, and a transcript drawer that surfaces every tool the agent ran.
+
+White-label by design — every brand string, colour, and wake phrase lives in `config/brand.json`. Hot-load plugins drop into `bridge/plugins/<name>/`. 60+ voice-callable tools categorised across communication / productivity / creative / system / memory.
+
+Whisper STT → Ollama LLM → Kokoro TTS pipeline. Default config: nothing leaves your Mac.
+
+---
+
+## How this is different
+
+There are several "voice-first AI for Mac" projects in the wild. Most are cloud-first wrappers — your voice → Anthropic → cloud TTS → back to you. They're fast and demo-friendly because rented intelligence is fast. They're also unsuitable for anyone whose data can't legally / contractually go through Anthropic.
+
+This one is the opposite trade:
+
+| | Cloud-first AI assistants | This kiosk |
+|---|---|---|
+| Brain | Cloud LLM (Anthropic / OpenAI) | Local Ollama (default qwen2.5:7b) |
+| STT | Cloud (Web Speech API) | Local MLX Whisper |
+| TTS | Cloud (Fish Audio / ElevenLabs) | Local Kokoro |
+| API keys required | Yes (~$10-50/mo per operator) | None |
+| Workspace scope (per-context personas, scoped memory + audit) | No | Yes — ship Workspaces v0-v4 |
+| White-label | Hardcoded brand | `config/brand.json` rebrands the whole HUD |
+| Plugin scaffolding | Fork the codebase | Voice command → `build_plugin` → working plugin in 500ms |
+| MCP server | No | Yes — every tool exposed to Claude Desktop / Cursor |
+| Apple Silicon telemetry | Decorative | Real CPU/GPU temps via macmon |
+| First-time-up cost | $0 + ~30 min install | $0 + ~30 min install |
+| Per-month cost | $10-50 (API) | $0 |
+
+If you want the fastest possible voice loop and don't care about who sees your data, the cloud-first projects are excellent. If you're a lawyer / accountant / consultant / journalist / clinician / regulated-business owner who cannot put client data through Anthropic, this one is for you.
 
 ---
 
@@ -151,7 +195,7 @@ Common gotchas (full FAQ in `docs/install-guide.html` pages 11–13):
               ┌────────────────────┴────────────────────┐
               │            Bridge (Node 22)             │
               │ ─────────────────────────────────────── │
-              │  99 tool dispatch · MCP server         │
+              │  60+ tool dispatch · MCP server        │
               │  Sentence-level LLM streaming · Audit   │
               │  Tasks · Undo · Memory · Notifications  │
               └─┬──────┬──────┬──────┬──────────┘
@@ -182,11 +226,12 @@ The 🚀 features are agency-flavoured, not generic kiosk demos. The bridge know
 
 ## ⚡ Performance
 
-- **Cold start to first audio**: ~1s on M5 Max (14b text model, sentence-level streaming hides cold-start)
-- **Subsequent turns**: ~300ms first-token latency with `keep_alive: 24h` and `OLLAMA_FLASH_ATTENTION=1` set via launchctl
-- **Tool routing on capable hardware**: short routing queries hit the 3b fast model (~500ms); long-form drafts and tool dispatch hit 14b. Roughly 5x faster on chat-style queries without giving up quality on writes
-- **Pre-warm on boot**: parallel probes to Ollama (text + VL), Kokoro, Whisper hide the 2-3s cold-start tax
-- **Optional Docker render env** — `RENDER_USE_DOCKER=1` routes shell commands through a pinned Debian image with ffmpeg + ImageMagick + exiftool. Reproducible across operator Macs
+- **Speech-end → first audio**: target p50 <800ms on M-series (the perceptual lag the operator feels). Sprint 11 added a per-turn instrumentation pipeline (`v.rec-end → v.audio-play` perf marks, `tools/latency-report.mjs` CLI summary, optional `?debug=latency` HUD overlay) so any regression surfaces immediately.
+- **Subsequent turns**: ~300ms first-token latency with `keep_alive: 24h` and `OLLAMA_FLASH_ATTENTION=1` set via launchctl.
+- **Tool routing on capable hardware**: short routing queries hit the 3b fast model (~500ms); long-form drafts + tool dispatch hit 14b. Roughly 5× faster on chat-style queries without giving up quality on writes. Embedding-based tool filter caches per-query embeddings so repeats skip the ~150-400ms `nomic-embed-text` roundtrip.
+- **Pre-warm on boot**: parallel probes to Ollama (text + VL), Kokoro, Whisper hide the 2-3s cold-start tax. Whisper now warms via a background silent-clip transcribe at server boot. `/diary` cache prewarmed via one fanout call (saves ~5s on first HUD load).
+- **Health-poll latency**: `/healthz` cached server-side with 1s TTL so two HUD windows don't double-fanout to Ollama/Kokoro/Whisper. `/diary` cached with 18s TTL + in-flight Promise dedup (concurrent callers share one AppleScript run).
+- **Optional Docker render env** — `RENDER_USE_DOCKER=1` routes shell commands through a pinned Debian image with ffmpeg + ImageMagick + exiftool. Reproducible across operator Macs.
 
 ---
 

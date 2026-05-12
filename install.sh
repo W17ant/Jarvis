@@ -9,13 +9,18 @@
 #   - Clear next-step output, no silent failures, friendly errors
 #
 # Usage:
-#   ./install.sh                   # full install
+#   ./install.sh                   # full install (HUD handles first-run setup)
 #   ./install.sh --models-only     # just pull/refresh Ollama models
 #   ./install.sh --skip-models     # everything except the model pull
-#   ./install.sh --no-wizard       # don't offer to run setup-wizard at end
+#   ./install.sh --with-cli-wizard # ALSO run the Terminal-based brand wizard
+#                                   (legacy path — most operators don't need this;
+#                                    the kiosk's first-run modal covers brand,
+#                                    voice, mic, location, and tier)
 #
 # After this finishes:
 #   ./launch.sh kiosk              # start the HUD in fullscreen
+#                                   First launch shows the in-kiosk setup modal —
+#                                   no Terminal needed for branding / voice / etc.
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -59,12 +64,17 @@ BREW="/opt/homebrew/bin/brew"
 
 # ── Arg parsing ───────────────────────────────────────────────
 MODE="full"
-OFFER_WIZARD=1
+# OFFER_WIZARD: opt-in (was opt-out). The HUD's setup modal now covers brand,
+# voice, mic, location, and tier without needing Terminal — pushing operators
+# into the CLI wizard at the end of install was the single biggest "wait, why
+# do I need to type things in a terminal?" moment for non-tech users.
+OFFER_WIZARD=0
 for arg in "$@"; do
   case "$arg" in
-    --models-only)  MODE="models-only" ;;
-    --skip-models)  MODE="skip-models"  ;;
-    --no-wizard)    OFFER_WIZARD=0 ;;
+    --models-only)     MODE="models-only" ;;
+    --skip-models)     MODE="skip-models"  ;;
+    --no-wizard)       OFFER_WIZARD=0 ;;
+    --with-cli-wizard) OFFER_WIZARD=1 ;;
     -h|--help)
       sed -n '2,18p' "$0" | sed 's/^# //; s/^#//'
       exit 0
@@ -386,9 +396,11 @@ if (( WIZARD_DONE )); then
 EOF
 else
   cat <<EOF
-  │  Next:                                                       │
-  │     node tools/setup-wizard.mjs   # pick voice, brand, etc   │
-  │     ./launch.sh kiosk             # start the kiosk          │
+  │  Next: launch the kiosk and finish setup in-screen:          │
+  │     ./launch.sh kiosk                                        │
+  │                                                              │
+  │  The first-launch wizard inside the HUD covers brand,        │
+  │  voice, mic, location, and tier — no Terminal required.      │
 EOF
 fi
 

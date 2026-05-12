@@ -1,0 +1,40 @@
+---
+import Layout from "../layouts/Layout.astro";
+const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+const u = (p: string) => `${base}${p}`;
+---
+<Layout title="Voice-first AI assistant with an instrument-cluster HUD" active={u("/")}>
+  <section class="hero">
+    <h1 class="hero__lede">
+      A voice-first AI assistant with an <em>instrument-cluster HUD</em>.
+    </h1>
+    <p class="hero__sub">
+      Local LLM. Real CPU/GPU temps. Kiosk-mode. White-label.
+      Iron Man's interface, your Mac's brain. MIT.
+    </p>
+    <p>
+      <a class="hero__cta" href={u("/quickstart")}>Quickstart →</a>
+      &nbsp;
+      <a class="hero__cta hero__cta--ghost" href="https://github.com/W17ANT/Jarvis" target="_blank" rel="noopener">View on GitHub</a>
+    </p>
+
+    <div class="hero__pillars">
+      <article class="hero__pillar">
+        <h3>// LOCAL FIRST</h3>
+        <p>Whisper STT → Ollama LLM → Kokoro TTS, all on your Mac. Zero cloud round-trips by default.</p>
+      </article>
+      <article class="hero__pillar">
+        <h3>// 60+ TOOLS</h3>
+        <p>Mail, calendar, code-agent, browser, knowledge base, MCP server. Voice-callable. <a href={u("/tool-reference")}>Full list</a>.</p>
+      </article>
+      <article class="hero__pillar">
+        <h3>// WHITE LABEL</h3>
+        <p>Edit <code>config/brand.json</code> — agent name, wake phrase, colours, fonts, logo. Hot-reload. <a href={u("/install-clients")}>Fork workflow</a>.</p>
+      </article>
+      <article class="hero__pillar">
+        <h3>// HOT-LOAD PLUGINS</h3>
+        <p>Drop a <code>manifest.json + handler.mjs</code> in <code>bridge/plugins/</code>. No restart. <a href={u("/plugins")}>Plugin guide</a>.</p>
+      </article>
+    </div>
+  </section>
+</Layout>

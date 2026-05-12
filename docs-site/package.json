@@ -1,0 +1,17 @@
+{
+  "name": "jarvis-docs",
+  "private": true,
+  "type": "module",
+  "version": "0.2.0",
+  "description": "Static documentation site for Jarvis AI Assistant. Built with Astro.",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "astro": "^5.0.0"
+  }
+}

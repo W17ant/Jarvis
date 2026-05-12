@@ -1,0 +1,162 @@
+---
+/**
+ * Layout.astro — shared shell for every Jarvis docs page.
+ *
+ * Why hand-rolled instead of Starlight: the operator's preference is to
+ * keep design control over the cyan / Oswald / Rubik aesthetic that
+ * matches the HUD. A starter theme would impose its own visual language
+ * we'd then have to undo. The site is small enough (~6 pages) that
+ * maintaining the layout ourselves is cheaper than fighting a theme.
+ */
+interface Props {
+  title?: string;
+  description?: string;
+  /** Marks the active page in the side nav. Use the route slug, e.g. "/quickstart". */
+  active?: string;
+  /** Override the OG image for a specific page. Defaults to /og-card.png.
+   *  Pass an absolute URL (`https://…`) when you want a per-page custom card. */
+  ogImage?: string;
+  /** Astro injects the markdown file's frontmatter under this key when the
+   *  page is `.md` and `layout:` points here. .astro pages pass title/etc
+   *  directly via Astro.props instead. We read both shapes. */
+  frontmatter?: { title?: string; description?: string; active?: string; ogImage?: string };
+}
+
+const DEFAULT_DESCRIPTION = "Voice-first AI assistant with an instrument-cluster HUD. Local LLM, real CPU/GPU temps, kiosk-mode, white-label. MIT.";
+const SITE_NAME = "Jarvis";
+const TWITTER_HANDLE = "@w17ant";
+
+/* Resolve from either direct props (.astro pages) or frontmatter (.md pages).
+ * Markdown pages set layout: ../layouts/Layout.astro and Astro forwards
+ * their frontmatter under `Astro.props.frontmatter`. Direct .astro pages
+ * pass props on the <Layout> element. */
+const fm = Astro.props.frontmatter || {};
+const title = Astro.props.title ?? fm.title ?? "Docs";
+const description = Astro.props.description ?? fm.description ?? DEFAULT_DESCRIPTION;
+const active = Astro.props.active ?? fm.active;
+const ogImage = Astro.props.ogImage ?? fm.ogImage;
+
+/* OG cards must be served from absolute URLs — relative paths fail validation
+ * on Twitter / Slack / Discord crawlers. We resolve against Astro.site +
+ * base (configured in astro.config.mjs) so the URLs match the deployed
+ * origin even on path-prefix deploys (aoneill.co.uk/arc/). */
+const SITE_ORIGIN = Astro.site?.toString().replace(/\/$/, "") || "https://aoneill.co.uk";
+const BASE_PATH = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+const SITE_URL = `${SITE_ORIGIN}${BASE_PATH}`;
+const ogImageURL = ogImage || `${SITE_URL}/og-card.png`;
+const canonicalURL = `${SITE_URL}${Astro.url.pathname.replace(BASE_PATH, "") || "/"}`;
+const fullTitle = `${title} · ${SITE_NAME} docs`;
+
+/* Asset URL helper — prepends the configured base path (e.g. "/arc") so
+ * hardcoded references to /favicon.svg, /styles.css resolve correctly under
+ * a path-prefix deploy. Astro auto-prefixes its own bundle imports but not
+ * arbitrary HTML attribute values, so we do it explicitly here. */
+const u = (path: string) => `${BASE_PATH}${path}`;
+
+const NAV: { href: string; label: string }[] = [
+  { href: u("/"),                label: "Home" },
+  { href: u("/quickstart"),      label: "Quickstart" },
+  { href: u("/install-clients"), label: "White-label install" },
+  { href: u("/tool-reference"),  label: "Tool reference" },
+  { href: u("/plugins"),         label: "Plugin authoring" },
+  { href: u("/privacy"),         label: "Privacy" },
+  { href: u("/troubleshooting"), label: "Troubleshooting" },
+];
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <title>{fullTitle}</title>
+
+    <!-- Canonical URL — keeps SEO tidy if a page is reachable via multiple
+         routes (e.g. trailing slash variants on Pages / Vercel). -->
+    <link rel="canonical" href={canonicalURL} />
+
+    <!-- Favicons. SVG is the master; PNG fallback for browsers that don't
+         render SVG favicons (older Safari versions on iOS, some embedded
+         WebViews). The 32× size is what most browsers actually render. -->
+    <link rel="icon" type="image/svg+xml" href={u("/favicon.svg")} />
+    <link rel="apple-touch-icon" href={u("/og-card.png")} />
+
+    <!-- OpenGraph (Facebook, LinkedIn, Slack unfurls, Discord, generic) -->
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:image" content={ogImageURL} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Jarvis — voice-first AI assistant with an instrument-cluster HUD" />
+    <meta property="og:locale" content="en_GB" />
+
+    <!-- Twitter / X large card. summary_large_image gives the wide
+         hero treatment instead of the cramped square thumbnail. -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content={TWITTER_HANDLE} />
+    <meta name="twitter:creator" content={TWITTER_HANDLE} />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageURL} />
+
+    <!-- Theme colour for mobile browser chrome (Safari address bar tint,
+         Chrome on Android status bar). Matches the kiosk's --accent-deep. -->
+    <meta name="theme-color" content="#0077a8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Rubik:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href={u("/styles.css")} />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="topbar__brand" href={u("/")}>
+        <span class="topbar__brand-primary">JARVIS</span>
+        <span class="topbar__brand-suffix">DOCS</span>
+      </a>
+      <nav class="topbar__links" aria-label="Primary">
+        <a href="https://github.com/W17ANT/Jarvis" target="_blank" rel="noopener">GitHub</a>
+        <a href={u("/quickstart")}>Get started</a>
+      </nav>
+    </header>
+
+    <div class="page">
+      <aside class="sidenav" aria-label="Documentation sections">
+        <ol>
+          {NAV.map((item) => (
+            <li>
+              <a
+                href={item.href}
+                class:list={[
+                  "sidenav__link",
+                  /* Markdown pages set `active: /quickstart` (no prefix) in
+                   * frontmatter; nav hrefs are u("/quickstart") (prefixed).
+                   * Strip the base prefix from item.href so the comparison
+                   * works regardless of which form callers pass. */
+                  (active === item.href || active === item.href.replace(BASE_PATH, "") || (active === "/" && item.href === BASE_PATH + "/"))
+                    ? "sidenav__link--active" : null,
+                ]}
+              >
+                {item.label}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </aside>
+
+      <main class="prose">
+        <slot />
+      </main>
+    </div>
+
+    <footer class="bottombar">
+      <span>Jarvis is MIT-licensed. Built local-first for Apple Silicon.</span>
+      <span><a href={u("/privacy")}>Privacy</a> · <a href="https://github.com/W17ANT/Jarvis/issues">Report an issue</a></span>
+    </footer>
+  </body>
+</html>

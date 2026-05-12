@@ -1,0 +1,13 @@
+# Astro / Node
+node_modules
+dist
+.astro
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode/settings.json
+
+# Local environment
+.env
+.env.local
