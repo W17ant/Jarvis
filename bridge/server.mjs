@@ -18,6 +18,7 @@ import { getMailSummary, draftEmail } from "./mail.mjs";
 import { runShell, writeFileSandboxed, shellAllowlist } from "./shell.mjs";
 import * as Memory from "./memory.mjs";
 import * as Vision from "./vision.mjs";
+import * as MacControl from "./mac-control.mjs";
 import * as Agency from "./agency.mjs";
 import * as Youtube from "./youtube.mjs";
 import * as Fal from "./fal.mjs";
@@ -1613,6 +1614,56 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "open_app",
+      description: "Activate a macOS application by name. Launches it if not running, brings it to the front if it is. Use when the operator says 'open Photoshop', 'launch Safari', 'switch to Mail', 'bring up Final Cut'. Accepts the menu-bar name ('Photoshop') or full bundle name ('Adobe Photoshop 2024'). Returns ok:false with a clear message if the app is not installed.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Application name as it appears in the menu bar or Applications folder." },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_system_volume",
+      description: "Set macOS output volume to a 0-100 level. 0 mutes, 100 is max. Use when the operator says 'volume 30', 'turn it down', 'turn it up', 'mute', 'turn the sound off', 'set volume to half'. Interpret relative phrases ('down a bit') by reading the current level via osascript first if you need to — otherwise pick a reasonable absolute (e.g. 'down a bit' ≈ 20-30, 'up a lot' ≈ 80).",
+      parameters: {
+        type: "object",
+        properties: {
+          level: { type: "number", description: "0-100. Clamped to range. 0 mutes." },
+        },
+        required: ["level"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "lock_screen",
+      description: "Lock the Mac — display sleeps immediately, password required on wake. Use when the operator says 'lock my screen', 'lock the Mac', 'I'm stepping away', 'lock it'. Different from sleep_display (would put just the display to sleep without security): this is the security-conscious 'I'm leaving the desk' verb.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "type_text",
+      description: "Type a string into whatever app is currently focused. Use when the operator says 'type my email', 'paste the address', 'fill in <text>', or wants to dictate text into a form/search bar without touching the keyboard. REQUIRES Accessibility permission. Operator must confirm before this runs — typing into the wrong field (especially a password) is irreversible.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "Text to type. Capped at 4000 characters. Newlines are typed as Return keystrokes." },
+        },
+        required: ["text"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "morning_brief",
       description: "Proactive 'good morning, here's your day' briefing. Aggregates weather + today's calendar + smart-inbox priorities + top news headlines into a single 60-90 second flowing narrative — not a list. Use when the operator says 'good morning', 'brief me on today', 'morning brief', 'give me the rundown', 'what's the day looking like in full'. For 'what's important right now' use smart_inbox_briefing instead — that returns a ranked list, this returns a spoken-paragraph narrative covering weather + day shape + headlines.",
       parameters: {
@@ -2152,6 +2203,11 @@ const NEEDS_CONFIRMATION = {
     const where = src ? `from ${a?.source_url ? "the linked video" : "the local clip"}` : "(awaiting source from the modal)";
     return `Recreate ${where} starring ${a?.slug || "(no influencer)"}. Shall I proceed?`;
   },
+  /* type_text uses System Events keystroke to type into the focused app —
+   * destructive if the wrong field is focused (password, search bar that
+   * triggers on each keystroke, etc.). Gate it. Preview the first 80
+   * chars so the operator hears what would land. */
+  type_text: (a) => `Type into the focused app: "${(a?.text || "").slice(0, 80)}${(a?.text || "").length > 80 ? "…" : ""}". Confirm?`,
   draft_email: (a) => `Draft email to ${a.to || "(no recipient)"} with subject "${a.subject || "(no subject)"}". Send it?`,
   add_calendar_event: (a) => `Add calendar event "${a.title || "(no title)"}" on ${a.startDate || a.date || "(no date)"}. Confirm?`,
   run_shell: (a) => `Run shell command: ${(a.command || "").slice(0, 120)}${a.command?.length > 120 ? "…" : ""}. Confirm?`,
@@ -2764,6 +2820,10 @@ Output ONLY the ranked list + the one-sentence take. No headers, no bullet marke
         fromCache: inbox.fromCache,
       };
     }
+    case "open_app":          return await MacControl.openApp(args?.name);
+    case "set_system_volume": return await MacControl.setVolume(args?.level);
+    case "lock_screen":       return await MacControl.lockScreen();
+    case "type_text":         return await MacControl.typeText(args?.text);
     case "morning_brief": {
       /* Stitch four prewarmed sources into a flowing narrative the LLM can speak.
        * Each fetch is independent so we run them in parallel; a failure on one
