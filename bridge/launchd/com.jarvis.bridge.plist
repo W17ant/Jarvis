@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.jarvis.bridge.plist — LaunchAgent that auto-starts the Jarvis bridge,
+  Kokoro TTS, Whisper STT, and the static server on user login.
+
+  Why a LaunchAgent (not LaunchDaemon): we want this to run as the operator's
+  user (so it inherits their Keychain, microphone permission, file ownership)
+  and only when they're actually logged in. LaunchDaemons run as root and
+  run on boot — wrong scope for a desktop kiosk.
+
+  Why bash -lc instead of running node directly: nvm-managed Node installs
+  put `node` somewhere that requires sourcing the operator's shell profile
+  (`.zprofile`, `.bash_profile`). A login shell (`bash -lc`) does that for
+  us, picking up whatever node the operator uses interactively. If they
+  later switch to Homebrew node or system node it keeps working.
+
+  WorkingDirectory is hardcoded to this operator's install path. White-label
+  installers should template this — see `tools/install-launchd.sh` (TODO)
+  for the install script that substitutes ${HOME}/Desktop/Jarvis at write-
+  time. For tonight's load, the path matches the operator's repo location.
+
+  Install:
+    cp bridge/launchd/com.jarvis.bridge.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.jarvis.bridge.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.jarvis.bridge.plist
+    rm ~/Library/LaunchAgents/com.jarvis.bridge.plist
+
+  Verify:
+    launchctl list | grep com.jarvis
+    tail /tmp/jarvis-launchd-out.log /tmp/jarvis-launchd-err.log
+
+  IMPORTANT — macOS sandboxing notes:
+
+  If your install lives under ~/Desktop, ~/Documents or ~/Downloads,
+  launchd-spawned bash WILL hit a TCC permission wall when reading those
+  folders. /tmp/jarvis-launchd-err.log will show:
+      shell-init: error retrieving current directory: getcwd: ...
+      bash: ./launch.sh: Operation not permitted
+
+  Two fixes (pick one):
+
+    A) Move the install to a folder outside the protected zones, e.g.:
+         mv ~/Desktop/Jarvis ~/Jarvis
+       Update the WorkingDirectory key below to match the new path.
+
+    B) Grant Full Disk Access to /bin/bash:
+         System Settings → Privacy & Security → Full Disk Access
+         → click "+" → Cmd+Shift+G → /bin/bash → Add → toggle on.
+       Then `launchctl unload` and `launchctl load` to retry.
+
+  Option A is cleaner for a kiosk install — no privacy escalation needed.
+-->
+
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jarvis.bridge</string>
+
+  <!--
+    Run launch.sh's `start` subcommand inside a login shell. This picks up
+    nvm / Homebrew / system node through the operator's shell profile and
+    fires off the four Jarvis services exactly as if the operator had
+    typed `./launch.sh start` themselves.
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>./launch.sh restart</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/Antony/Desktop/Jarvis</string>
+
+  <!-- Start the moment the LaunchAgent is loaded (login + on every launchctl load). -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!--
+    Restart only on unclean exit. If the operator runs `./launch.sh stop`
+    deliberately, KeepAlive=false-on-clean-exit means launchd won't fight
+    them by re-starting the services. This avoids the classic "I stopped
+    the bridge but it keeps coming back" footgun.
+  -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+    <key>Crashed</key>
+    <true/>
+  </dict>
+
+  <!--
+    Cap restart attempts so a misconfigured install doesn't burn CPU
+    looping. 30s back-off between failures gives the operator time to
+    notice via system logs / Console.app.
+  -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/jarvis-launchd-out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/jarvis-launchd-err.log</string>
+</dict>
+</plist>

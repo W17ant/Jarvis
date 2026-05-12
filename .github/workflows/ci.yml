@@ -1,0 +1,60 @@
+# Jarvis CI — runs on every push + PR.
+#
+# Why these jobs and not more: bridge boot + voice loop need Whisper, Kokoro
+# and macmon binaries that aren't available on GitHub-hosted runners (and
+# pulling them down would inflate runtime past the point of being useful).
+# Typecheck + the vitest suite cover the deterministic surface area: schema
+# validation, audit log shape, plugin manifest parser, brand merge, sentence
+# segmenter. The voice + tool dispatch path is exercised manually via
+# ./launch.sh restart and the smoke checklist in CHANGELOG.md.
+#
+# Security note: this workflow does NOT interpolate any untrusted github.event
+# fields (issue/PR title/body, commit messages, head refs) into run: blocks.
+# Concurrency uses github.ref which is a controlled value (branch / PR id).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: typecheck + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+  shellcheck:
+    name: shellcheck operator scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck launch.sh tools/diagnose.sh tools/update.sh

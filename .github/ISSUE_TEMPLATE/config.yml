@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/W17ANT/Jarvis#readme
+    about: README, install guide, and pointers to the rest of the docs.
+  - name: Privacy questions
+    url: https://github.com/W17ANT/Jarvis/blob/main/docs/privacy.md
+    about: What stays on your Mac and what (if anything) leaves it.
+  - name: White-label / fork workflow
+    url: https://github.com/W17ANT/Jarvis/blob/main/docs/install-for-clients.md
+    about: How to fork, lock the brand, and pull upstream improvements.
