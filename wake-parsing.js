@@ -68,6 +68,16 @@ export function extractQuery(text) {
    * pseudo-query. Now matches \s+ OR end-of-string so bare wake phrases
    * extract to "" cleanly. */
   q = q.replace(/^(hey|hi|ok|please|can you|could you|would you)(\s+|$)/i, "");
+  /* Defence-in-depth: strip leading punctuation, then if the heard text
+   * begins with "<word> ," (a comma is the giveaway of a wake-strip
+   * residue — the wake variant left punctuation behind), drop that word
+   * and the comma. The comma requirement is critical: a natural query
+   * like "show me the news" has no leading comma, so its first word is
+   * preserved. Only "penny , show me" / "uh , brief me" style residues
+   * lose their orphan prefix. */
+  q = q.replace(/^[,.;:!?\s-]+/, "");
+  q = q.replace(/^([a-z][a-z']{0,11})\s*,\s+/i, "");
+  q = q.replace(/^[,.;:!?\s-]+/, "");
   return q;
 }
 

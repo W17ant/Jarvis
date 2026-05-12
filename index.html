@@ -11,11 +11,56 @@
        so it matches the marketing logo's black-condensed treatment. JetBrains Mono for tickers. -->
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <!-- Versioned to bust Chrome's CSS cache when styles.css changes. Bump on each release. -->
-  <link rel="stylesheet" href="styles.css?v=20260508q" />
+  <link rel="stylesheet" href="styles.css?v=20260510l" />
+  <script>
+  /* HUD view modes — read at the very top of boot so CSS/JS can branch on
+   * data attributes before the first paint. URL params:
+   *   ?mode=reactor   — strips chrome (calendar, drawers, settings, panels);
+   *                     just the central reactor + waveform + state chip.
+   *                     For a secondary display showing ambient state.
+   *   ?mode=ambient   — even more minimal: reactor only, no controls.
+   *   ?workspace=slug — pin THIS window to that workspace persona; HUD
+   *                     applies the workspace's accent_color + agent_label
+   *                     to the chrome and sends the slug with every LLM
+   *                     call so the bridge dispatches in this scope.
+   *
+   * Defaults: no params = full kiosk view, global active workspace.
+   * The data-mode attribute drives all the CSS via [data-mode="reactor"]
+   * descendant rules. The workspace pin is read by workspace-switcher.js
+   * after boot and applied via the same accent / label hooks. */
+  (() => {
+    const sp = new URLSearchParams(location.search);
+    const mode = sp.get("mode");
+    if (mode === "reactor" || mode === "ambient") {
+      document.documentElement.setAttribute("data-mode", mode);
+    }
+    const wsPin = sp.get("workspace");
+    if (wsPin) {
+      /* Stored on window so workspace-switcher.js can read it without
+       * re-parsing the URL. Read-only for the lifetime of this window. */
+      window.__pinnedWorkspace = wsPin.toLowerCase();
+    }
+  })();
+  </script>
   <script>
   /* Why: brand-bootstrap runs before main scripts so colours, agent name, fonts, and logos
    * are applied before the user sees the first paint. Falls back to embedded Jarvis
-   * defaults if the bridge isn't up yet. */
+   * defaults if the bridge isn't up yet.
+   *
+   * Race fix: this is a classic <script> (not type=module), so it begins executing
+   * before any deferred module scripts. But the bridge fetch is async — by the
+   * time `await fetch(...)` resolves, modules have already booted. Modules that
+   * read brand-derived state (--accent, --agent-label, window.__BRAND__) at
+   * import time would race the bootstrap and see stale defaults.
+   *
+   * Mitigation: expose `window.__brandReady` as a Promise that resolves once
+   * apply() completes (or skipped on bridge failure). Modules that need brand
+   * can `await window.__brandReady` instead of fetching themselves.
+   *
+   * Also dispatch `brand:applied` on document so non-module code can subscribe.
+   */
+  let __brandResolve;
+  window.__brandReady = new Promise((resolve) => { __brandResolve = resolve; });
   (async () => {
     const apply = (b) => {
       const c = b?.colors || {};
@@ -97,6 +142,12 @@
         root.style.setProperty("--accent-tint", `rgba(${r2},${g2},${b2},0.06)`);
       }
     } catch {}
+
+    /* Brand + per-profile overrides applied. Resolve the gate so any module
+     * awaiting brand-derived state sees the final DOM, and dispatch a public
+     * event for non-module subscribers. */
+    __brandResolve(window.__BRAND__ || null);
+    document.dispatchEvent(new CustomEvent("brand:applied", { detail: window.__BRAND__ || null }));
   })();
   </script>
 </head>
@@ -125,6 +176,15 @@
         </div>
         <span class="calendar__brand-tag" data-brand-tagline>your voice-first AI assistant</span>
       </div>
+      <!-- Workspace switcher pill. Shows the active operating context (or a faded
+           "(no workspace)" label when none is set). Click → modal listing all
+           workspaces with switch + create + delete. Live-updates on the
+           workspace.switched WS event. -->
+      <button class="workspace-chip" id="workspaceChip" type="button" aria-label="Switch workspace" title="Switch workspace (Cmd+W)">
+        <span class="workspace-chip__icon" aria-hidden="true">⌥</span>
+        <span class="workspace-chip__label" id="workspaceChipLabel">(no workspace)</span>
+      </button>
+
       <!-- Service health pips: bridge / ollama / kokoro / whisper. Polled every 15s.
            Green = up, amber = slow/unreachable, dim = unknown. Read-only at-a-glance. -->
       <div class="health" id="healthBar" aria-label="Service health" title="Service health">
@@ -434,6 +494,108 @@
           <circle cx="300" cy="300" r="46" class="speedo__core-glow" filter="url(#glow)" style="display:none" />
         </svg>
 
+        <!-- ─── Friday faceted-crystal reactor ───
+             Persona-distinct centerpiece. Hidden by default; shown when
+             body[data-persona="friday"]. Same viewBox as the Jarvis SVG so
+             it occupies the exact same grid cell, but different geometry:
+             hex outer frame + 8 alternating crystal facets meeting at the
+             core. Reads as the "polished communicator" sibling to Jarvis's
+             industrial arc reactor. Phase 1 = static; voice-waveform +
+             state-pulse animation hooks come in Phase 2. -->
+        <svg viewBox="0 0 600 600" class="speedo__svg speedo__svg--friday" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+          <defs>
+            <radialGradient id="fridayCore" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"  stop-color="#fff5d8" stop-opacity="1" />
+              <stop offset="35%" stop-color="#ffb84a" stop-opacity="0.9" />
+              <stop offset="100%" stop-color="#a8770f" stop-opacity="0" />
+            </radialGradient>
+            <radialGradient id="fridayHalo" cx="50%" cy="50%" r="50%">
+              <stop offset="55%" stop-color="#ffb84a" stop-opacity="0" />
+              <stop offset="85%" stop-color="#ffb84a" stop-opacity="0.20" />
+              <stop offset="100%" stop-color="#ffb84a" stop-opacity="0" />
+            </radialGradient>
+            <!-- Two facet gradients alternating around the perimeter so light
+                 catches different sides — that's what makes the cut read as
+                 "crystal" rather than "pie chart". facetA is the bright side,
+                 facetB is the shadowed side. -->
+            <linearGradient id="fridayFacetA" x1="0.5" y1="0" x2="0.5" y2="1">
+              <stop offset="0%"  stop-color="#ffe5a8" stop-opacity="0.85" />
+              <stop offset="100%" stop-color="#a8770f" stop-opacity="0.45" />
+            </linearGradient>
+            <linearGradient id="fridayFacetB" x1="0.5" y1="0" x2="0.5" y2="1">
+              <stop offset="0%"  stop-color="#ffd17a" stop-opacity="0.65" />
+              <stop offset="100%" stop-color="#5e3f06" stop-opacity="0.55" />
+            </linearGradient>
+            <filter id="fridayCoreGlow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="14" />
+            </filter>
+          </defs>
+
+          <!-- Wide halo — same aesthetic role as the Jarvis bg gradient. -->
+          <circle cx="300" cy="300" r="288" fill="url(#fridayHalo)" />
+
+          <!-- Outer hex frame. Centered at 300,300 with radius 240 (same
+               outer envelope as Jarvis's heavy ring). Six points calculated:
+               (R,0), (R/2, R*√3/2), (-R/2, R*√3/2), (-R,0), (-R/2, -R*√3/2),
+               (R/2, -R*√3/2). For R=240: (240,0), (120,207.85), … -->
+          <polygon points="540,300 420,507.85 180,507.85 60,300 180,92.15 420,92.15"
+                   fill="none" stroke="#ffb84a" stroke-opacity="0.30" stroke-width="1.5" />
+
+          <!-- 8 alternating crystal facets meeting at center (300,300).
+               Each facet is a triangle from center out to a pair of perimeter
+               points 45° apart. Even-index facets get facetA (bright), odd
+               get facetB (shadowed) — light-catching crystal effect.
+
+               Each facet has data-facet-i so CSS animations can phase-shift
+               opacity per facet, simulating light traveling around the cut. -->
+          <g class="friday-facets" stroke="#ffb84a" stroke-opacity="0.7" stroke-width="1">
+            <polygon class="friday-facet" data-facet-i="0" points="300,300 500,300 441.42,441.42" fill="url(#fridayFacetA)" />
+            <polygon class="friday-facet" data-facet-i="1" points="300,300 441.42,441.42 300,500" fill="url(#fridayFacetB)" />
+            <polygon class="friday-facet" data-facet-i="2" points="300,300 300,500 158.58,441.42" fill="url(#fridayFacetA)" />
+            <polygon class="friday-facet" data-facet-i="3" points="300,300 158.58,441.42 100,300" fill="url(#fridayFacetB)" />
+            <polygon class="friday-facet" data-facet-i="4" points="300,300 100,300 158.58,158.58" fill="url(#fridayFacetA)" />
+            <polygon class="friday-facet" data-facet-i="5" points="300,300 158.58,158.58 300,100" fill="url(#fridayFacetB)" />
+            <polygon class="friday-facet" data-facet-i="6" points="300,300 300,100 441.42,158.58" fill="url(#fridayFacetA)" />
+            <polygon class="friday-facet" data-facet-i="7" points="300,300 441.42,158.58 500,300" fill="url(#fridayFacetB)" />
+          </g>
+
+          <!-- Inner refined ring — visual frame for the bright pupil.
+               Pulses in/out via CSS to give the centerpiece a heartbeat. -->
+          <circle class="friday-inner-ring" cx="300" cy="300" r="80" fill="none" stroke="#ffb84a" stroke-width="1.5" stroke-opacity="0.7" />
+
+          <!-- Bright crystalline core. radial gradient inside, hard-bright
+               pupil at center to mirror the Jarvis inner spark.
+               .friday-core-pupil scales on a slow sin wave for a breath effect. -->
+          <circle class="friday-core-glow" cx="300" cy="300" r="60" fill="url(#fridayCore)" filter="url(#fridayCoreGlow)" />
+          <circle class="friday-core-pupil" cx="300" cy="300" r="18" fill="#fff5d8" opacity="0.95" />
+
+          <!-- Slow perimeter sweep — a single radial line orbiting the rim,
+               echoing Jarvis's right-hemisphere scanner but going full 360°
+               at a more relaxed pace (Friday is observation, not detection). -->
+          <g class="friday-sweep" transform="translate(300 300)">
+            <line x1="0" y1="0" x2="0" y2="-240" stroke="#ffb84a" stroke-width="1.5" stroke-opacity="0.85" stroke-linecap="round" />
+            <line x1="0" y1="0" x2="0" y2="-240" stroke="#ffd17a" stroke-width="0.5" stroke-opacity="0.5" />
+          </g>
+
+          <!-- Cardinal compass markers for parity with Jarvis. Same letter-spacing,
+               just amber-toned. -->
+          <g class="friday-compass" font-family="JetBrains Mono, monospace" font-size="10" fill="#ffd17a" letter-spacing="0.1em">
+            <text x="300" y="32" text-anchor="middle">▲ N</text>
+            <text x="300" y="582" text-anchor="middle">▼ S</text>
+            <text x="32" y="304" text-anchor="middle">◀ W</text>
+            <text x="568" y="304" text-anchor="middle">▶ E</text>
+          </g>
+
+          <!-- Asymmetric anchor tag, same position as Jarvis's CORE-01 tag.
+               "COMMS-01 // ACTIVE" reads as Friday's PR/communicator beat. -->
+          <g class="friday-anchor-tag" transform="translate(70 270)">
+            <path d="M 0 0 L 130 0 L 142 12 L 142 36 L 130 48 L 0 48 Z"
+                  fill="rgba(255, 184, 74, 0.10)" stroke="#ffb84a" stroke-width="1" />
+            <text x="68" y="18" text-anchor="middle" font-family="Oswald, sans-serif" font-size="11" font-weight="600" fill="#ffb84a" letter-spacing="0.18em">COMMS-01</text>
+            <text x="68" y="38" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#fff5d8" letter-spacing="0.16em">// ACTIVE</text>
+          </g>
+        </svg>
+
         <!-- ─── Rim chips (HTML overlay so they can use webfonts cleanly) ───
              Four chamfered chips at the cardinal break-points, with leader
              lines drawn via CSS borders. Live values written by hud.js. -->
@@ -462,6 +624,17 @@
         <span class="settings-btn__bracket settings-btn__bracket--bl"></span>
         <span class="settings-btn__bracket settings-btn__bracket--br"></span>
         <span class="settings-btn__label">SETTINGS</span>
+      </button>
+
+      <!-- Help / command palette button — sibling to SETTINGS, anchored bottom-LEFT
+           of the centerpiece. Same chrome vocabulary so the eye reads them as a pair.
+           Click or press ? to open the categorised tool catalogue. -->
+      <button class="help-btn" id="helpBtn" type="button" aria-label="What can Jarvis do" title='What can Jarvis do? (?)'>
+        <span class="help-btn__bracket help-btn__bracket--tl"></span>
+        <span class="help-btn__bracket help-btn__bracket--tr"></span>
+        <span class="help-btn__bracket help-btn__bracket--bl"></span>
+        <span class="help-btn__bracket help-btn__bracket--br"></span>
+        <span class="help-btn__label">?  COMMANDS</span>
       </button>
     </section>
 
@@ -525,6 +698,79 @@
       <ul class="launch" id="launchList"></ul>
     </section>
 
+    <!-- Smart Inbox panel — workspace-aware "what should I look at right now"
+         summary. Polls /inbox every 5min; refresh-on-demand via the briefing
+         tool. Lives as a layout-system widget (data-widget-id="inbox") so the
+         operator can drag/resize it via Cmd+L like every other panel. -->
+    <section class="panel panel--inbox" data-widget-id="inbox" aria-label="Smart Inbox">
+      <div class="panel__title">
+        INBOX
+        <button id="inboxRefreshBtn" type="button" class="panel__icon-btn" aria-label="Refresh inbox" title="Refresh now">↻</button>
+      </div>
+      <ul class="inbox" id="inboxList"></ul>
+      <div class="inbox__empty" id="inboxEmpty" hidden>nothing pressing right now</div>
+      <div class="inbox__hint" id="inboxHint">say <em>"hey jarvis, brief me"</em> for a triage</div>
+    </section>
+
+    <!-- Workspace handbook editor — opens from the workspace switcher's ✎
+         button. Inline textarea so the operator can shape scope-specific
+         LLM rules without leaving the kiosk. Save → PATCH /workspaces/<slug>
+         → bridge updates DB + broadcasts workspace.updated → next LLM call
+         picks up the new handbook (system prompt is rebuilt per call). -->
+    <div class="ws-handbook-modal" id="workspaceHandbookModal" hidden role="dialog" aria-modal="true" aria-label="Edit workspace handbook">
+      <div class="ws-handbook-modal__panel">
+        <div class="ws-handbook-modal__head">
+          <span class="ws-handbook-modal__title">HANDBOOK · <span id="workspaceHandbookSlug"></span></span>
+          <button class="ws-handbook-modal__close" id="workspaceHandbookClose" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="ws-handbook-modal__split">
+          <textarea id="workspaceHandbookText" class="ws-handbook-modal__text" spellcheck="false" placeholder="# Scope rules for this workspace&#10;&#10;British English. Cite sources. Never use exclamation marks.&#10;&#10;Each line lands in the LLM system prompt verbatim when this workspace is active."></textarea>
+          <div id="workspaceHandbookPreview" class="ws-handbook-modal__preview" aria-label="Live preview"></div>
+        </div>
+        <div class="ws-handbook-modal__actions">
+          <select id="workspaceHandbookSnippet" class="ws-handbook-modal__snippet" aria-label="Insert snippet">
+            <option value="">+ INSERT SNIPPET…</option>
+            <option value="priorities">Priorities directive</option>
+            <option value="vocabulary">Vocabulary list</option>
+            <option value="tone">Tone rules</option>
+            <option value="avoid">Words to avoid</option>
+            <option value="examples">Reply examples</option>
+          </select>
+          <span id="workspaceHandbookStatus" class="ws-handbook-modal__hint"></span>
+          <button id="workspaceHandbookCancel" type="button" class="ws-handbook-modal__cancel">CANCEL</button>
+          <button id="workspaceHandbookSave" type="button" class="ws-handbook-modal__save">SAVE</button>
+        </div>
+        <small class="ws-handbook-modal__sub">Saved into <code>data/memory.db</code>; takes effect on the next LLM call. Preview is plain rendered markdown — the LLM reads the raw text on the left.</small>
+      </div>
+    </div>
+
+    <!-- Workspace switcher modal. Lists all workspaces; click to switch, +
+         to create, edit/delete from the row's hover affordances. Lives
+         here in the HUD shell (not under settings) because workspace
+         switching is a primary operation, not a configuration knob. -->
+    <div class="ws-modal" id="workspaceModal" hidden role="dialog" aria-modal="true" aria-label="Switch workspace">
+      <div class="ws-modal__panel">
+        <div class="ws-modal__head">
+          <span class="ws-modal__title">WORKSPACES</span>
+          <button class="ws-modal__close" id="workspaceModalClose" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <ul class="ws-modal__list" id="workspaceList" aria-label="Available workspaces"></ul>
+        <div class="ws-modal__actions">
+          <button id="workspaceCreateBtn" type="button" class="ws-modal__create">+ NEW WORKSPACE</button>
+          <button id="workspaceClearBtn" type="button" class="ws-modal__clear">Clear active</button>
+        </div>
+        <small class="ws-modal__hint">Switching changes the LLM's scope, working directory, and tool catalog. Voice: <code>"hey jarvis, switch to consulting"</code>.</small>
+      </div>
+    </div>
+
     <!-- FIRST-RUN SETUP MODAL — shown once until localStorage records completion -->
     <div class="setup" id="setupModal" hidden role="dialog" aria-modal="true" aria-label="First-run setup">
       <div class="setup__panel">
@@ -578,12 +824,43 @@
         </div>
 
         <div class="setup__field">
-          <label>Agency name (shown in voice persona)</label>
+          <label>Agent name</label>
+          <input id="setupAgent" type="text" placeholder="Jarvis" autocomplete="off" />
+          <small>The voice persona. Determines the wake phrase below if you don't override it.</small>
+        </div>
+
+        <div class="setup__field">
+          <label>Wake phrase</label>
+          <input id="setupWake" type="text" placeholder="hey jarvis" autocomplete="off" />
+          <small>What you say to wake the kiosk. Shorter is better; 2–3 syllables works best.</small>
+        </div>
+
+        <div class="setup__field">
+          <label>Agency / brand name</label>
           <input id="setupAgency" type="text" placeholder="Jarvis AI" />
+          <small>Shown on the wordmark and in any voice persona that name-checks the agency.</small>
+        </div>
+
+        <!-- Brand accent colour. Preset chips cover 90% of the operators
+             ("I want it cyan / red / amber / green / purple"); the custom
+             field is for white-label clients who already have a brand hex.
+             Saved into config/brand.json via POST /brand. -->
+        <div class="setup__field">
+          <label>Brand accent</label>
+          <div class="setup__accent-chips" id="setupAccentChips">
+            <button type="button" class="setup__accent-chip" data-accent="#00d4ff" style="--chip:#00d4ff" aria-label="Cyan">CYAN</button>
+            <button type="button" class="setup__accent-chip" data-accent="#3aa6ff" style="--chip:#3aa6ff" aria-label="Blue">BLUE</button>
+            <button type="button" class="setup__accent-chip" data-accent="#ff5a3a" style="--chip:#ff5a3a" aria-label="Red">RED</button>
+            <button type="button" class="setup__accent-chip" data-accent="#ffb84a" style="--chip:#ffb84a" aria-label="Amber">AMBER</button>
+            <button type="button" class="setup__accent-chip" data-accent="#5fd97a" style="--chip:#5fd97a" aria-label="Green">GREEN</button>
+            <button type="button" class="setup__accent-chip" data-accent="#a87bff" style="--chip:#a87bff" aria-label="Violet">VIOLET</button>
+          </div>
+          <input id="setupAccentHex" type="text" placeholder="#00d4ff (or any hex)" autocomplete="off" pattern="^#[0-9a-fA-F]{6}$" />
         </div>
 
         <button class="setup__submit" id="setupSubmit" type="button">GET STARTED</button>
         <button class="setup__skip" id="setupSkip" type="button">Skip (use defaults)</button>
+        <small class="setup__advanced-hint">Logo, wake mishears, API keys, and folder roots can be added later from <strong>SETTINGS</strong>.</small>
       </div>
     </div>
 
@@ -613,7 +890,7 @@
           <div class="settings-modal__row">
             <select id="settingsProject"></select>
           </div>
-          <small>Voice commands without an explicit subject default to this shoot. Pick "(none)" to scope at the LLM's discretion per query.</small>
+          <small>Voice commands without an explicit subject default to this project. Pick "(none)" to scope at the LLM's discretion per query.</small>
         </div>
 
         <div class="settings-modal__field">
@@ -680,6 +957,23 @@
           <small>Reduced motion follows your OS setting automatically.</small>
         </div>
 
+        <!-- Sprint 10: pick the HUD centerpiece. Reactor (default) is the
+             SVG instrument cluster — workspace-aware accent rim, per-core
+             arcs, voice waveform inside. Orb is a Three.js audio-reactive
+             particle sphere that pulses with the operator's voice and
+             follows the workspace persona's accent colour. Hot-swaps on
+             change without reload. -->
+        <div class="settings-modal__field">
+          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Centerpiece</label>
+          <div class="settings-modal__row">
+            <select id="settingsCenterpiece">
+              <option value="reactor" selected>Reactor (instrument cluster)</option>
+              <option value="orb">Particle orb (Three.js, audio-reactive)</option>
+            </select>
+          </div>
+          <small>The orb fetches Three.js from CDN on first use — needs internet on first paint.</small>
+        </div>
+
         <div class="settings-modal__field">
           <label><img src="assets/icons/monitor.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Operator camera</label>
           <div class="settings-modal__row">
@@ -709,20 +1003,21 @@
             <span class="settings-modal__folder-label">Generated artefacts to</span>
             <input id="settingsOutputDir" type="text" placeholder="Output root — e.g. ~/Documents/Jarvis/output" autocomplete="off" />
           </div>
-          <small id="settingsFoldersHint">Generated files auto-organise into subfolders by type (<code>pdf</code>, <code>docx</code>, <code>xlsx</code>, <code>pptx</code>, <code>youtube</code>, <code>brand-packs</code>, <code>videos</code>, etc). Absolute paths or paths relative to the project root.</small>
+          <small id="settingsFoldersHint">Generated files auto-organise into subfolders by type (<code>pdf</code>, <code>docx</code>, <code>xlsx</code>, <code>pptx</code>, <code>videos</code>, etc). Absolute paths or paths relative to the project root.</small>
         </div>
 
         <!-- Creative style guide — operator's CLAUDE.md equivalent. A markdown
              file the bridge injects into the LLM system prompt on every askLLM
-             call so generated drafts (emails, captions, press releases, video
-             briefs) follow the agency's house voice. Big textarea + monospace
-             font matches how operators are used to editing markdown. -->
+             call so generated drafts (emails, documents, messages, captions,
+             whatever the operator's workflow produces) follow the operator's
+             house voice. Big textarea + monospace font matches how operators
+             are used to editing markdown. -->
         <div class="settings-modal__field">
           <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Creative style guide</label>
           <textarea id="settingsCreativeStyle"
                     class="settings-modal__textarea"
                     spellcheck="false"
-                    placeholder="# Editorial voice&#10;&#10;Tone, sentence length, words you use vs avoid, edit pacing… the rules every generated draft should follow.&#10;&#10;Click LOAD TEMPLATE below to start from the Jarvis example, or type your own."></textarea>
+                    placeholder="# Editorial voice&#10;&#10;Tone, sentence length, words you use vs avoid, examples of writing you're proud of… the rules every generated draft should follow.&#10;&#10;Click LOAD TEMPLATE below to start from a generic example, or type your own."></textarea>
           <div class="settings-modal__row settings-modal__row--style-actions">
             <button id="settingsStyleLoadTemplate" type="button" class="settings-modal__link">↻ LOAD TEMPLATE</button>
             <span id="settingsStyleStatus" class="settings-modal__hint"></span>
@@ -791,7 +1086,7 @@
               <option value="openai">OpenAI</option>
             </select>
           </div>
-          <small>"High-stakes" = drafting client emails, press releases, anything where a wrong word costs money. Default routes everything to Ollama (private + free); pick Anthropic / OpenAI per workload if you've added API keys below.</small>
+          <small>"High-stakes" = drafting client emails, formal documents, anything where a wrong word costs money. Default routes everything to Ollama (private + free); pick Anthropic / OpenAI per workload if you've added API keys below.</small>
         </div>
 
         <!-- ─── API KEYS (generic NAME=VALUE) ───
@@ -879,6 +1174,23 @@
           <small>Text Jarvis from your phone. Only allow-listed senders can trigger; only messages starting with the trigger phrase forward to the LLM. Replies skip the voice-confirmation gate (your inbound message IS the consent). Requires Full Disk Access in <a href="x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" target="_blank">System Settings → Privacy</a>.</small>
         </div>
 
+        <!-- ─── DIAGNOSTICS ───
+             Read-only view of the last 7 days of session metrics + an
+             explicit "Export diagnostic ZIP" button. Local-first telemetry —
+             nothing is sent automatically. The exporter drops a tarball on
+             the Desktop; the operator chooses whether to email it. -->
+        <div class="settings-modal__field" id="settingsDiagField">
+          <label><img src="assets/icons/sliders-horizontal.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Diagnostics</label>
+          <div class="settings-modal__diag-grid" id="settingsDiagGrid">
+            <span class="settings-modal__hint">loading session metrics…</span>
+          </div>
+          <div class="settings-modal__row settings-modal__row--style-actions">
+            <button id="settingsDiagExportBtn" type="button" class="settings-modal__link">↓ EXPORT DIAGNOSTIC ZIP</button>
+            <span id="settingsDiagExportStatus" class="settings-modal__hint"></span>
+          </div>
+          <small>Local-first telemetry. Nothing is sent off this Mac unless you click Export and email the bundle yourself. Read <a href="docs/privacy.md" target="_blank">docs/privacy.md</a> for the full audit trail of what's captured (and what isn't).</small>
+        </div>
+
         <div class="settings-modal__field">
           <label><img src="assets/icons/map-pin-line.svg" alt="" aria-hidden="true" class="settings-modal__icon"/>Location</label>
           <div class="settings-modal__row settings-modal__row--searchable">
@@ -927,9 +1239,50 @@
     </div>
 
     <!-- Wake-button: tap or wake word activates listening. Label is rewritten by brand bootstrap. -->
-    <button class="wake" id="wakeBtn" type="button" aria-label="Activate assistant">
+    <button class="wake" id="wakeBtn" type="button" aria-label="Activate assistant"
+            data-tip="Tap to start listening, or say the wake word. Tap again to stop. Stays in conversation mode for follow-ups.">
       <span class="wake__inner" id="wakeBtnLabel">TAP / SAY "HEY JARVIS"</span>
     </button>
+
+    <!-- Aux controls cluster — pinned to the far-right edge of the HUD so they
+         don't compete with the centred wake button for layout space. Order:
+         mute toggle, then text-input toggle. Tooltips picked up by tooltips.js
+         from data-tip; aria-label kept for screen readers. -->
+    <div class="hud-aux-controls" id="hudAuxControls">
+      <button class="tts-mute" id="ttsMuteBtn" type="button"
+              aria-label="Mute Jarvis voice replies" aria-pressed="false"
+              data-tip="Mute Jarvis voice replies. Reply still appears on screen. Shortcut: M">
+        <span class="tts-mute__icon" aria-hidden="true">🔊</span>
+      </button>
+      <button class="text-input-toggle" id="textInputToggle" type="button"
+              aria-label="Type a message"
+              data-tip="Type to Jarvis instead of speaking. Useful in loud environments. Shortcut: T">
+        <span class="text-input-toggle__icon" aria-hidden="true">⌨</span>
+      </button>
+    </div>
+
+    <!-- Text input modal — centred above the waveform for high-visibility
+         typing in loud environments. Operates as a chat thread: operator
+         messages on the right, Jarvis replies stream in on the left.
+         Same llm.askStream bridge path as the voice flow. When TTS is
+         muted, this becomes the primary reply surface (visible, persistent);
+         when unmuted, replies still appear here AND play via Kokoro. -->
+    <div class="text-input-modal" id="textInputBar" hidden role="dialog" aria-modal="false" aria-label="Type to Jarvis">
+      <div class="text-input-modal__panel">
+        <div class="text-input-modal__head">
+          <span class="text-input-modal__title">TYPE TO JARVIS</span>
+          <button class="text-input-modal__close" id="textInputClose" type="button"
+                  aria-label="Close text input" data-tip="Close (Esc)">×</button>
+        </div>
+        <!-- Thread — populated by voice.js as messages flow. Hidden until the
+             first message exists so a freshly opened modal isn't dead space. -->
+        <div class="text-input-modal__thread" id="textInputThread" hidden role="log" aria-live="polite"></div>
+        <textarea class="text-input-modal__field" id="textInputField"
+                  rows="2" autocomplete="off" spellcheck="false"
+                  placeholder="Type a sentence or short paragraph. Enter to send, Shift+Enter for a new line, Esc to close."></textarea>
+        <div class="text-input-modal__hint">Enter sends · Shift+Enter newline · Esc closes</div>
+      </div>
+    </div>
 
     <!-- Idle command-discovery nudge. Sits above the wake button when shown.
          Auto-fades after 12s, dismissible, hidden in demo mode. -->
@@ -1026,7 +1379,76 @@
     window.__usage = Usage;
     window.addEventListener("DOMContentLoaded", () => Usage.init());
   </script>
+  <!-- Influencer reference picker. Pops when create_influencer returns
+       2-4 stills; operator clicks one to lock it as the canonical face.
+       Hidden by default; shown via influencer-modals.js on the WS event. -->
+  <div class="inf-modal" id="infRefsModal" hidden role="dialog" aria-modal="true" aria-label="Pick canonical reference">
+    <div class="inf-modal__panel">
+      <div class="inf-modal__head">
+        <span class="inf-modal__title">PICK REFERENCE · <span id="infRefsName"></span></span>
+        <button class="inf-modal__close" id="infRefsClose" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="inf-modal__grid" id="infRefsGrid"></div>
+      <div class="inf-modal__hint">Click a reference to lock it as the canonical face — or say "use the second one" / "regenerate".</div>
+    </div>
+  </div>
+
+  <!-- Source-video paste/drop modal. Opens when recreate_video_with_influencer
+       fires without a source. Operator pastes a TikTok / IG / YT link OR
+       drops a local mp4. Resolves the bridge's pending request via WS. -->
+  <div class="inf-modal" id="infSourceModal" hidden role="dialog" aria-modal="true" aria-label="Provide source video">
+    <div class="inf-modal__panel inf-modal__panel--source">
+      <div class="inf-modal__head">
+        <span class="inf-modal__title">SOURCE VIDEO · <span id="infSourceName"></span></span>
+        <button class="inf-modal__close" id="infSourceClose" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="inf-modal__source-body">
+        <label class="inf-modal__label" for="infSourceUrl">Paste a TikTok / Instagram / YouTube link:</label>
+        <input class="inf-modal__url" id="infSourceUrl" type="url" placeholder="https://www.tiktok.com/@user/video/..." autocomplete="off" spellcheck="false" />
+        <div class="inf-modal__or">— or —</div>
+        <div class="inf-modal__drop" id="infSourceDrop">
+          Drop a local <span class="inf-modal__mono">.mp4</span> here
+        </div>
+        <div class="inf-modal__source-status" id="infSourceStatus"></div>
+      </div>
+      <div class="inf-modal__actions">
+        <button class="inf-modal__cancel" id="infSourceCancel" type="button">CANCEL</button>
+        <button class="inf-modal__confirm" id="infSourceConfirm" type="button">RECREATE</button>
+      </div>
+    </div>
+  </div>
+
   <script src="hud.js" type="module"></script>
   <script src="voice.js" type="module"></script>
+  <script src="influencer-modals.js" type="module"></script>
+  <!-- Hover tooltips: reads data-tip (and falls back to title) on any element.
+       Idempotent init; hides on touch devices automatically. -->
+  <script type="module">
+    import { init as initTooltips } from "./tooltips.js";
+    initTooltips();
+  </script>
+  <!-- Sprint 11 latency overlay — only mounts when ?debug=latency is in the
+       URL or localStorage["debug.latency"]==="1". Zero-cost in production. -->
+  <script src="latency-overlay.js" type="module"></script>
+
+  <!-- News panel mount point. Hidden until bridge broadcasts news.show. -->
+  <div id="news-panel-root" class="news-panel-root" hidden></div>
+  <script src="news-panel.js" type="module"></script>
+
+  <!-- Influencer wizard panel mount point. Hidden until bridge broadcasts influencer.wizard.show. -->
+  <div id="influencer-wizard-root" class="news-panel-root" hidden></div>
+  <script src="influencer-wizard-panel.js" type="module"></script>
+
+  <!-- Asset panel — for generated images + videos. Auto-opens on teaser.image_ready / teaser.video_ready. -->
+  <div id="asset-panel-root" class="news-panel-root" hidden></div>
+  <script src="asset-panel.js" type="module"></script>
+
+  <!-- Weather panel — opens on "show me the weather" via fast-path. -->
+  <div id="weather-panel-root" class="news-panel-root" hidden></div>
+  <script src="weather-panel.js" type="module"></script>
+
+  <!-- Screenshot panel — opens on screenshot.taken broadcast. -->
+  <div id="screenshot-panel-root" class="news-panel-root" hidden></div>
+  <script src="screenshot-panel.js" type="module"></script>
 </body>
 </html>

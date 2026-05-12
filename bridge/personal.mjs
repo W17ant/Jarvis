@@ -147,6 +147,79 @@ return "added"`;
   }
 }
 
+/** List open reminders across one list (default) or all lists.
+ *
+ *  Returns reminders where `completed` is false. Each row carries title +
+ *  due date (ISO) + notes + listName so the Smart Inbox aggregator can
+ *  normalise into its unified shape.
+ *
+ *  AppleScript trick: we build the result as a tab-separated string + double-
+ *  newline-separated rows to keep parsing trivial on the JS side. AppleScript's
+ *  list-of-records output isn't JSON-friendly — operators have lost minutes
+ *  to "AppleScript record syntax doesn't parse as JSON" before. */
+export async function listReminders({ listName = null, includeCompleted = false } = {}) {
+  const completedFilter = includeCompleted ? "" : " whose completed is false";
+  const scope = listName
+    ? `tell list ${osaQuote(String(listName))} of application "Reminders"`
+    : `tell application "Reminders"`;
+  const script = `${scope}
+  set _output to ""
+  set _reminders to (every reminder${completedFilter})
+  repeat with r in _reminders
+    set _title to (name of r as string)
+    set _notes to ""
+    try
+      set _notes to (body of r as string)
+    end try
+    set _due to ""
+    try
+      set _dueDate to (remind me date of r)
+      set _due to (do shell script "date -j -f '%A, %B %e, %Y at %l:%M:%S %p' '" & (_dueDate as string) & "' '+%Y-%m-%dT%H:%M:%S%z'")
+    end try
+    set _list to ""
+    try
+      set _list to (name of (container of r) as string)
+    end try
+    set _output to _output & _title & "\\t" & _due & "\\t" & _list & "\\t" & _notes & linefeed & linefeed
+  end repeat
+  return _output
+end tell`;
+  try {
+    const raw = await runOsa(script);
+    const reminders = [];
+    for (const block of String(raw || "").split(/\n\n+/)) {
+      const line = block.trim();
+      if (!line) continue;
+      const parts = line.split("\t");
+      const [title, due, list, ...notesParts] = parts;
+      if (!title) continue;
+      const notes = notesParts.join("\t").trim();
+      const dueMs = due && due.trim() ? Date.parse(due.trim()) : null;
+      reminders.push({
+        title: title.trim(),
+        due: due && due.trim() ? due.trim() : null,
+        dueMs: Number.isFinite(dueMs) ? dueMs : null,
+        listName: list && list.trim() ? list.trim() : (listName || "Reminders"),
+        notes: notes || null,
+        completed: false,
+      });
+    }
+    /* Sort by due date — undated reminders go to the end. */
+    reminders.sort((a, b) => {
+      if (a.dueMs == null && b.dueMs == null) return 0;
+      if (a.dueMs == null) return 1;
+      if (b.dueMs == null) return -1;
+      return a.dueMs - b.dueMs;
+    });
+    return { ok: true, reminders };
+  } catch (e) {
+    if (/-1743/.test(String(e.message))) {
+      return { ok: false, error: "Reminders automation not permitted. Approve in System Settings → Privacy & Security → Automation." };
+    }
+    return { ok: false, error: `osascript failed: ${e.message}` };
+  }
+}
+
 /* ------------------------------------------------------------------------- *
  * 3. In-bridge timer
  *

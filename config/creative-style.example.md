@@ -1,94 +1,102 @@
 # Creative Style Guide
 
-> Your "template for success" — the rules every generated email, caption,
-> press release, video brief, or shoot brief should follow. Think of this
-> as the brief you'd give a freelance writer or editor on day one.
+> Your "template for success" — the rules every generated email, document, message, or
+> creative draft should follow. Think of this as the brief you'd give a freelance writer
+> or assistant on day one.
 >
-> This file is read by the LLM on every request. Edit freely; changes take
-> effect on the next message (no bridge restart needed).
+> This file is read by the LLM on every request. Edit freely; changes take effect on the
+> next message (no bridge restart needed).
 >
-> Copy this template to `config/creative-style.md` and customise. The
-> example below is what an automotive PR agency uses for their content —
-> swap the specifics for your own.
+> Copy this template to `config/creative-style.md` and replace the examples below with
+> your own. The defaults are deliberately neutral so the LLM gets useful guidance even
+> before you customise.
 
 ---
 
 ## Editorial voice
 
-- **Tone**: confident, knowledgeable, slightly understated. Never breathless.
+- **Tone**: confident, knowledgeable, slightly understated. Avoid breathless or salesy.
 - **Sentence length**: vary it. Short. Then a longer one that gives the reader space to breathe. Then short again.
-- **Cars** are characters, not products. Lead with what the car *does to you*, not the spec sheet.
-- **British English** always — "colour", "tyre", "kerb", "centre". Never "color" / "tire".
-- **Numbers** in words for under ten ("nine seconds"), digits for over ten ("450 brake horsepower").
-- **Avoid clichés**: "unleash", "beast", "monster", "tame the road", "redefines the segment".
-- **Avoid filler**: "really", "very", "just", "simply", "in order to".
+- **Active voice** by default. Switch to passive only when the actor is genuinely irrelevant.
+- **British English** if that's your default ("colour", "centre", "organise") — set whatever you actually use here. The LLM will follow it.
+- **Numbers** in words for under ten ("nine seconds"), digits for over ten ("450"). State your preference.
+- **Avoid clichés**: "unleash", "next-level", "game-changer", "deep dive", "circle back".
+- **Avoid filler**: "really", "very", "just", "simply", "in order to", "the fact that".
 
 ## Words we use
 
-- "kerbside presence" — never "stance" or "road presence"
-- "the cabin" — never "interior" (too brochure)
-- "the V8 / V10 / V12" — call out the engine layout when relevant; it's part of the character
-- "delivery date" — never "ETA" or "arrival window"
-- "press fleet" / "press car" — never "demo car" or "loaner"
-- "shoot" — for any production day. Never "shooting" as a noun. Never "session".
+> Replace this list with vocabulary specific to your domain. Examples:
+>
+> - For a law firm: "matter" not "case", "instruction" not "request", "clauses" not "bits".
+> - For a clinic: "appointment" not "session", "follow-up" not "check-in".
+> - For an agency: brand names spelled exactly as the client uses them.
+
+- _your-term-1_ — never _generic-alternative_
+- _your-term-2_ — never _generic-alternative_
 
 ## Words we avoid
 
-- "Game-changer", "next-level", "drives like a dream"
-- "Lifestyle" as a vague catch-all
-- Hyperbolic adjectives without earning them ("stunning", "incredible")
-- "Synergy", "leverage", "circle back" (corporate-speak)
-- Exclamation marks in any deliverable copy. Internal Slack only.
+- Hyperbolic adjectives without earning them ("stunning", "incredible", "amazing")
+- Corporate-speak ("synergy", "leverage", "best-in-class")
+- Exclamation marks in any deliverable copy
+- _Add your own pet peeves here so they show up in every generated draft._
 
 ## Email drafts
 
-- **Greeting**: "Hi [first name]," — not "Dear" (too formal), not "Hey" (too casual).
+- **Greeting**: state your default — "Hi [first name]," or "Hello [first name]," or whatever fits.
 - **First sentence**: state the reason for the email. No "I hope you're well."
-- **Sign-off**: "All the best," / "Speak soon," — never "Best regards" or "Cheers".
-- **Signature**: name on its own line, role on the next, domain on the third.
+- **Sign-off**: pick one and stick to it — "All the best," / "Speak soon," / "Kind regards,".
+- **Signature**: name on its own line, role on the next, contact on the third.
 - **Length**: under 120 words for cold pitches; under 200 for follow-ups.
 
-## Captions (social, YouTube, Reels)
+## Document drafts
 
-- **Hook in the first 7 words.** The viewer is one swipe from gone.
-- **No hashtag walls.** Two or three relevant tags, end of caption.
-- **End on the car's name in caps**, on its own line:
-  > Aston Martin DB12.
-- **YouTube titles**: lead with the car, then the angle.
-  ✓ "Ferrari 296 GTB — the V6 that changes everything"
-  ✗ "WE DROVE THE NEW FERRARI AND YOU WON'T BELIEVE WHAT HAPPENED"
+- **Headers**: sentence case, not Title Case ("Quarterly review" not "Quarterly Review").
+- **Bullet lists**: parallel structure — every bullet starts with the same part of speech.
+- **Numbers + units**: always with a non-breaking space ("£250", "30 mph", "4 GB").
 
-## Press releases
+## Specific deliverables
 
-- **Headline**: present tense, active verb, under 80 characters.
-- **Subhead**: the *so what* in one sentence.
-- **Lead**: who, what, when, where, why — five W's in two sentences max.
-- **Quote**: always attributed; named source only, never "a spokesperson".
-- **Embargo line**: bold, top of page, even if no embargo applies (then "FOR IMMEDIATE RELEASE").
+> Add per-deliverable rules below if you have any. Examples:
+>
+> - **Press releases**: lead with the news, not the company. Quote a real human in the second paragraph.
+> - **Social captions**: Instagram = scene-setting first sentence; LinkedIn = insight + question; TikTok = no captions, leave to the speaker.
+> - **Internal Slack**: bullet points, never paragraphs. Emoji allowed. Active verbs.
 
-## Video edits
+## What to escalate, not draft
 
-- **First 3 seconds**: motion or sound — no static logo intros.
-- **Pacing**: fast cuts (1-2 sec) in the first 15 seconds, then slow into 3-5 second beats once we have the viewer.
-- **Music**: under-score, not driver. Track sits at -14 LUFS, ducked to -22 under voice.
-- **Lower thirds**: Oswald 600, 36pt, brand red. Two lines max. Animate in over 12 frames.
-- **End card**: 2-second hold on the wordmark. No URL — they came from somewhere they trust.
+The LLM should ask first, not draft, when:
 
-## Visual direction (when briefing a shoot or scoring clips)
+- A claim depends on a fact it doesn't have.
+- The recipient or audience is ambiguous.
+- The draft would reveal information that's been flagged as confidential.
 
-- **Lighting**: prefer low-key + golden hour over flat midday. Overcast is fine; harsh sun is not.
-- **Angles**: low and wide for hero, three-quarter front for badge shots, dead-on rear for tail-light heroes. Avoid drone overheads unless the location demands it.
-- **Detail shots**: stitching, badges, exhaust tips, brake calipers, key fob — these tell the story.
-- **Reject**: cliché shots (key in ignition close-up, tachometer needle blur, person leaning on bonnet).
+## Examples
 
-## Things to *always* do
+> Paste 1-3 examples of writing you're proud of below. The LLM uses these as the strongest
+> signal of what "good" looks like for you. One paragraph each is enough.
 
-- Run a final read at half speed before sending — you'll catch the lazy adjective.
-- Check the car's name, model year, and trim spelling. *Especially* badges.
-- If you're unsure on a fact, ask before writing — never invent.
+**Example 1 — Email reply (the kind you'd be happy to send):**
 
-## Things to *never* do
+```
+Hi Sam,
 
-- Write press copy you wouldn't be happy seeing on the manufacturer's own site.
-- Use stock photography in any client-facing deliverable.
-- Promise a delivery date you haven't confirmed with the editor.
+Thanks for the detail. The constraint that matters here is the launch date — we can fit
+either A or B inside it, but not both. My read is A, because it unblocks the team
+review that's already in the calendar. If B turns out to be the bigger lever I'd rather
+delay than do half-quality work on both.
+
+Speak soon,
+Antony
+```
+
+**Example 2 — Document opening (the kind that earns the reader's attention):**
+
+```
+The migration ran clean for ten weeks. Then last Tuesday, between 14:02 and 14:18, the
+write-path errored at twelve times the baseline rate. This document is the post-mortem.
+```
+
+---
+
+_Last reviewed: yyyy-mm-dd_

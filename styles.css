@@ -373,7 +373,10 @@ html, body {
   position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
-  max-width: 88px;       /* Cap so three across fit comfortably in the left column */
+  /* DIAGNOSTIC — pinned to 100px so the operator can verify CSS edits are
+   * actually loading. Bigger drop than 140 → 100 should be visually
+   * unmistakable. Resize back up once cache behaviour is confirmed. */
+  max-width: 100px;
   margin: 0 auto;
 }
 .syspod__svg {
@@ -381,10 +384,10 @@ html, body {
   transform: rotate(-90deg);   /* 12-o-clock starts at the top */
 }
 .syspod__track {
-  fill: none; stroke: var(--line-soft); stroke-width: 6;
+  fill: none; stroke: var(--line-soft); stroke-width: 4;
 }
 .syspod__fill {
-  fill: none; stroke: var(--accent); stroke-width: 6;
+  fill: none; stroke: var(--accent); stroke-width: 4;
   stroke-linecap: round;
   stroke-dasharray: 264;        /* 2π × r=42 */
   stroke-dashoffset: 264;       /* starts empty; JS sets via setArcGauge */
@@ -3697,21 +3700,31 @@ body.high-contrast .speedo::after {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-auto-rows: 1fr;
-  gap: 12px 16px;
-  padding-bottom: 10px;
+  /* Sprint 13 — minimal padding between pods. 12px 16px → 4px 6px → 0.
+   * Pods are visually self-bordered by their ring stroke + glow halo so
+   * they don't need additional spacing to read as distinct. The grid
+   * cells still keep them on a clean 2-column rhythm. */
+  gap: 0;
+  padding-bottom: 6px;
   border-bottom: 1px dashed var(--line-soft);
-  flex: 1 1 auto;          /* claim available height inside the panel */
+  flex: 1 1 auto;
   min-height: 0;
 }
 .syspods--pairs .syspod {
   display: flex;
   align-items: center;
-  gap: 8px;
+  /* gap 0 — readout is absolute-positioned over the SVG, the flex gap was
+   * dead space pushing pods apart. */
+  gap: 0;
 }
 .syspods--pairs .syspod__readout {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  /* Sprint 13 — was flex-start (left-aligned inside the ring) which made
+   * "35 %" sit hard against the ring edge. Center alignment lets the
+   * readout breathe equally on both sides regardless of digit count. */
+  align-items: center;
+  justify-content: center;
 }
 /* Each sparkline row: label · canvas · value, monospaced numerals on the right. */
 .sparkrows {
@@ -3763,11 +3776,20 @@ body.high-contrast .speedo::after {
 .syspod__fill--netdn   { stroke: #5cf2c8; }   /* mint */
 .syspod__fill--netup   { stroke: #f5d76e; }   /* honey */
 
-/* Bigger dials for the paired layout — was 50px in the 3-up row, now 64px. */
-.panel--system .syspod__svg { width: 64px; height: 64px; flex: 0 0 auto; }
-.panel--system .syspod__value { font-size: 18px; font-weight: 600; }
-.panel--system .syspod__value--small { font-size: 11px; letter-spacing: 0.1em; }
-.panel--system .syspod__label { font-size: 9px; letter-spacing: 0.22em; }
+/* Sprint 13 — was hardcoded 64×64px which made the SVG sit small on the
+ * left while the absolute-positioned readout filled the (much larger)
+ * syspod box, so the text appeared "outside" the circle. Now SVG fills
+ * the entire syspod (which is itself max-width 240px, aspect 1/1) so
+ * the readout overlays the actual ring centre. Font sizes scaled up to
+ * match the bigger pods. */
+.panel--system .syspod__svg { width: 100%; height: 100%; flex: 1 1 auto; }
+/* Font sizes proportional to 140px pod size. */
+.panel--system .syspod__value { font-size: 17px; font-weight: 700; }
+/* Sprint 13 — was 10px (a holdover from the smaller pods where NET values
+ * like "100M" / "1.5G" needed shrinking to fit). At 140px pod size the
+ * normal 17px sits comfortably, and matching CPU/GPU/RAM reads cleaner. */
+.panel--system .syspod__value--small { font-size: 17px; font-weight: 700; letter-spacing: 0; }
+.panel--system .syspod__label { font-size: 10.5px; letter-spacing: 0.22em; }
 
 /* ═══════════════════════════════════════════════════════════════════
  *  MARK VII REACTOR — full visual rebuild (replaces 6-rect petal version)
@@ -3988,9 +4010,16 @@ body.tier-lite .ic-mid-ring { animation: none; }
   filter: drop-shadow(0 0 4px var(--accent-glow));
 }
 
-/* Right-hemisphere scan line */
+/* Right-hemisphere scan line.
+ *
+ * Why the origin pin: the <g> wrapper has `transform="translate(300 300)"`
+ * to centre the line on the reactor, but CSS transform-origin defaults to
+ * the viewBox's top-left (0,0) on SVG. Without an explicit origin, rotate()
+ * orbits the canvas corner instead of the reactor centre — the scan line
+ * appears to swing out from the top-left of the speedo. Pinning to the
+ * viewBox centre (300,300) makes it spin around the reactor properly. */
 .ic-scan-r {
-  transform-origin: 0 0;
+  transform-origin: 300px 300px;
   animation: icScanR 4s linear infinite;
 }
 .ic-scan-line {
@@ -4132,4 +4161,2219 @@ body.tier-lite .ic-scan-r { animation: none; opacity: 0; }
   background: #ffb84d;
   pointer-events: none;
   transition: left 160ms;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  ONBOARDING TOUR (T3 — first-run guided walkthrough)
+ *  Centered card overlay with backdrop blur; chamfered chrome inherits
+ *  the instrument-cluster vocabulary. Steps render one-at-a-time with
+ *  progress dots. Auto-dismiss at 90s; Esc / Skip exit anytime.
+ *  ═══════════════════════════════════════════════════════════════ */
+
+.tour-card {
+  background: var(--ink-1);
+  border: 1.5px solid var(--accent);
+  /* Chamfered corners — same vocabulary as the rim chips and settings buttons. */
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  padding: 28px 36px;
+  width: min(560px, 90vw);
+  box-shadow: 0 0 60px rgba(0, 212, 255, 0.25);
+  font-family: var(--font-body);
+}
+
+.tour-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 18px;
+}
+.tour-card__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  color: var(--accent-deep);
+  text-transform: uppercase;
+}
+.tour-card__step {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+}
+
+.tour-card__progress {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+.tour-card__dot {
+  width: 28px;
+  height: 4px;
+  background: var(--ink-2);
+  border: 1px solid var(--line-soft);
+  transition: background 220ms, border-color 220ms;
+}
+.tour-card__dot.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.tour-card__dot.is-done {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+}
+
+.tour-card__instruction {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.35;
+  margin-bottom: 12px;
+}
+.tour-card__why {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 22px;
+}
+.tour-card__status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-deep);
+  letter-spacing: 0.06em;
+  padding: 8px 12px;
+  background: var(--ink-2);
+  border-left: 2px solid var(--accent-deep);
+  margin-bottom: 22px;
+  transition: color 220ms, border-color 220ms;
+}
+.tour-card__status.is-success {
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+
+.tour-card__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line-soft);
+}
+.tour-card__skip {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  padding: 8px 16px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 180ms, border-color 180ms;
+  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+.tour-card__skip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.tour-card__esc-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  HELP BUTTON (T4 — permanent ? COMMANDS affordance)
+ *  Sibling to .settings-btn but anchored bottom-LEFT of the centerpiece
+ *  so the pair frames the speedo. Same chrome vocabulary (corner brackets
+ *  + Oswald letter-spacing) so the eye reads them as a matched set.
+ *  ═══════════════════════════════════════════════════════════════ */
+
+.help-btn {
+  position: absolute;
+  bottom: 14px; left: 14px;
+  width: 130px; height: 30px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  z-index: 5;
+  padding: 0;
+  display: grid; place-items: center;
+}
+.help-btn__bracket {
+  position: absolute;
+  width: 9px; height: 9px;
+  border: 1.5px solid var(--text-dim);
+  pointer-events: none;
+  transition: border-color 0.18s, filter 0.18s;
+}
+.help-btn__bracket--tl { top: 0;     left: 0;    border-right: none;  border-bottom: none; }
+.help-btn__bracket--tr { top: 0;     right: 0;   border-left: none;   border-bottom: none; }
+.help-btn__bracket--bl { bottom: 0;  left: 0;    border-right: none;  border-top: none;    }
+.help-btn__bracket--br { bottom: 0;  right: 0;   border-left: none;   border-top: none;    }
+.help-btn__label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.4em;
+  padding-left: 0.4em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  transition: color 0.18s, text-shadow 0.18s;
+}
+.help-btn:hover .help-btn__bracket,
+.help-btn:focus-visible .help-btn__bracket {
+  border-color: var(--accent);
+  filter: drop-shadow(0 0 4px var(--accent-glow));
+}
+.help-btn:hover .help-btn__label,
+.help-btn:focus-visible .help-btn__label {
+  color: var(--accent);
+  text-shadow: 0 0 6px var(--accent-glow);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  HELP MODAL — categorised command catalogue
+ *  Adds category headers + label/id name treatment + try-it example
+ *  phrasing to the existing modal scaffolding.
+ *  ═══════════════════════════════════════════════════════════════ */
+
+.hm-cat {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 0 4px;
+  margin-top: 12px;
+  border-bottom: 1px dashed var(--line-soft);
+}
+.hm-cat:first-child { margin-top: 0; }
+.hm-cat__label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+.hm-cat__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.hm-name__label {
+  display: block;
+  color: var(--text);
+  font-weight: 500;
+}
+.hm-name__id {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.hm-desc__text {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.hm-desc__example {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-deep);
+  margin-top: 2px;
+  font-style: italic;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Settings → Diagnostics
+ * Last-7-days session-metrics table + export-bundle action. Read-only;
+ * the operator's only knob is the Export button below the grid.
+ * ──────────────────────────────────────────────────────────────────────── */
+.settings-modal__diag-grid {
+  width: 100%;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.settings-modal__diag-table {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  border: 1px solid var(--accent-tint);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.settings-modal__diag-row {
+  display: grid;
+  /* Day | Turns | p50 | p95 | Errors */
+  grid-template-columns: 1.4fr 0.8fr 1fr 1fr 0.8fr;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--accent-tint);
+}
+.settings-modal__diag-row:last-child { border-bottom: 0; }
+.settings-modal__diag-row > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-modal__diag-row--head {
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Setup-modal additions: accent chips + advanced-features hint
+ * Why these live at the end: the setup-modal styles above were laid out
+ * before brand identity moved into the wizard. Rather than rewrite the
+ * whole block we append the new affordances here.
+ * ──────────────────────────────────────────────────────────────────────── */
+.setup__accent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 8px;
+}
+.setup__accent-chip {
+  --chip: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-family: var(--font-display, "Oswald", sans-serif);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--ink-2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 80ms ease;
+}
+.setup__accent-chip::before {
+  content: "";
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--chip);
+  box-shadow: 0 0 8px var(--chip);
+}
+.setup__accent-chip:hover { border-color: var(--chip); }
+.setup__accent-chip.is-selected {
+  border-color: var(--chip);
+  box-shadow: inset 0 0 0 1px var(--chip);
+  transform: translateY(-1px);
+}
+.setup__advanced-hint {
+  display: block;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+.setup__advanced-hint strong {
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Workspace switcher — calendar-strip chip + modal
+ *
+ * The chip lives in the calendar strip (top of HUD) so workspace switching
+ * is always one click away. Modal panel slides from centre, mirrors the
+ * visual weight of settings-modal but narrower (workspaces is a focused
+ * action, not a configuration knob).
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.workspace-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 0 8px;
+  background: var(--ink-2);
+  border: 1px solid var(--accent-tint);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: var(--font-display, "Oswald", sans-serif);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  min-width: 0;
+  max-width: 220px;
+}
+.workspace-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.workspace-chip--active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+.workspace-chip__icon {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1;
+}
+.workspace-chip__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+/* Modal */
+.ws-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 12, 0.78);
+  backdrop-filter: blur(6px);
+}
+.ws-modal[hidden] { display: none; }
+.ws-modal__panel {
+  width: min(520px, 90vw);
+  max-height: 85vh;
+  background: var(--ink-1);
+  border: 1px solid var(--accent-tint);
+  border-radius: 6px;
+  padding: 24px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 60px rgba(0, 212, 255, 0.08) inset;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ws-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--accent-tint);
+}
+.ws-modal__title {
+  font-family: var(--font-display, "Oswald");
+  font-size: 14px;
+  letter-spacing: 0.32em;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ws-modal__close {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  width: 28px; height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.ws-modal__close:hover { color: var(--accent); }
+.ws-modal__close svg { width: 16px; height: 16px; }
+
+.ws-modal__list {
+  list-style: none;
+  margin: 0; padding: 0;
+  overflow-y: auto;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ws-modal__row {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--ink-2);
+  overflow: hidden;
+}
+.ws-modal__row:hover { border-color: var(--accent-tint); }
+.ws-modal__row--active {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+.ws-modal__row--empty,
+.ws-modal__row--err {
+  padding: 14px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+.ws-modal__row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+}
+.ws-modal__row-label {
+  font-family: var(--font-display, "Oswald");
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.ws-modal__row-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.ws-modal__row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.ws-modal__meta-chip {
+  display: inline-block;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  background: rgba(0, 212, 255, 0.08);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  color: var(--accent);
+  border-radius: 2px;
+}
+.ws-modal__row-delete {
+  width: 36px;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--accent-tint);
+  color: var(--text-dim);
+  font-size: 18px;
+  font-weight: 300;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.ws-modal__row-delete:hover {
+  color: #ff5a3a;
+  background: rgba(255, 90, 58, 0.08);
+}
+
+.ws-modal__actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--accent-tint);
+}
+.ws-modal__create,
+.ws-modal__clear {
+  flex: 1;
+  padding: 10px 14px;
+  font-family: var(--font-display, "Oswald");
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.ws-modal__create {
+  background: var(--accent);
+  color: var(--ink-0);
+  border: 1px solid var(--accent);
+}
+.ws-modal__create:hover { background: transparent; color: var(--accent); }
+.ws-modal__clear {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--accent-tint);
+}
+.ws-modal__clear:hover { color: var(--accent); border-color: var(--accent); }
+
+.ws-modal__hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+.ws-modal__hint code {
+  font-family: var(--font-mono);
+  background: var(--ink-2);
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: var(--accent);
+}
+
+/* History drawer workspace chip - inline with the title to telegraph
+ * which workspace's conversation the operator is looking at. */
+.history-drawer__ws-chip {
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  background: var(--accent-tint);
+  color: var(--accent);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+/* Workspace switcher: insights expand panel + ⓘ button.
+ * Stays inside the existing row so the modal layout doesn't jump when
+ * insights load. The grid fits 6 stat cells in 2 rows on the typical
+ * 280px-ish modal width. */
+.ws-modal__row-info {
+  width: 28px;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--accent-tint);
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.ws-modal__row-info:hover {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+.ws-modal__row {
+  flex-wrap: wrap;
+}
+.ws-modal__insights {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--accent-tint);
+  background: rgba(0, 212, 255, 0.04);
+}
+.ws-modal__insights-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-modal__insights-key {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--accent-deep);
+  text-transform: uppercase;
+}
+.ws-modal__insights-val {
+  font-family: var(--font-display, "Oswald");
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ws-modal__insights-stamp {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--accent-tint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* Workspace switcher: ✎ edit-handbook button + handbook editor modal.
+ * Editor sits at z-index 2300 so it stacks ABOVE the workspace switcher
+ * modal — operator can switch from the switcher row to the editor in
+ * one click without losing context. */
+.ws-modal__row-edit {
+  width: 28px;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--accent-tint);
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.ws-modal__row-edit:hover {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.ws-handbook-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 12, 0.82);
+  backdrop-filter: blur(8px);
+}
+.ws-handbook-modal[hidden] { display: none; }
+.ws-handbook-modal__panel {
+  width: min(640px, 92vw);
+  max-height: 85vh;
+  background: var(--ink-1);
+  border: 1px solid var(--accent-tint);
+  border-radius: 6px;
+  padding: 24px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 60px rgba(0, 212, 255, 0.08) inset;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ws-handbook-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--accent-tint);
+}
+.ws-handbook-modal__title {
+  font-family: var(--font-display, "Oswald");
+  font-size: 14px;
+  letter-spacing: 0.32em;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ws-handbook-modal__title span {
+  color: var(--text);
+}
+.ws-handbook-modal__close {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  width: 28px; height: 28px;
+  cursor: pointer;
+}
+.ws-handbook-modal__close svg { width: 16px; height: 16px; }
+.ws-handbook-modal__close:hover { color: var(--accent); }
+
+.ws-handbook-modal__text {
+  flex: 1;
+  min-height: 280px;
+  max-height: 60vh;
+  padding: 14px 16px;
+  background: var(--ink-2);
+  border: 1px solid var(--accent-tint);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  resize: vertical;
+}
+.ws-handbook-modal__text:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.ws-handbook-modal__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ws-handbook-modal__hint {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.ws-handbook-modal__cancel,
+.ws-handbook-modal__save {
+  padding: 8px 16px;
+  font-family: var(--font-display, "Oswald");
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ws-handbook-modal__cancel {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--accent-tint);
+}
+.ws-handbook-modal__cancel:hover { color: var(--accent); border-color: var(--accent); }
+.ws-handbook-modal__save {
+  background: var(--accent);
+  color: var(--ink-0);
+  border: 1px solid var(--accent);
+}
+.ws-handbook-modal__save:hover { background: transparent; color: var(--accent); }
+.ws-handbook-modal__save:disabled { opacity: 0.5; cursor: wait; }
+
+.ws-handbook-modal__sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+}
+.ws-handbook-modal__sub code {
+  font-family: var(--font-mono);
+  background: var(--ink-2);
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: var(--accent);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * HUD view modes — secondary-display variants.
+ *
+ * data-mode="reactor"  → strip chrome, keep reactor + waveform + state
+ * data-mode="ambient"  → reactor only, no controls or readouts
+ *
+ * Both share the same WS connection + active workspace as the default
+ * window. They're visual surfaces of the same kiosk, not parallel kiosks.
+ * The HUD layout grid stays the same; we hide rows/cells by display:none
+ * so the reactor naturally fills the space.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/* REACTOR mode: keep the centerpiece + voice waveform + state chip + workspace
+ * chip (so the operator can see which scope the second window is in).
+ * Drop everything else. */
+html[data-mode="reactor"] body {
+  background: var(--ink-0);
+}
+html[data-mode="reactor"] .calendar__days,
+html[data-mode="reactor"] .health,
+html[data-mode="reactor"] .notif-bell,
+html[data-mode="reactor"] .settings-btn,
+html[data-mode="reactor"] .help-btn,
+html[data-mode="reactor"] .panel,
+html[data-mode="reactor"] .ic-chips,
+html[data-mode="reactor"] .transcript,
+html[data-mode="reactor"] .rec-indicator,
+html[data-mode="reactor"] .skip-link,
+html[data-mode="reactor"] .grid-bg,
+html[data-mode="reactor"] .scanline {
+  display: none !important;
+}
+html[data-mode="reactor"] .hud {
+  /* Center the reactor on the full viewport. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 0;
+}
+html[data-mode="reactor"] .speedo {
+  /* Bigger reactor to fill the secondary display. */
+  width: min(70vh, 70vw);
+  height: min(70vh, 70vw);
+  margin: 0;
+}
+/* Keep the calendar header visible but minimised — wordmark + workspace chip
+ * tell the operator which agent persona this window is. */
+html[data-mode="reactor"] .calendar {
+  background: transparent;
+  border: 0;
+  padding: 24px 32px;
+}
+html[data-mode="reactor"] .calendar__brand-tag { display: none; }
+
+/* AMBIENT mode: reactor only, full screen, no chrome at all. For
+ * wall-mounted second displays in at-rest state. */
+html[data-mode="ambient"] body {
+  background: var(--ink-0);
+  cursor: none;   /* hide cursor on a wall-mount where it's never touched */
+}
+html[data-mode="ambient"] .calendar,
+html[data-mode="ambient"] .panel,
+html[data-mode="ambient"] .transcript,
+html[data-mode="ambient"] .ic-chips,
+html[data-mode="ambient"] .health,
+html[data-mode="ambient"] .notif-bell,
+html[data-mode="ambient"] .settings-btn,
+html[data-mode="ambient"] .help-btn,
+html[data-mode="ambient"] .speedo__state,
+html[data-mode="ambient"] .rec-indicator,
+html[data-mode="ambient"] .skip-link,
+html[data-mode="ambient"] .grid-bg,
+html[data-mode="ambient"] .scanline {
+  display: none !important;
+}
+html[data-mode="ambient"] .hud {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+html[data-mode="ambient"] .speedo {
+  width: min(80vh, 80vw);
+  height: min(80vh, 80vw);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Smart Inbox panel — Sprint 8.
+ *
+ * Sits in the right rail. Same .panel chrome as launch / weather / clock,
+ * with a tighter row layout because each item carries 3 lines worth of
+ * info (icon, who, what, when). Imminent events get a stronger left
+ * border accent so the operator's eye lands on them first.
+ * ──────────────────────────────────────────────────────────────────────── */
+.panel--inbox {
+  display: flex;
+  flex-direction: column;
+}
+.panel--inbox .panel__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.panel__icon-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 4px;
+  transition: color 120ms ease;
+}
+.panel__icon-btn:hover { color: var(--accent); }
+
+.inbox {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  overflow-y: auto;
+  /* Stop the scrollbar from disrupting the right rail's tidy line. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-tint) transparent;
+}
+.inbox__item {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--ink-2);
+  border-left: 2px solid var(--accent-tint);
+  border-radius: 2px;
+  transition: border-color 120ms ease;
+}
+.inbox__item:hover { border-left-color: var(--accent); }
+.inbox__item--imminent {
+  border-left-color: #ff5a3a;
+  background: rgba(255, 90, 58, 0.05);
+}
+.inbox__item--unread {
+  /* Subtle weight on the title for unread mail. */
+  font-weight: 500;
+}
+.inbox__icon {
+  flex: 0 0 auto;
+  width: 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+  text-align: center;
+  margin-top: 1px;
+}
+.inbox__item--imminent .inbox__icon { color: #ff5a3a; }
+.inbox__item--reminder .inbox__icon { color: #5fd97a; }
+
+.inbox__body {
+  flex: 1;
+  min-width: 0;   /* allow ellipsis on the inner spans */
+}
+.inbox__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.inbox__who {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+.inbox__when {
+  flex: 0 0 auto;
+  color: var(--accent-deep);
+}
+.inbox__item--imminent .inbox__when { color: #ff5a3a; font-weight: 600; }
+.inbox__what {
+  font-size: 12px;
+  color: var(--text);
+  margin-top: 2px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox__empty {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding: 12px 10px;
+  text-align: center;
+  font-style: italic;
+}
+.inbox__hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 8px 10px 4px;
+  text-align: center;
+  border-top: 1px dashed var(--accent-tint);
+  margin-top: 6px;
+}
+.inbox__hint em {
+  color: var(--accent);
+  font-style: normal;
+  font-family: var(--font-mono);
+}
+
+/* Sprint 9: clickable inbox rows. Each row already had hover state for
+ * border-color; add cursor + keyboard focus styling so the click affordance
+ * is obvious. */
+.inbox__item {
+  cursor: pointer;
+}
+.inbox__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.inbox__item:active {
+  transform: translateX(1px);
+}
+
+/* Sprint 9: handbook editor split — textarea on left, live preview on right.
+ * Snippet dropdown styled to match cancel/save buttons. */
+.ws-handbook-modal__split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  flex: 1;
+  min-height: 280px;
+}
+.ws-handbook-modal__preview {
+  padding: 14px 16px;
+  background: var(--ink-2);
+  border: 1px solid var(--accent-tint);
+  border-radius: 4px;
+  overflow-y: auto;
+  font-family: var(--font-body, system-ui);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+}
+.ws-handbook-modal__preview h1, .ws-handbook-modal__preview h2,
+.ws-handbook-modal__preview h3, .ws-handbook-modal__preview h4 {
+  font-family: var(--font-display, "Oswald");
+  color: var(--accent);
+  margin: 12px 0 6px;
+  letter-spacing: 0.04em;
+}
+.ws-handbook-modal__preview h1 { font-size: 18px; }
+.ws-handbook-modal__preview h2 { font-size: 15px; }
+.ws-handbook-modal__preview h3 { font-size: 13px; }
+.ws-handbook-modal__preview p { margin: 6px 0; }
+.ws-handbook-modal__preview ul { padding-left: 20px; margin: 4px 0; }
+.ws-handbook-modal__preview li { margin: 2px 0; }
+.ws-handbook-modal__preview code {
+  font-family: var(--font-mono);
+  background: rgba(0, 212, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.ws-handbook-modal__preview strong { color: var(--text); }
+.ws-handbook-modal__preview em { color: var(--accent-deep); font-style: italic; }
+
+.ws-handbook-modal__snippet {
+  padding: 8px 12px;
+  background: var(--ink-2);
+  color: var(--text);
+  border: 1px solid var(--accent-tint);
+  border-radius: 4px;
+  font-family: var(--font-display, "Oswald");
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.ws-handbook-modal__snippet:hover { border-color: var(--accent); color: var(--accent); }
+
+@media (max-width: 720px) {
+  .ws-handbook-modal__split { grid-template-columns: 1fr; }
+}
+
+/* Sprint 10: centerpiece picker. body[data-centerpiece="orb"] dims the
+ * SVG instrument cluster so the Three.js orb canvas (mounted inside the
+ * same .speedo container) reads cleanly. The orb canvas absolute-fills
+ * the speedo. */
+body[data-centerpiece="orb"] .speedo__svg,
+body[data-centerpiece="orb"] .ic-chips {
+  opacity: 0.15;
+  transition: opacity 400ms ease;
+}
+body[data-centerpiece="orb"] .speedo canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.speedo {
+  position: relative;
+}
+
+/* Sprint 10 fix: reactor view-mode centerpiece centering.
+ *
+ * The default kiosk layout positions .speedo absolutely inside its grid
+ * cell. When we strip the grid + force the parent .hud to flex, the
+ * speedo's absolute children (SVG, state chip, ic-chips) collapse to
+ * the viewport corners instead of staying glued to the reactor.
+ *
+ * Force .speedo into flow with explicit dimensions + relative
+ * positioning so its absolute children anchor to it correctly. */
+html[data-mode="reactor"] .speedo,
+html[data-mode="ambient"] .speedo {
+  position: relative !important;
+  inset: auto !important;
+  top: auto !important; left: auto !important;
+  right: auto !important; bottom: auto !important;
+  width: min(70vh, 70vw) !important;
+  height: min(70vh, 70vw) !important;
+  margin: 0 auto !important;
+  display: block !important;
+}
+html[data-mode="reactor"] .speedo__svg,
+html[data-mode="ambient"] .speedo__svg {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  inset: auto !important;
+  display: block !important;
+}
+/* Ambient drops the state chip too (just the orb at rest, no labels). */
+html[data-mode="ambient"] .speedo__state {
+  display: none !important;
+}
+
+/* ─── PERSONA-DRIVEN CENTERPIECE ───
+ * Two SVGs live inside .speedo: the default Jarvis cyan reactor and the
+ * Friday faceted-crystal reactor. We swap visibility based on
+ * body[data-persona] which workspace-switcher.js sets when the active or
+ * pinned workspace is "friday". Default state shows the Jarvis reactor.
+ *
+ * Why CSS-driven and not JS removal: the Jarvis SVG's inner IDs
+ * (#icVoiceWave, #rxCoreArcs, etc) are written to by hud.js continuously.
+ * Removing/reattaching the DOM would require re-running those wireups.
+ * Hiding via display:none keeps hud.js's references valid while making
+ * the alternative visible. Phase 2 (animation parity) will route hud.js
+ * updates to whichever centerpiece is active.
+ */
+.speedo__svg--friday {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* !important here is defensive — the reactor / ambient view-mode CSS already
+ * uses `display: block !important` on .speedo__svg to force it visible after
+ * stripping chrome. Without !important on our persona swap the Jarvis SVG
+ * would stay visible AND the Friday SVG would never show in those modes. */
+body[data-persona="friday"] .speedo__svg:not(.speedo__svg--friday) {
+  display: none !important;
+}
+body[data-persona="friday"] .speedo__svg--friday {
+  display: block !important;
+}
+/* Hide the Jarvis-specific HTML overlays (rim chips, anchor) when on Friday
+ * — they reference Jarvis-side IDs. Friday's anchor lives inside its own SVG. */
+body[data-persona="friday"] .ic-chips,
+body[data-persona="friday"] .speedo__brand-mark {
+  display: none;
+}
+
+/* Sprint 12 — voice-reactive amplitude (0..1). voice.js publishes this
+ * each animation frame from drawMicWave/drawTtsWave. Defaults to 0 when
+ * idle so persona reactors snap back to their static animation. */
+:root { --audio-amp: 0; }
+
+/* ─── FRIDAY REACTOR ANIMATIONS ───
+ * The Jarvis arc-reactor SVG has rotating tick rings + a sweeping scan line +
+ * a pulsing inner ring. Friday's faceted-crystal needed parity — operator
+ * feedback was "no animation on Friday like there is with Jarvis". Pure CSS
+ * keyframes, GPU-friendly (transform/opacity only). All anchored at the SVG
+ * centre (300,300) so transforms spin around the right pivot. */
+
+/* Inner ring breathes — scale 1.00 → 1.04 → 1.00 over 3s, sin-eased. */
+@keyframes friday-breath {
+  0%, 100% { transform: scale(1.00); }
+  50%      { transform: scale(1.04); }
+}
+.friday-inner-ring {
+  transform-origin: 300px 300px;
+  transform-box: fill-box;
+  animation: friday-breath 3s ease-in-out infinite;
+  /* Voice-reactive: ring stroke widens slightly with audio amplitude,
+   * making the ring "thicken" when Friday speaks or hears the operator. */
+  stroke-width: calc(1.5px + var(--audio-amp) * 2.5px);
+  stroke-opacity: calc(0.7 + var(--audio-amp) * 0.3);
+}
+
+/* Core pupil pulses brightness — 0.85 → 1.00 → 0.85 over 2.5s, slightly
+ * offset from the inner ring so the eye picks up two layers of liveness. */
+@keyframes friday-core-pulse {
+  0%, 100% { opacity: 0.85; transform: scale(0.96); }
+  50%      { opacity: 1.00; transform: scale(1.06); }
+}
+.friday-core-pupil {
+  transform-origin: 300px 300px;
+  transform-box: fill-box;
+  animation: friday-core-pulse 2.5s ease-in-out infinite;
+  /* Voice-reactive: pupil grows + brightens with audio amplitude. The
+   * keyframe still runs (the heartbeat baseline); this var just adds an
+   * extra scale boost on top, so quiet → 1.0× breath, loud → ~1.4× pop. */
+  r: calc(18px + var(--audio-amp) * 14px);
+}
+
+/* Outer hex frame stroke-opacity oscillates — feels like the cut catches
+ * ambient light. Slower than the inner pulses (5s) so it reads as the
+ * background "still alive" beat rather than a hero animation. */
+@keyframes friday-hex-glow {
+  0%, 100% { stroke-opacity: 0.30; }
+  50%      { stroke-opacity: 0.55; }
+}
+.speedo__svg--friday > polygon[stroke="#ffb84a"]:not([fill]) {
+  animation: friday-hex-glow 5s ease-in-out infinite;
+}
+
+/* Facet shimmer — opacity oscillates per facet, phase-offset by index so
+ * light appears to move around the perimeter. Each facet hits its peak at
+ * a different point in the 4s cycle (50ms per facet × 8 facets ≈ 0.5s
+ * each, distributed across the cycle). The cumulative effect is a soft
+ * rotating glint that doesn't read as a literal spinner. */
+@keyframes friday-facet-shimmer {
+  0%, 100% { opacity: 0.78; }
+  50%      { opacity: 1.00; }
+}
+.friday-facet {
+  animation: friday-facet-shimmer 4s ease-in-out infinite;
+  /* Voice-reactive: each facet's stroke brightens + thickens with audio
+   * amplitude — when Friday speaks, all 8 wedges flare in sync (the
+   * shimmer phase-offset still drives the per-facet ripple, but the
+   * overall brightness rides the voice). */
+  stroke-width: calc(1px + var(--audio-amp) * 1.8px);
+  stroke-opacity: calc(0.7 + var(--audio-amp) * 0.3);
+}
+.friday-facet[data-facet-i="0"] { animation-delay: 0.0s; }
+.friday-facet[data-facet-i="1"] { animation-delay: 0.5s; }
+.friday-facet[data-facet-i="2"] { animation-delay: 1.0s; }
+.friday-facet[data-facet-i="3"] { animation-delay: 1.5s; }
+.friday-facet[data-facet-i="4"] { animation-delay: 2.0s; }
+.friday-facet[data-facet-i="5"] { animation-delay: 2.5s; }
+.friday-facet[data-facet-i="6"] { animation-delay: 3.0s; }
+.friday-facet[data-facet-i="7"] { animation-delay: 3.5s; }
+
+/* Sweep line orbits the perimeter — slow 12s full rotation. Same vocabulary
+ * as Jarvis's right-hemisphere scanner but going full 360° and slower
+ * (Friday is observation-paced, not detection-paced). */
+@keyframes friday-sweep-rotate {
+  from { transform: translate(300px, 300px) rotate(0deg); }
+  to   { transform: translate(300px, 300px) rotate(360deg); }
+}
+.friday-sweep {
+  animation: friday-sweep-rotate 12s linear infinite;
+}
+
+/* Respect reduced-motion preference — if the operator has it set in
+ * macOS, Friday's reactor stays still (still distinguishable by the
+ * faceted geometry alone, no flashing). */
+@media (prefers-reduced-motion: reduce) {
+  .friday-inner-ring,
+  .friday-core-pupil,
+  .friday-facet,
+  .friday-sweep,
+  .speedo__svg--friday > polygon[stroke="#ffb84a"]:not([fill]) {
+    animation: none;
+  }
+}
+
+/* ─────────────── INFLUENCER MODALS ───────────────
+ * Two dialogs share the .inf-modal scaffold: a refs picker (shows 2-4
+ * generated portraits in a grid, click to lock) and a source-video paster
+ * (URL field + local-file drop zone). Both follow the existing HUD overlay
+ * conventions: full-screen dim backdrop, centred panel with cyan border,
+ * monospace label/title text, hidden by [hidden] attribute. */
+.inf-modal {
+  position: fixed; inset: 0; z-index: 9000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.inf-modal[hidden] { display: none; }
+.inf-modal__panel {
+  background: #0a141a;
+  border: 1px solid var(--accent, #4ad6ff);
+  border-radius: 6px;
+  box-shadow: 0 0 32px rgba(74, 214, 255, 0.18);
+  min-width: 480px; max-width: 90vw; max-height: 90vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.inf-modal__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(74, 214, 255, 0.25);
+}
+.inf-modal__title {
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 11px; letter-spacing: 0.28em;
+  color: var(--accent, #4ad6ff);
+  text-transform: uppercase;
+}
+.inf-modal__close {
+  background: none; border: none; color: var(--text-dim, #7a98a6);
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 0 6px;
+}
+.inf-modal__close:hover { color: var(--accent, #4ad6ff); }
+
+/* Refs grid: 2-up on small screens, 3-up otherwise. Tiles are square
+ * portraits with a numeric badge in the top-left for voice recall
+ * ("use the second one" → tile 2). */
+.inf-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  padding: 18px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.inf-modal__tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: #050b0e;
+  border: 1px solid rgba(74, 214, 255, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0; overflow: hidden;
+  transition: border-color 120ms, transform 120ms;
+}
+.inf-modal__tile:hover {
+  border-color: var(--accent, #4ad6ff);
+  transform: translateY(-2px);
+}
+.inf-modal__tile img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.inf-modal__idx {
+  position: absolute; top: 8px; left: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--accent, #4ad6ff);
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 11px; font-weight: 700;
+  padding: 3px 8px; border-radius: 3px;
+  letter-spacing: 0.1em;
+}
+.inf-modal__hint {
+  padding: 12px 18px;
+  border-top: 1px solid rgba(74, 214, 255, 0.15);
+  font-size: 11px;
+  color: var(--text-dim, #7a98a6);
+}
+
+/* Source-video panel: URL field on top, drop zone below. */
+.inf-modal__panel--source { min-width: 520px; }
+.inf-modal__source-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.inf-modal__label {
+  font-size: 11px; letter-spacing: 0.18em;
+  color: var(--text-dim, #7a98a6);
+  text-transform: uppercase;
+}
+.inf-modal__url {
+  background: #050b0e;
+  border: 1px solid rgba(74, 214, 255, 0.3);
+  color: var(--text, #d8e8ee);
+  padding: 10px 12px;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 13px;
+  border-radius: 3px;
+  outline: none;
+}
+.inf-modal__url:focus {
+  border-color: var(--accent, #4ad6ff);
+  box-shadow: 0 0 0 1px rgba(74, 214, 255, 0.4);
+}
+.inf-modal__or {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-dim, #7a98a6);
+  letter-spacing: 0.15em;
+  padding: 4px 0;
+}
+.inf-modal__drop {
+  border: 1px dashed rgba(74, 214, 255, 0.4);
+  border-radius: 3px;
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--text-dim, #7a98a6);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  transition: border-color 150ms, background 150ms;
+}
+.inf-modal__drop.is-drag {
+  border-color: var(--accent, #4ad6ff);
+  background: rgba(74, 214, 255, 0.06);
+  color: var(--accent, #4ad6ff);
+}
+.inf-modal__mono {
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  color: var(--accent, #4ad6ff);
+}
+.inf-modal__source-status {
+  min-height: 18px;
+  font-size: 11px;
+  color: var(--text-dim, #7a98a6);
+}
+.inf-modal__source-status[data-kind="error"] { color: #ff6b6b; }
+.inf-modal__source-status[data-kind="ok"]    { color: #5cf2c8; }
+
+.inf-modal__actions {
+  display: flex; justify-content: flex-end; gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(74, 214, 255, 0.15);
+}
+.inf-modal__cancel,
+.inf-modal__confirm {
+  background: transparent;
+  border: 1px solid rgba(74, 214, 255, 0.3);
+  color: var(--text-dim, #7a98a6);
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 11px; letter-spacing: 0.18em;
+  padding: 8px 16px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 120ms, border-color 120ms;
+}
+.inf-modal__confirm {
+  border-color: var(--accent, #4ad6ff);
+  color: var(--accent, #4ad6ff);
+}
+.inf-modal__cancel:hover  { color: var(--text, #d8e8ee); border-color: var(--text-dim, #7a98a6); }
+.inf-modal__confirm:hover { background: rgba(74, 214, 255, 0.08); }
+
+/* ─────────────── TEXT INPUT + TTS MUTE ───────────────
+ * Operator can drive Jarvis without voice in loud environments. The mute
+ * toggle silences all TTS for both voice + text inputs; the keyboard
+ * toggle opens a text input bar that submits via Enter, hitting the same
+ * llm.askStream pipeline as the voice flow.
+ *
+ * Pinned top-right so they don't compete with the wake button for layout
+ * space. z-index 8500 — above panels, below the modals (which sit at 9000+). */
+.hud-aux-controls {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* z-index 8500 — above panels, below the influencer / settings modals (9000+).
+   * Modals dim the rest of the HUD on open; the aux controls hiding behind
+   * a modal is the right behaviour because the operator is mid-modal flow. */
+  z-index: 8500;
+}
+/* Buttons styled to match the wake button's chrome vocabulary so the eye
+ * reads them as part of the same affordance family — solid dark fill, 1.5px
+ * cyan border, accent-coloured glyph, soft glow at rest, full inversion on
+ * hover. The slight glow + thicker border is what makes them stand out
+ * against the panel grid behind them. */
+.tts-mute,
+.text-input-toggle {
+  background: var(--ink-0, #050b0e);
+  border: 1.5px solid var(--accent, #4ad6ff);
+  color: var(--accent, #4ad6ff);
+  width: 44px; height: 44px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+  box-shadow: 0 0 14px rgba(74, 214, 255, 0.22),
+              0 2px 6px rgba(0, 0, 0, 0.5);
+  transition: background 150ms, color 150ms, box-shadow 150ms, transform 150ms;
+}
+.tts-mute:hover,
+.text-input-toggle:hover {
+  background: var(--accent, #4ad6ff);
+  color: var(--ink-0, #050b0e);
+  box-shadow: 0 0 22px rgba(74, 214, 255, 0.45),
+              0 2px 8px rgba(0, 0, 0, 0.6);
+  transform: translateY(-1px);
+}
+.tts-mute:focus-visible,
+.text-input-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent, #4ad6ff),
+              0 0 22px rgba(74, 214, 255, 0.45);
+}
+/* Muted state — strikethrough on the speaker icon + dim red border so the
+ * operator knows TTS won't fire. aria-pressed=true is the source of truth. */
+.tts-mute[aria-pressed="true"] {
+  border-color: rgba(255, 90, 58, 0.6);
+  color: #ff5a3a;
+  background: rgba(255, 90, 58, 0.06);
+}
+.tts-mute[aria-pressed="true"] .tts-mute__icon {
+  position: relative;
+}
+.tts-mute[aria-pressed="true"] .tts-mute__icon::after {
+  content: ""; position: absolute; left: -2px; right: -2px; top: 50%;
+  border-top: 2px solid #ff5a3a;
+  transform: rotate(-15deg);
+}
+
+/* Bottom-centred text-input panel. Sits above the waveform strip so the
+ * operator can write a sentence or short paragraph without losing the
+ * waveform context. When opened, body gets .is-typing which shrinks/lifts
+ * the reactor (same choreography as listening mode) so the panel doesn't
+ * cover the dial. No backdrop-dim — voice + ambient HUD activity keep
+ * happening while typing; this is a co-input surface, not a blocker. */
+.text-input-modal {
+  position: fixed;
+  /* 110px clears the wake button (bottom: 22px) and the waveform strip with
+   * comfortable breathing room. Centered horizontally so the panel anchors
+   * to the same axis as the reactor. */
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  /* Subtle slide-up entrance — matches the listening-state choreography. */
+  animation: text-input-rise 200ms cubic-bezier(0.2, 0.6, 0.25, 1);
+}
+.text-input-modal[hidden] { display: none; }
+@keyframes text-input-rise {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.text-input-modal__panel {
+  background: var(--ink-0, #050b0e);
+  border: 1.5px solid var(--accent, #4ad6ff);
+  border-radius: 4px;
+  box-shadow: 0 0 36px rgba(74, 214, 255, 0.35),
+              0 8px 32px rgba(0, 0, 0, 0.6);
+  width: min(720px, 80vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* When the text-input modal is open, body gets .is-typing — same reactor
+ * shrink/lift choreography as listening mode, applied to the speedo so the
+ * panel below doesn't visually fight the dial. Reused selector list keeps
+ * the rule in lockstep with .is-listening. */
+body.is-typing .speedo {
+  transform: scale(0.72) translateY(-6%);
+}
+.text-input-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(74, 214, 255, 0.25);
+}
+.text-input-modal__title {
+  font-family: var(--font-display, var(--font-mono, "JetBrains Mono", monospace));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  color: var(--accent, #4ad6ff);
+  text-transform: uppercase;
+}
+.text-input-modal__close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim, #7a98a6);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 6px;
+  transition: color 120ms;
+}
+.text-input-modal__close:hover { color: var(--accent, #4ad6ff); }
+/* Thread area — message exchange surface. Hidden until the first message
+ * lands so an empty modal doesn't show a blank scrollbox. Operator messages
+ * align right (cyan-tinted), Jarvis replies align left (warmer, panel-fill).
+ * Auto-scrolls to the latest message via voice.js after each append. */
+.text-input-modal__thread {
+  max-height: min(48vh, 480px);
+  overflow-y: auto;
+  padding: 14px 18px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-bottom: 1px solid rgba(74, 214, 255, 0.12);
+  scrollbar-width: thin;
+}
+.text-input-modal__thread[hidden] { display: none; }
+.text-input-modal__msg {
+  max-width: 86%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  /* Soft entrance — feels like the message arrives, not just appears. */
+  animation: text-input-msg-in 140ms ease-out;
+}
+@keyframes text-input-msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.text-input-modal__msg[data-role="user"] {
+  align-self: flex-end;
+  background: rgba(74, 214, 255, 0.16);
+  border: 1px solid rgba(74, 214, 255, 0.5);
+  color: var(--text, #d8e8ee);
+}
+.text-input-modal__msg[data-role="assistant"] {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(122, 152, 166, 0.35);
+  color: var(--text, #d8e8ee);
+}
+/* Pending assistant message — shown while sentences stream in. Same fill,
+ * adds a soft pulsing border so the operator knows replies are still
+ * arriving. Class removed by voice.js once the streamDone event fires. */
+.text-input-modal__msg[data-role="assistant"][data-pending="true"] {
+  border-color: var(--accent, #4ad6ff);
+  box-shadow: 0 0 12px rgba(74, 214, 255, 0.18);
+  animation: text-input-msg-in 140ms ease-out, text-input-msg-pulse 1.6s ease-in-out infinite;
+}
+@keyframes text-input-msg-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(74, 214, 255, 0.15); }
+  50%      { box-shadow: 0 0 18px rgba(74, 214, 255, 0.4); }
+}
+
+.text-input-modal__field {
+  width: 100%;
+  min-height: 64px;
+  max-height: 28vh;
+  background: transparent;
+  border: none;
+  color: var(--text, #d8e8ee);
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 14px 18px;
+  outline: none;
+  resize: vertical;
+  /* Webkit scrollbar styling for long paragraphs. */
+  scrollbar-width: thin;
+}
+.text-input-modal__field::placeholder { color: rgba(122, 152, 166, 0.6); }
+.text-input-modal__hint {
+  padding: 8px 18px 12px;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text-dim, #7a98a6);
+  text-transform: uppercase;
+  border-top: 1px solid rgba(74, 214, 255, 0.12);
+}
+
+/* ─────────────── HUD TOOLTIPS ───────────────
+ * Custom hover tooltip rendered by tooltips.js. One shared element
+ * positioned absolutely; reads data-tip (or title) on the hovered target.
+ * Cyan-on-dark to match the rest of the HUD instead of the boring
+ * native browser bubble. */
+.hud-tip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  background: #0a141a;
+  color: var(--text, #d8e8ee);
+  border: 1px solid rgba(74, 214, 255, 0.45);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+  max-width: 260px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45),
+              0 0 12px rgba(74, 214, 255, 0.18);
+  /* Tiny entrance animation — feels snappier than just appearing. */
+  animation: hud-tip-in 120ms ease-out;
+}
+.hud-tip[hidden] { display: none; }
+@keyframes hud-tip-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================
+   NEWS PANEL — full-width side panel that slides in from the right
+   edge of the viewport. While "open" it covers the HUD. A left-edge
+   arrow toggles it to a "collapsed" state where only a 32px tab
+   remains visible on the right edge. The left edge also acts as a
+   resize handle (cursor: ew-resize) — drag to make the panel
+   narrower; width is persisted to localStorage by news-panel.js.
+   ============================================================ */
+.news-panel-root[hidden] { display: none; }
+.news-panel-root {
+  position: fixed;
+  top: 0; bottom: 0; right: 0;
+  /* Width is set inline by news-panel.js (default 100vw, persisted).
+   * The inline style wins over this fallback. */
+  width: 100vw;
+  background: rgba(0, 0, 0, 0.92);
+  color: #e7e7e7;
+  z-index: 9000;
+  font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  /* Start off-screen; .is-open transitions to translateX(0). */
+  transform: translateX(100%);
+  transition: transform 280ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+.news-panel-root.is-open {
+  transform: translateX(0);
+}
+.news-panel-root.is-collapsed {
+  /* Reveal only the 32px toggle tab on the right edge of the screen. */
+  transform: translateX(calc(100% - 32px));
+}
+/* While the user is dragging the resize handle we want immediate width
+ * tracking, not the 280ms transform transition. */
+.news-panel-root.is-resizing { transition: none; }
+
+/* Left-edge arrow toggle. Always visible. Square button — text content
+ * is replaced by news-panel.js to mirror open/collapsed state. */
+.news-panel-toggle {
+  position: absolute;
+  top: 50%; left: 0;
+  transform: translate(-100%, -50%);
+  width: 32px; height: 64px;
+  background: rgba(11, 11, 11, 0.94);
+  border: 1px solid var(--accent, #00d4ff);
+  border-right: none;
+  color: var(--accent, #00d4ff);
+  font: inherit; font-size: 18px; line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  user-select: none;
+}
+.news-panel-toggle:hover { background: rgba(0, 212, 255, 0.12); }
+.news-panel-root.is-collapsed .news-panel-toggle {
+  /* When collapsed the panel itself is slid 32px-from-right; the toggle
+   * sits at the panel's local left edge which is the visible tab. */
+  transform: translate(0, -50%);
+}
+
+/* 6px-wide resize hot-zone overlaying the panel's left edge. */
+.news-panel-resize {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 1;
+}
+
+.news-panel-grid {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  grid-template-columns: 55% 22.5% 22.5%;
+  grid-template-areas:
+    "head head head"
+    "live stories tech";
+  height: 100%;
+  gap: 12px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+.news-panel-head {
+  grid-area: head;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px;
+  border: 1px solid var(--accent, #00d4ff);
+  background: rgba(11, 11, 11, 0.94);
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+}
+.news-panel-head .news-clock { font-variant-numeric: tabular-nums; color: #e7e7e7; }
+.news-panel-head button {
+  background: transparent; color: var(--accent, #00d4ff);
+  border: 1px solid var(--accent, #00d4ff); padding: 4px 10px;
+  font: inherit; cursor: pointer; letter-spacing: 0.12em;
+}
+.news-panel-head button:hover { background: rgba(0, 212, 255, 0.12); }
+.news-panel-live {
+  grid-area: live;
+  border: 1px solid #1f1f1f;
+  position: relative;
+  overflow: hidden;
+}
+.news-panel-live iframe {
+  position: absolute; inset: 0; width: 100%; height: 100%; border: 0;
+}
+.news-panel-live-fallback {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; color: #888; font-size: 13px;
+}
+.news-panel-col {
+  border: 1px solid #1f1f1f;
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+.news-panel-col.stories { grid-area: stories; }
+.news-panel-col.tech    { grid-area: tech; }
+.news-panel-col h2 {
+  margin: 0 0 10px 0;
+  font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+  border-bottom: 1px solid #1f1f1f;
+  padding-bottom: 8px;
+}
+.news-panel-col h2 .stale {
+  color: #b46; font-size: 10px; margin-left: 8px;
+}
+.news-row {
+  display: block;
+  padding: 8px 0;
+  border-bottom: 1px solid #1a1a1a;
+  color: #e7e7e7; text-decoration: none;
+  font-size: 13px; line-height: 1.4;
+}
+.news-row:hover { color: var(--accent, #00d4ff); }
+.news-row-title { display: block; }
+.news-row-meta {
+  display: block;
+  margin-top: 3px;
+  color: #888;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.news-row-meta .src {
+  display: inline-block;
+  padding: 1px 6px; margin-right: 6px;
+  border: 1px solid #2a2a2a;
+}
+.news-panel-empty {
+  color: #888; font-size: 12px; padding: 10px 0;
+}
+
+/* ============================================================
+   INFLUENCER WIZARD — shares .news-panel-root family for the slide-in
+   shell (animation, toggle arrow, resize handle). These rules cover the
+   wizard-specific interior: question chips, progress strip, result slots.
+   ============================================================ */
+.inf-wizard-grid {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  grid-template-columns: 1fr;
+  height: 100%;
+  gap: 12px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+.inf-wizard-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px;
+  border: 1px solid var(--accent, #00d4ff);
+  background: rgba(11, 11, 11, 0.94);
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+}
+.inf-wizard-body {
+  overflow-y: auto;
+  padding: 6px 4px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.inf-q {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.inf-q-label {
+  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: #888;
+}
+.inf-chips {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.inf-chip {
+  background: transparent;
+  color: #e7e7e7;
+  border: 1px solid #2a2a2a;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+}
+.inf-chip:hover { border-color: var(--accent, #00d4ff); }
+.inf-chip.is-active {
+  border-color: var(--accent, #00d4ff);
+  color: var(--accent, #00d4ff);
+  background: rgba(0, 212, 255, 0.12);
+}
+.inf-url-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #e7e7e7;
+  border: 1px solid #2a2a2a;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.inf-url-input:focus { outline: none; border-color: var(--accent, #00d4ff); }
+.inf-go-row {
+  display: flex; gap: 8px; align-items: center;
+}
+.inf-go-btn, .inf-regen-btn, .inf-save-btn {
+  background: transparent;
+  color: var(--accent, #00d4ff);
+  border: 1px solid var(--accent, #00d4ff);
+  padding: 8px 18px;
+  font: inherit; font-size: 12px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  cursor: pointer;
+}
+.inf-go-btn:disabled { color: #555; border-color: #2a2a2a; cursor: not-allowed; }
+.inf-go-btn:hover:not(:disabled),
+.inf-regen-btn:hover,
+.inf-save-btn:hover { background: rgba(0, 212, 255, 0.12); }
+
+/* Progress strip — one row per stage. */
+.inf-progress {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px;
+  border: 1px solid #1f1f1f;
+  background: rgba(0, 0, 0, 0.4);
+}
+.inf-stage-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; letter-spacing: 0.1em;
+  padding: 6px 4px;
+  border-bottom: 1px solid #161616;
+}
+.inf-stage-row:last-child { border-bottom: 0; }
+.inf-stage-row[data-status="pending"] { color: #555; }
+.inf-stage-row[data-status="running"] { color: var(--accent, #00d4ff); }
+.inf-stage-row[data-status="done"]    { color: #6dd47e; }
+.inf-stage-row[data-status="failed"]  { color: #d46d6d; }
+.inf-stage-row[data-status="skipped"] { color: #888; }
+
+/* Result slots. */
+.inf-results {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.inf-result-slot {
+  border: 1px solid #1f1f1f;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.4);
+}
+.inf-result-slot h3 {
+  margin: 0 0 8px 0;
+  font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+}
+.inf-result-slot img,
+.inf-result-slot video {
+  display: block;
+  width: 100%; height: auto;
+  background: #111;
+}
+.inf-caption-block {
+  border-top: 1px solid #1a1a1a;
+  padding-top: 8px; margin-top: 8px;
+  font-size: 12px; line-height: 1.4;
+  color: #c8c8c8;
+}
+.inf-caption-block:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.inf-caption-block-label {
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+  margin-bottom: 4px;
+}
+
+/* ============================================================
+   ASSET PANEL — generated image + video viewer. Shares the
+   news-panel slide-in family for the shell.
+   ============================================================ */
+.asset-grid {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  height: 100%; gap: 12px; padding: 12px; box-sizing: border-box;
+}
+.asset-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px;
+  border: 1px solid var(--accent, #00d4ff);
+  background: rgba(11, 11, 11, 0.94);
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+}
+.asset-body {
+  overflow-y: auto; padding: 6px 4px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.asset-media {
+  border: 1px solid #1f1f1f;
+  background: #0a0a0a;
+  min-height: 200px;
+  display: flex; align-items: center; justify-content: center;
+}
+.asset-media img,
+.asset-media video {
+  display: block; max-width: 100%; max-height: 60vh; width: auto; height: auto;
+}
+.asset-media-empty {
+  color: #888; font-size: 12px; padding: 20px;
+}
+.asset-meta {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid #1f1f1f;
+  background: rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+.asset-meta-row {
+  display: flex; gap: 10px;
+}
+.asset-meta-label {
+  flex: 0 0 90px;
+  color: #888;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.asset-actions {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.asset-action-btn {
+  background: transparent;
+  color: var(--accent, #00d4ff);
+  border: 1px solid var(--accent, #00d4ff);
+  padding: 6px 14px;
+  font: inherit; font-size: 11px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  cursor: pointer;
+}
+.asset-action-btn[disabled] {
+  color: #444; border-color: #222; cursor: not-allowed;
+}
+.asset-action-btn:hover:not([disabled]) { background: rgba(0, 212, 255, 0.12); }
+.asset-prompt[hidden] { display: none; }
+.asset-prompt {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px;
+  border: 1px solid #1f1f1f;
+  background: rgba(0, 0, 0, 0.5);
+}
+.asset-prompt-textarea {
+  width: 100%; box-sizing: border-box;
+  background: #0a0a0a; color: #e7e7e7;
+  border: 1px solid #2a2a2a;
+  padding: 10px 12px;
+  font: inherit; font-size: 12px;
+  resize: vertical;
+}
+.asset-prompt-row { display: flex; gap: 8px; }
+.asset-history-label {
+  margin: 6px 0 0 0;
+  font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+}
+.asset-history {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.asset-history-thumb {
+  width: 80px; height: 100px;
+  background: #0a0a0a;
+  border: 1px solid #1f1f1f;
+  padding: 0; cursor: pointer;
+  overflow: hidden;
+}
+.asset-history-thumb:hover { border-color: var(--accent, #00d4ff); }
+.asset-history-thumb img,
+.asset-history-thumb video {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+
+/* ============================================================
+   WEATHER PANEL — current conditions + 5-day forecast.
+   ============================================================ */
+.weather-grid {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  height: 100%; gap: 12px; padding: 12px; box-sizing: border-box;
+}
+.weather-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px;
+  border: 1px solid var(--accent, #00d4ff);
+  background: rgba(11, 11, 11, 0.94);
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+}
+.weather-refresh-btn {
+  background: transparent;
+  color: var(--accent, #00d4ff);
+  border: 1px solid var(--accent, #00d4ff);
+  padding: 4px 10px;
+  font: inherit; font-size: 11px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  cursor: pointer;
+}
+.weather-refresh-btn:hover { background: rgba(0, 212, 255, 0.12); }
+.weather-body {
+  overflow-y: auto; padding: 6px 4px;
+  display: flex; flex-direction: column; gap: 20px;
+}
+.weather-now {
+  text-align: center;
+  padding: 20px;
+  border: 1px solid #1f1f1f;
+  background: rgba(0, 0, 0, 0.4);
+}
+.weather-now-temp {
+  font-size: 64px;
+  color: var(--accent, #00d4ff);
+  font-weight: 300;
+  line-height: 1;
+}
+.weather-now-label {
+  font-size: 14px;
+  color: #e7e7e7;
+  margin-top: 6px;
+  letter-spacing: 0.08em;
+  text-transform: capitalize;
+}
+.weather-location {
+  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: #888;
+  margin-top: 10px;
+}
+.weather-forecast {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;
+}
+.weather-day {
+  text-align: center;
+  padding: 10px 4px;
+  border: 1px solid #1f1f1f;
+  background: rgba(0, 0, 0, 0.4);
+}
+.weather-day-name {
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: #888;
+}
+.weather-day-icon {
+  font-size: 28px;
+  margin: 6px 0;
+}
+.weather-day-temp {
+  font-size: 12px; color: #e7e7e7;
+  font-variant-numeric: tabular-nums;
+}
+.weather-day-rain {
+  font-size: 10px; color: var(--accent, #00d4ff);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   SCREENSHOT PANEL — captured-image viewer + actions.
+   ============================================================ */
+.shot-grid {
+  display: grid; grid-template-rows: 56px 1fr;
+  height: 100%; gap: 12px; padding: 12px; box-sizing: border-box;
+}
+.shot-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px;
+  border: 1px solid var(--accent, #00d4ff);
+  background: rgba(11, 11, 11, 0.94);
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--accent, #00d4ff);
+}
+.shot-body {
+  overflow-y: auto; padding: 6px 4px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.shot-image {
+  border: 1px solid #1f1f1f;
+  background: #0a0a0a;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 200px;
+}
+.shot-image img {
+  display: block; max-width: 100%; max-height: 60vh; width: auto; height: auto;
+}
+.shot-meta {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid #1f1f1f;
+  background: rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+.shot-meta-row {
+  display: flex; gap: 10px;
+}
+.shot-meta-label {
+  flex: 0 0 90px;
+  color: #888; letter-spacing: 0.1em; text-transform: uppercase; font-size: 10px;
+}
+.shot-actions {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.shot-action-btn {
+  background: transparent;
+  color: var(--accent, #00d4ff);
+  border: 1px solid var(--accent, #00d4ff);
+  padding: 6px 14px;
+  font: inherit; font-size: 11px;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  cursor: pointer;
+}
+.shot-action-btn[disabled] {
+  color: #444; border-color: #222; cursor: not-allowed;
+}
+.shot-action-btn:hover:not([disabled]) { background: rgba(0, 212, 255, 0.12); }
+.shot-describe-out[hidden] { display: none; }
+.shot-describe-out {
+  padding: 10px;
+  border: 1px solid #1f1f1f;
+  background: rgba(0, 0, 0, 0.5);
+  font-size: 13px; line-height: 1.5;
+  color: #e7e7e7;
 }

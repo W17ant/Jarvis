@@ -125,8 +125,27 @@ on isoDate(d)
 end isoDate
 `;
 
-/* ---------- TOOL: get upcoming events ---------- */
-export async function getUpcomingEvents({ days = 7, calendarName } = {}) {
+/* ---------- TOOL: get upcoming events ---------- *
+ *
+ *  Cache: 5-minute TTL keyed by `${days}|${calendarName||""}`. Calendar.app
+ *  via AppleScript is the slowest dependency in this module (~600ms when warm,
+ *  several seconds on cold launch). Caching makes "what's on today" answer
+ *  instantly after the first call; the prewarm module keeps the days:1 key
+ *  warm so the first call is also instant. invalidate() clears the cache
+ *  after a mutation so a freshly-added event surfaces immediately. */
+const _cache = new Map(); /* key → { stamp, value } */
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+export function invalidate() { _cache.clear(); }
+
+export async function getUpcomingEvents({ days = 7, calendarName, force = false } = {}) {
+  const key = `${days}|${calendarName || ""}`;
+  if (!force) {
+    const hit = _cache.get(key);
+    if (hit && (Date.now() - hit.stamp) < CACHE_TTL_MS) {
+      return { ...hit.value, fromCache: true };
+    }
+  }
   await ensureCalendarRunning();
   const now = new Date();
   const until = new Date(now.getTime() + days * 86400_000);
@@ -184,7 +203,9 @@ return output`;
     const [title = "", start = "", location = "", calendar = ""] = line.split(" | ");
     return { title: title.trim(), start: start.trim(), location: location.trim(), calendar: calendar.trim() };
   });
-  return { ok: true, count: events.length, events };
+  const value = { ok: true, count: events.length, events };
+  _cache.set(key, { stamp: Date.now(), value });
+  return value;
 }
 
 /* ---------- TOOL: add calendar event ---------- */

@@ -105,6 +105,25 @@ function buildEntry(turn) {
   return row;
 }
 
+/* Workspaces v2: surface the active workspace label in the drawer header so
+ * the operator knows which scope's conversation they're viewing. The bridge
+ * /health/workspaces endpoint is the source of truth; we cache the label for
+ * the duration of a render. Empty/no-workspace = no chip. */
+let _activeWorkspaceLabel = null;
+async function _refreshActiveWorkspaceLabel() {
+  try {
+    const r = await fetch("http://localhost:8766/workspaces", { cache: "no-store" });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j.activeSlug) {
+      const w = (j.workspaces || []).find((x) => x.slug === j.activeSlug);
+      _activeWorkspaceLabel = w?.label || j.activeSlug;
+    } else {
+      _activeWorkspaceLabel = null;
+    }
+  } catch { /* bridge offline; chip stays as-is */ }
+}
+
 function renderDrawer() {
   if (!drawerEl) return;
   while (drawerEl.firstChild) drawerEl.removeChild(drawerEl.firstChild);
@@ -114,6 +133,17 @@ function renderDrawer() {
   const title = document.createElement("div");
   title.className = "history-drawer__title";
   title.textContent = "CONVERSATION";
+  /* Workspace scope chip — quietly tells the operator what scope they're
+   * looking at. Click is a no-op for now (drawer only shows current session
+   * regardless); the chip is informational. v2 will fetch past-session turns
+   * scoped to the active workspace and the chip becomes a toggle. */
+  if (_activeWorkspaceLabel) {
+    const wsChip = document.createElement("span");
+    wsChip.className = "history-drawer__ws-chip";
+    wsChip.title = `Conversation history is scoped to the ${_activeWorkspaceLabel} workspace.`;
+    wsChip.textContent = `· ${_activeWorkspaceLabel.toUpperCase()}`;
+    title.appendChild(wsChip);
+  }
   const meta = document.createElement("div");
   meta.className = "history-drawer__meta";
   meta.textContent = entries.length === 0 ? "no turns yet" : `${entries.length} turn${entries.length === 1 ? "" : "s"}`;
@@ -147,7 +177,11 @@ function openDrawer() {
   if (!drawerEl) return;
   drawerOpen = true;
   drawerEl.hidden = false;
+  /* Refresh the workspace label asynchronously; the first render uses the
+   * cached value (or no chip on cold start), then the post-fetch render
+   * fills it in. ~80ms so the chip appears almost immediately. */
   renderDrawer();
+  _refreshActiveWorkspaceLabel().then(() => { if (drawerOpen) renderDrawer(); });
 }
 
 function closeDrawer() {
@@ -163,12 +197,11 @@ export function init() {
   drawerEl = document.getElementById("historyDrawer");
   if (!drawerEl) return;
 
-  /* H key toggles drawer. Skipped when typing in inputs / textareas / selects. */
+  /* Cmd/Ctrl+H toggles drawer (preventDefault stops macOS hide-app
+   * shortcut). Esc closes it. Modifier-gated per the unified policy so
+   * bare H never gets eaten when typing. */
   document.addEventListener("keydown", (e) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    const tag = document.activeElement?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    if (e.key === "h" || e.key === "H") {
+    if ((e.metaKey || e.ctrlKey) && (e.key === "h" || e.key === "H")) {
       e.preventDefault();
       toggleDrawer();
     } else if (e.key === "Escape" && drawerOpen) {

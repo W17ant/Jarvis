@@ -26,6 +26,25 @@ const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
 const OPENAI_API = "https://api.openai.com/v1/chat/completions";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 
+/* Lazy import for the system-warnings registry — avoids a top-level circular
+ * with server.mjs (server imports providers, providers reaches back through
+ * the registry which server also imports). Inlined dynamic import keeps both
+ * sides clean and means a missing/renamed module fails soft (warning skipped,
+ * actual error still propagates). */
+async function _registerAuthWarning(provider, status) {
+  try {
+    const SW = await import("../system-warnings.mjs");
+    SW.register({
+      code: `llm-key-invalid:${provider}`,
+      title: `${provider.toUpperCase()} key rejected`,
+      body: status === 401
+        ? `The configured API key was rejected (HTTP 401). Open Settings → API keys and update it.`
+        : `${provider.toUpperCase()} returned HTTP ${status} — your key may be missing scope or rate-limited.`,
+      action: { label: "OPEN SETTINGS", href: "javascript:document.getElementById('settingsBtn')?.click()" },
+    });
+  } catch { /* registry not wired (e.g. unit tests) — silent */ }
+}
+
 /* Lazy-loaded usage logger — kept out of the import block to avoid a
  * circular import risk when usage-log.mjs grows. Imported on first call,
  * cached thereafter. */
@@ -199,6 +218,10 @@ async function anthropicChat({ model, messages, tools, maxTokens, signal }) {
     const txt = await r.text().catch(() => "");
     /* Log even on failure — the operator wants to know about wasted retries. */
     logUsage({ provider: "anthropic", model, elapsedMs: Date.now() - t0, source: "providers.chat", error: `${r.status}: ${txt.slice(0, 120)}` });
+    /* 401/403 surface as toasts so the operator can fix their key without
+     * reading bridge logs. Higher codes (5xx, rate limits) stay invisible
+     * because they're transient and would just spam. */
+    if (r.status === 401 || r.status === 403) _registerAuthWarning("anthropic", r.status);
     throw new Error(`Anthropic ${r.status}: ${txt.slice(0, 400)}`);
   }
   const j = await r.json();
@@ -276,6 +299,7 @@ async function openaiChat({ model, messages, tools, maxTokens, signal }) {
   if (!r.ok) {
     const txt = await r.text().catch(() => "");
     logUsage({ provider: "openai", model, elapsedMs: Date.now() - t0, source: "providers.chat", error: `${r.status}: ${txt.slice(0, 120)}` });
+    if (r.status === 401 || r.status === 403) _registerAuthWarning("openai", r.status);
     throw new Error(`OpenAI ${r.status}: ${txt.slice(0, 400)}`);
   }
   const j = await r.json();

@@ -1,206 +1,89 @@
 {
-  "_comment": "Action manifest enrichment — labels, categories, voice phrasings layered on top of the bridge's tool definitions at /actions. Optional per-tool entries; missing tools fall back to name/description/parameters only. As the command palette + help cheat-sheet land they'll consume these fields. Categories: video, pdf, vision, mail, calendar, premiere, frameio, memory, agency, social, lightroom, shell, system.",
+  "_comment": "Action manifest enrichment — labels, categories, voice phrasings layered on top of the bridge's tool definitions at /actions. Five buckets so the help modal + 'what can you do' summary stay scannable: communication, productivity, creative, system, memory. Plugin-registered tools inherit category 'plugin' unless overridden here.",
 
-  "video_edit_from_shoot": {
-    "label": "Cut a teaser",
-    "category": "video",
-    "phrasings": ["cut a teaser", "edit a teaser from", "make a teaser of", "build a video for"]
-  },
-  "generate_youtube_short": {
-    "label": "YouTube short",
-    "category": "video",
-    "phrasings": ["render a youtube short", "cut a short for"]
-  },
-  "generate_youtube_thumbnail": {
-    "label": "YouTube thumbnail",
-    "category": "video",
-    "phrasings": ["thumbnail for", "youtube thumb"]
-  },
-  "generate_youtube_promo": {
-    "label": "YouTube thumb + short",
-    "category": "video",
-    "phrasings": ["thumbnail and a short", "promo pack for"]
+  "_categories": {
+    "communication": { "label": "Communication", "blurb": "Mail, calendar, messages, contacts, reminders." },
+    "productivity":  { "label": "Productivity",  "blurb": "Timers, tasks, knowledge base, code agent, web search." },
+    "creative":      { "label": "Creative",      "blurb": "Document generation, YouTube assets, social captions, brand pack export." },
+    "system":        { "label": "System",        "blurb": "Music, browser, screenshots, app launchers, sleep mode, purchases." },
+    "memory":        { "label": "Memory",        "blurb": "Persistent recall, conversation summaries, fact storage." }
   },
 
-  "create_pdf": {
-    "label": "Generate PDF",
-    "category": "pdf",
-    "phrasings": ["generate a", "draft a", "create a"]
-  },
-  "generate_shoot_report": {
-    "label": "Shoot report",
-    "category": "pdf",
-    "phrasings": ["shoot report", "wrap-up doc", "client report for"]
-  },
-  "press_release_from_bullets": {
-    "label": "Press release from bullets",
-    "category": "pdf",
-    "phrasings": ["draft a press release", "press release from"]
-  },
-  "hero_contact_sheet": {
-    "label": "Hero contact sheet",
-    "category": "pdf",
-    "phrasings": ["contact sheet of the heroes", "hero contact sheet"]
-  },
+  "get_upcoming_events": { "label": "Today's calendar",   "category": "communication", "phrasings": ["what's in the diary", "today's meetings", "what's on", "schedule for"] },
+  "add_calendar_event":  { "label": "Add calendar event", "category": "communication", "phrasings": ["schedule", "book", "add to calendar", "put in the diary"] },
+  "get_mail_summary":    { "label": "Inbox summary",      "category": "communication", "phrasings": ["check mail", "what's in my inbox", "any new emails"] },
+  "draft_email":         { "label": "Draft email",        "category": "communication", "phrasings": ["draft an email to", "write to", "send a note to"] },
+  "send_imessage":       { "label": "Send iMessage",      "category": "communication", "phrasings": ["text", "message", "iMessage"] },
+  "add_contact":         { "label": "Add contact",        "category": "communication", "phrasings": ["save contact", "remember this number"] },
+  "get_contact":         { "label": "Look up contact",    "category": "communication", "phrasings": ["who is", "find contact"] },
+  "list_contacts":       { "label": "List contacts",      "category": "communication", "phrasings": ["show me my contacts"] },
+  "add_reminder":        { "label": "Add reminder",       "category": "communication", "phrasings": ["remind me to", "set a reminder"] },
+  "compose_note":        { "label": "Note",               "category": "communication", "phrasings": ["take a note", "jot down"] },
+  "request_eod_digest":  { "label": "End-of-day digest",  "category": "communication", "phrasings": ["wrap up the day", "eod summary"] },
 
-  "describe_image": {
-    "label": "Describe shot",
-    "category": "vision",
-    "phrasings": ["what's in", "describe the shot", "caption this"]
-  },
-  "caption_shoot_folder": {
-    "label": "Caption a shoot",
-    "category": "vision",
-    "phrasings": ["summarise the shoot", "what's in the latest shoot"]
-  },
-  "find_frame": {
-    "label": "Find a shot by description",
-    "category": "vision",
-    "phrasings": ["find shots of", "where do we have"]
-  },
-  "find_similar_shots": {
-    "label": "Find similar shots",
-    "category": "vision",
-    "phrasings": ["find shots like this"]
-  },
-  "score_clip_for_trailer": {
-    "label": "Score clip for trailer",
-    "category": "vision",
-    "phrasings": ["how good is this clip"]
-  },
-  "find_portrait_crop": {
-    "label": "Suggest crop",
-    "category": "vision",
-    "phrasings": ["where should I crop"]
-  },
-  "crop_to_portrait": {
-    "label": "Crop to vertical",
-    "category": "vision",
-    "phrasings": ["make a vertical of", "crop for stories"]
-  },
-  "export_all_aspects": {
-    "label": "Export all aspect ratios",
-    "category": "vision",
-    "phrasings": ["export every aspect", "all variants of"]
-  },
+  "set_timer":           { "label": "Set timer",          "category": "productivity", "phrasings": ["set a timer", "timer for", "start a timer"] },
+  "list_timers":         { "label": "Active timers",      "category": "productivity", "phrasings": ["what timers", "any active timers"] },
+  "cancel_timer":        { "label": "Cancel timer",       "category": "productivity", "phrasings": ["stop the timer", "cancel timer"] },
+  "set_focus":           { "label": "Focus mode",         "category": "productivity", "phrasings": ["focus", "do not disturb", "dnd"] },
+  "search_knowledge":    { "label": "Search docs",        "category": "productivity", "phrasings": ["search my docs", "find in knowledge", "look up"] },
+  "ingest_knowledge":    { "label": "Add to knowledge",   "category": "productivity", "phrasings": ["add this to docs", "remember this document"] },
+  "code_agent_run":      { "label": "Code agent",         "category": "productivity", "phrasings": ["write me a", "code up a", "build me a script"] },
+  "build_plugin":        { "label": "Build a plugin",     "category": "system",       "phrasings": ["build a plugin", "make me a tool", "I want jarvis to be able to", "scaffold a plugin"] },
+  "create_workspace":    { "label": "Create workspace",   "category": "system",       "phrasings": ["create a workspace", "set up a new workspace", "new workspace called", "I want a separate context for"] },
+  "switch_workspace":    { "label": "Switch workspace",   "category": "system",       "phrasings": ["switch to", "switch workspace", "I'm in", "let's work on", "change workspace"] },
+  "list_workspaces":     { "label": "List workspaces",    "category": "system",       "phrasings": ["what workspaces", "show my workspaces", "which workspace am I in"] },
+  "delete_workspace":    { "label": "Delete workspace",   "category": "system",       "phrasings": ["delete workspace", "remove the workspace"] },
+  "refresh_workspace_knowledge": { "label": "Refresh workspace knowledge", "category": "memory", "phrasings": ["refresh my workspace knowledge", "index this folder", "ingest the new files", "scan workspace files"] },
+  "workspace_insights":  { "label": "Workspace insights", "category": "system",       "phrasings": ["what's in this workspace", "workspace stats", "how active is", "show me workspace details"] },
+  "smart_inbox_briefing": { "label": "Smart inbox briefing", "category": "communication", "phrasings": ["what's important", "what should I do first", "brief me", "what's on my plate", "what's the day looking like", "morning briefing"] },
+  "act_on_inbox_item":   { "label": "Act on inbox item",  "category": "communication", "phrasings": ["reply to the first one", "open the second one", "snooze that", "tick off the third reminder", "accept the next meeting"] },
+  "list_reminders":      { "label": "List reminders",     "category": "productivity",  "phrasings": ["what reminders do I have", "show my to-dos", "what's pending", "list my reminders"] },
+  "export_workspace":    { "label": "Export workspace",   "category": "system",       "phrasings": ["export this workspace", "back up my workspace", "save workspace bundle"] },
+  "import_workspace":    { "label": "Import workspace",   "category": "system",       "phrasings": ["import workspace", "restore workspace from bundle", "load workspace bundle"] },
+  "web_search":          { "label": "Web search",         "category": "productivity", "phrasings": ["search the web", "google", "look up online"] },
+  "ask_internal":        { "label": "Internal lookup",    "category": "productivity", "phrasings": ["what does", "explain"] },
+  "team_standup":        { "label": "Team standup",       "category": "productivity", "phrasings": ["standup", "team status"] },
+  "dream_cycle":         { "label": "Overnight cleanup",  "category": "productivity", "phrasings": ["dream cycle", "overnight pass", "consolidate memory"] },
+  "transcribe_video":    { "label": "Transcribe video",   "category": "productivity", "phrasings": ["transcribe", "what's said in"] },
+  "cancel_active_jobs":  { "label": "Cancel jobs",        "category": "productivity", "phrasings": ["stop everything", "cancel jobs", "abort"] },
+  "run_shell":           { "label": "Shell command",      "category": "productivity", "phrasings": ["run", "execute"] },
+  "write_file":          { "label": "Write file",         "category": "productivity", "phrasings": ["save to", "write to"] },
 
-  "draft_email": {
-    "label": "Draft email",
-    "category": "mail",
-    "phrasings": ["draft an email to", "email"]
-  },
-  "get_mail_summary": {
-    "label": "Inbox summary",
-    "category": "mail",
-    "phrasings": ["what's in the inbox", "summarise my mail"]
-  },
+  "create_pdf":               { "label": "Generate PDF",         "category": "creative", "phrasings": ["pdf for", "draft a", "create a pdf"] },
+  "generate_pptx":            { "label": "PowerPoint deck",      "category": "creative", "phrasings": ["powerpoint", "deck", "pptx"] },
+  "generate_docx":            { "label": "Word document",        "category": "creative", "phrasings": ["word doc", "docx"] },
+  "generate_xlsx":            { "label": "Excel sheet",          "category": "creative", "phrasings": ["spreadsheet", "excel", "xlsx"] },
+  "generate_youtube_promo":   { "label": "YT thumb + short",     "category": "creative", "phrasings": ["youtube promo", "promo pack"] },
+  "generate_youtube_thumbnail": { "label": "YouTube thumbnail",  "category": "creative", "phrasings": ["thumbnail for", "youtube thumb"] },
+  "generate_youtube_short":   { "label": "YouTube short",        "category": "creative", "phrasings": ["youtube short", "short for"] },
+  "generate_social_captions": { "label": "Social captions",      "category": "creative", "phrasings": ["caption for", "social copy", "instagram caption"] },
+  "check_brand_tone":         { "label": "Brand tone check",     "category": "creative", "phrasings": ["does this match the brand", "tone check"] },
+  "hashtag_research":         { "label": "Hashtag research",     "category": "creative", "phrasings": ["hashtags for", "tags for"] },
+  "brand_pack_export":        { "label": "Brand pack export",    "category": "creative", "phrasings": ["brand pack", "deliverables for"] },
+  "export_all_aspects":       { "label": "Multi-aspect export",  "category": "creative", "phrasings": ["all aspects", "every ratio"] },
+  "describe_image":           { "label": "Describe image",       "category": "creative", "phrasings": ["what's in this image", "describe this picture"] },
+  "vehicle_spec_lookup":      { "label": "Vehicle spec",         "category": "creative", "phrasings": ["specs for", "vehicle data"] },
 
-  "get_upcoming_events": {
-    "label": "Upcoming events",
-    "category": "calendar",
-    "phrasings": ["what's coming up", "what's on this week"]
-  },
-  "add_calendar_event": {
-    "label": "Add calendar event",
-    "category": "calendar",
-    "phrasings": ["add to my calendar", "schedule"]
-  },
+  "open_url":            { "label": "Open URL",          "category": "system", "phrasings": ["open", "go to", "launch website"] },
+  "request_browse":      { "label": "Agentic browse",    "category": "system", "phrasings": ["browse", "go online and"] },
+  "take_screenshot":     { "label": "Screenshot",        "category": "system", "phrasings": ["screenshot", "capture screen", "screen grab"] },
+  "play_music":          { "label": "Play music",        "category": "system", "phrasings": ["play music", "put on", "play some"] },
+  "pause_music":         { "label": "Pause music",       "category": "system", "phrasings": ["pause", "stop the music"] },
+  "read_article":        { "label": "Read article",      "category": "system", "phrasings": ["read this article", "summarise this page"] },
+  "lookup_password":     { "label": "Look up password",  "category": "system", "phrasings": ["password for", "credentials for"] },
+  "enter_sleep_mode":    { "label": "Sleep / quiet",     "category": "system", "phrasings": ["sleep", "shut down", "quiet mode"] },
+  "undo_last":           { "label": "Undo",              "category": "system", "phrasings": ["undo", "scratch that", "go back"] },
+  "read_active_window":  { "label": "Read active window","category": "system", "phrasings": ["what's on screen", "read this window"] },
+  "get_capabilities":    { "label": "What can you do",   "category": "system", "phrasings": ["what can you do", "show me commands", "list tools"] },
+  "request_purchase":    { "label": "Make a purchase",   "category": "system", "phrasings": ["buy", "order", "purchase"] },
+  "search_products":     { "label": "Search products",   "category": "system", "phrasings": ["find a", "search for"] },
+  "compare_products":    { "label": "Compare products",  "category": "system", "phrasings": ["compare", "which is better"] },
+  "find_flights":        { "label": "Find flights",      "category": "system", "phrasings": ["flights to", "find a flight"] },
+  "add_project":         { "label": "Add project",       "category": "system", "phrasings": ["add project", "new project"] },
+  "list_projects":       { "label": "List projects",     "category": "system", "phrasings": ["what projects", "show projects"] },
+  "random_quote":        { "label": "Random quote",      "category": "system", "phrasings": ["a quote", "say something witty"] },
 
-  "premiere_open_project": { "label": "Open Premiere project", "category": "premiere" },
-  "premiere_import_folder": { "label": "Import folder to Premiere", "category": "premiere" },
-  "premiere_create_sequence_from_folder": { "label": "Build sequence from folder", "category": "premiere" },
-  "premiere_render_active_sequence": { "label": "Render active sequence", "category": "premiere" },
-
-  "frameio_list_pending_review": {
-    "label": "Pending review",
-    "category": "frameio",
-    "phrasings": ["what's pending review", "review queue"]
-  },
-  "frameio_get_comments": { "label": "Read Frame.io comments", "category": "frameio" },
-  "frameio_add_comment": { "label": "Comment on Frame.io", "category": "frameio" },
-  "frameio_set_status": { "label": "Set Frame.io status", "category": "frameio" },
-  "frameio_search_files": { "label": "Search Frame.io", "category": "frameio" },
-
-  "add_contact":   { "label": "Add contact", "category": "memory" },
-  "get_contact":   { "label": "Look up contact", "category": "memory" },
-  "list_contacts": { "label": "List contacts", "category": "memory" },
-  "remember":      { "label": "Remember a fact", "category": "memory" },
-  "recall":        { "label": "Recall a fact", "category": "memory" },
-  "add_project":   { "label": "Add project", "category": "memory" },
-  "list_projects": { "label": "List projects", "category": "memory" },
-  "save_conversation": { "label": "Save session summary", "category": "memory" },
-
-  "flag_shot":        { "label": "Flag shot", "category": "shoots" },
-  "list_shot_flags":  { "label": "List shot flags", "category": "shoots" },
-  "clear_shot_flag":  { "label": "Clear shot flag", "category": "shoots" },
-  "trackday_tag":     { "label": "Tag track-day metadata", "category": "shoots" },
-  "batch_watermark":  { "label": "Watermark a folder", "category": "shoots" },
-
-  "add_usage_rights":    { "label": "Record clearance", "category": "rights" },
-  "check_usage_rights":  { "label": "Check clearance", "category": "rights" },
-  "list_usage_rights":   { "label": "List rights", "category": "rights" },
-  "expire_usage_rights": { "label": "Revoke clearance", "category": "rights" },
-
-  "generate_social_captions": { "label": "Social captions", "category": "agency" },
-  "check_brand_tone":         { "label": "Check brand tone", "category": "agency" },
-  "hashtag_research":         { "label": "Hashtag research", "category": "agency" },
-  "vehicle_spec_lookup":      { "label": "Vehicle spec", "category": "agency" },
-  "ask_internal":             { "label": "How do we usually...", "category": "agency" },
-  "team_standup":             { "label": "Team standup", "category": "agency" },
-  "describe_shoot_with_specs": { "label": "Brief on a shoot", "category": "agency" },
-  "color_match_reference":    { "label": "Match a colour grade", "category": "agency" },
-
-  "generate_outreach_pack":   { "label": "Outreach pack", "category": "leads" },
-  "list_outreach_leads":      { "label": "List leads", "category": "leads" },
-  "mark_lead_contacted":      { "label": "Mark lead contacted", "category": "leads" },
-
-  "apply_lightroom_preset":   { "label": "Apply Lightroom preset", "category": "lightroom" },
-  "list_lightroom_presets":   { "label": "List Lightroom presets", "category": "lightroom" },
-
-  "press_cycle_radar": {
-    "label": "Press-cycle radar",
-    "category": "leads",
-    "phrasings": ["what's in the press cycle", "any pitch opportunities", "what's been in the news"]
-  },
-
-  "pre_shoot_checklist": {
-    "label": "Pre-shoot kit checklist",
-    "category": "agency",
-    "phrasings": ["kit check for", "what should we pack for", "pre-shoot list for"]
-  },
-
-  "brand_pack_export": {
-    "label": "Build a brand pack",
-    "category": "shoots",
-    "phrasings": ["build a brand pack of", "export deliverables for", "pack this up for"]
-  },
-
-  "auto_cull": {
-    "label": "Auto-cull a shoot",
-    "category": "shoots",
-    "phrasings": ["cull the latest shoot", "auto-cull", "remove the duplicates from"]
-  },
-
-  "dream_cycle": {
-    "label": "Tidy memory",
-    "category": "memory",
-    "phrasings": ["tidy up the memory", "compact memory", "merge duplicates"]
-  },
-
-  "read_active_window": {
-    "label": "Read the active window",
-    "category": "system",
-    "phrasings": ["what's open", "what app am I in", "what's on screen", "what's the active sequence"]
-  },
-
-  "undo_last": {
-    "label": "Undo last action",
-    "category": "system",
-    "phrasings": ["undo", "scratch that", "never mind that", "reverse that"]
-  },
-
-  "web_search":               { "label": "Web search", "category": "system" },
-  "run_shell":                { "label": "Run shell command", "category": "system" },
-  "write_file":               { "label": "Write file", "category": "system" },
-  "get_capabilities":         { "label": "What can you do", "category": "system" }
+  "remember":            { "label": "Remember a fact",   "category": "memory", "phrasings": ["remember that", "make a note of", "keep this in mind"] },
+  "recall":              { "label": "Recall facts",      "category": "memory", "phrasings": ["what do you remember about", "recall", "what did I say about"] },
+  "save_conversation":   { "label": "Save conversation", "category": "memory", "phrasings": ["save this chat", "wrap up the conversation"] }
 }

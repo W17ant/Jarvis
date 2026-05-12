@@ -46,9 +46,15 @@ const DEFAULT_LAYOUT = {
     { id: "system", size: "large" },
   ],
   right: [
+    /* Sprint 8: inbox replaces launch in the default layout. The launch
+     * dock's items are equivalent to "open <app>" voice commands; the
+     * inbox panel is the new "what's important right now" surface that
+     * operators value daily. Existing operators with persisted layouts
+     * keep what they had — this only affects fresh installs. To restore
+     * launch, Cmd+L → drag it back from the widget tray. */
     { id: "clock",   size: "small" },
     { id: "weather", size: "small" },
-    { id: "launch",  size: "small" },
+    { id: "inbox",   size: "small" },
   ],
 };
 
@@ -314,6 +320,21 @@ function hideHint() {
 /** Wire keybinds + apply persisted layout. Called once at boot. */
 export function init() {
   applyLayout(readLayout());
+
+  /* Re-apply layout on viewport resize. Why: inline grid-row writes from the
+   * last apply persist on the panels, so if a future media query changes the
+   * grid template (e.g. a narrow-display fallback), the stale inline values
+   * would leak across breakpoints. Re-asserting from the saved layout is
+   * idempotent and means any future breakpoint-aware sizing has a hook.
+   * Debounced to 150ms so we don't thrash during drag-resize on macOS. */
+  let _resizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (_resizeTimer) clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => {
+      _resizeTimer = null;
+      applyLayout(readLayout());
+    }, 150);
+  });
 
   document.addEventListener("keydown", (e) => {
     /* Cmd/Ctrl + L toggles edit mode. The L is for Layout — we don't conflict with

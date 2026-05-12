@@ -23,6 +23,7 @@ import os
 import platform
 import sys
 import tempfile
+import time
 import threading
 
 PORT = int(os.environ.get("WHISPER_PORT", "8768"))
@@ -110,21 +111,27 @@ def _transcribe_mlx(path: str, want_segments: bool) -> dict:
     """MLX backend. Calls mlx_whisper.transcribe per request — no persistent
     model object; MLX caches the loaded weights internally between calls.
     Returns the same shape as the faster-whisper path so the HTTP handler
-    is backend-agnostic."""
+    is backend-agnostic.
+
+    Sprint 11 perf knobs:
+    - condition_on_previous_text=False: each turn is independent (wake-word
+      fragment + short query), so re-feeding prior context just adds tokens
+      to process for no recognition benefit. Saves ~5-10% per call.
+    - temperature=[0.0, 0.2]: was [0.0, 0.2, 0.4]. The third fallback
+      almost never improved transcripts but did fire on quiet audio,
+      producing hallucinated phrases (the very bug we filter client-side).
+      Two attempts is a better speed/safety trade for our short-clip use case.
+    """
     import mlx_whisper
     result = mlx_whisper.transcribe(
         path,
         path_or_hf_repo=_mlx_repo,
         language="en",
-        condition_on_previous_text=True,
+        condition_on_previous_text=False,
         initial_prompt=WHISPER_INITIAL_PROMPT,
         compression_ratio_threshold=2.4,
         no_speech_threshold=0.45,
-        # MLX whisper temperatures parameter is the same shape as openai-whisper:
-        # ascending list, falls back through them on low confidence.
-        temperature=[0.0, 0.2, 0.4],
-        # MLX doesn't have an in-engine VAD; we rely on whisper's no_speech_threshold
-        # for silence rejection. For long-form / dictation we'd add silero VAD upstream.
+        temperature=[0.0, 0.2],
     )
     text = (result.get("text") or "").strip()
     duration = float(result.get("segments", [{}])[-1].get("end", 0.0)) if result.get("segments") else 0.0
@@ -236,13 +243,18 @@ class Handler(BaseHTTPRequestHandler):
                 f.write(data)
         except Exception:
             pass
+        # T1 sprint: time the inference path so the HUD debug panel can
+        # separate model time from network/serialisation time. perf_counter
+        # is monotonic + sub-ms precision.
+        t0 = time.perf_counter()
         try:
             result = transcribe_bytes(data, want_segments=want_segments)
         except Exception as e:
             print(f"[whisper] transcribe failed: {e}", file=sys.stderr, flush=True)
             self.send_response(500); self._cors(); self.end_headers()
             self.wfile.write(f"transcribe error: {e}".encode()); return
-        print(f"[whisper] → text={result['text']!r}  duration={result.get('duration', 0):.2f}s", flush=True)
+        result["transcribe_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        print(f"[whisper] → text={result['text']!r}  duration={result.get('duration', 0):.2f}s  transcribe_ms={result['transcribe_ms']}", flush=True)
         body = json.dumps(result).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json"); self._cors()
@@ -253,9 +265,37 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def _warmup():
+    """Run a 0.5s silent transcribe at boot so the FIRST real request doesn't
+    pay model-weights-load cost on top of inference. MLX caches weights after
+    the first call; this fires that first call against a tiny synthetic clip
+    so the operator never feels it. Sprint 11 — saves ~1-3s on the first turn.
+
+    Why on a thread: don't block server start. /health already reports backend
+    readiness; warmup just primes the inference path in the background.
+    """
+    if BACKEND == "none":
+        return
+    try:
+        import wave, struct
+        # 0.5s of silence at 16kHz mono 16-bit — bare minimum for whisper to
+        # accept and run a forward pass. Real transcribed text doesn't matter.
+        path = os.path.join(tempfile.gettempdir(), "jarvis-whisper-warmup.wav")
+        with wave.open(path, "wb") as f:
+            f.setnchannels(1); f.setsampwidth(2); f.setframerate(16000)
+            f.writeframes(b"\x00\x00" * 8000)
+        t0 = time.perf_counter()
+        transcribe_bytes(open(path, "rb").read(), want_segments=False)
+        ms = round((time.perf_counter() - t0) * 1000)
+        print(f"[whisper] warmup complete in {ms}ms — model loaded, first real request will be hot", flush=True)
+    except Exception as e:
+        print(f"[whisper] warmup failed (non-fatal): {e}", flush=True)
+
+
 def main():
     addr = ("127.0.0.1", PORT)
     print(f"[whisper] listening on http://{addr[0]}:{addr[1]}/  (POST /transcribe, GET /health)", flush=True)
+    threading.Thread(target=_warmup, daemon=True).start()
     ThreadingHTTPServer(addr, Handler).serve_forever()
 
 

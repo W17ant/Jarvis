@@ -1,11 +1,23 @@
-/** paths.mjs - Single source of truth for the operator-configurable shoots + output dirs.
+/** paths.mjs - Single source of truth for the operator-configurable working + output dirs.
  *
  *  Why: every bridge module used to compute `path.join(PROJECT_DIR, "shoots")` /
  *  `path.join(PROJECT_DIR, "output")` inline, which made the install hard-pinned to the
- *  repo directory. Operators on different machines want their shoots on a NAS or fast
- *  external SSD and their output on whatever drive is least full. This module reads
+ *  repo directory. Operators on different machines want their working files on a NAS or
+ *  fast external SSD and their output on whatever drive is least full. This module reads
  *  those roots from `config/brand.json` `.paths` block (with PROJECT_DIR fallbacks) and
  *  exposes a stable resolver so call sites don't care where the data physically lives.
+ *
+ *  v0.3 rename: "shoots" → "working" to drop the FOM-photo-agency vocabulary. The
+ *  Paths API exposes BOTH `getShootsDir()` (legacy alias) and `getWorkingDir()` (new
+ *  primary). brand.json's `paths.shoots` and `paths.working` are both honoured —
+ *  operators who set the new one win; existing installs that only have the old one
+ *  keep working unchanged. Default dir name on a fresh install is now `working/`,
+ *  but if `shoots/` already exists on disk the cache prefers it so we don't fragment
+ *  the operator's filesystem mid-flight.
+ *
+ *  Workspaces v1: the active workspace's `working_root` (set via the workspaces
+ *  module) overrides this resolver. Switching workspaces switches the working
+ *  dir defaults — see Workspaces.systemPromptHint + the override hook below.
  *
  *  The output directory carries a fixed sub-folder taxonomy (OUTPUT_SUBDIRS below) so the
  *  operator's MAIN folder always organises into the same shape: youtube/{thumbnails,shorts},
@@ -57,24 +69,57 @@ export const OUTPUT_SUBDIRS = Object.freeze({
 let cache = null;
 
 /** Read brand.json paths block. Returns the resolved roots; falls back to PROJECT_DIR
- *  defaults on any failure so a half-configured install still works. */
+ *  defaults on any failure so a half-configured install still works.
+ *
+ *  Resolution priority for the working dir:
+ *    1. `paths.working` from brand.json (new key, preferred)
+ *    2. `paths.shoots` from brand.json (legacy key, honoured for back-compat)
+ *    3. PROJECT_DIR/working — if the directory already exists on disk
+ *    4. PROJECT_DIR/shoots — if the legacy directory already exists on disk
+ *    5. PROJECT_DIR/working — created on first use
+ *
+ *  This means: a fresh install creates `working/`; an upgraded install with an
+ *  existing `shoots/` keeps using it; an operator who explicitly sets one or
+ *  the other in settings always wins. */
 function loadCache() {
   if (cache) return cache;
   let raw = null;
   try { raw = JSON.parse(fs.readFileSync(BRAND_PATH, "utf8")); } catch { /* missing/corrupt → defaults */ }
   const p = raw?.paths || {};
   /* If the configured value is relative, resolve under PROJECT_DIR; absolute paths pass
-   * through. This lets the operator type "shoots" or "/Volumes/Workdrive/Shoots" and have
+   * through. This lets the operator type "working" or "/Volumes/Workdrive/Files" and have
    * both behave correctly. */
   const resolveOrDefault = (val, defaultName) => {
     const v = (val || "").trim();
     if (!v) return path.join(PROJECT_DIR, defaultName);
     return path.isAbsolute(v) ? v : path.join(PROJECT_DIR, v);
   };
+  /* Pick the working-dir root. Honour explicit config first; if neither is set,
+   * prefer an existing on-disk directory over creating a new one. */
+  let workingRoot;
+  let workingConfigured = false;
+  if (p.working && String(p.working).trim()) {
+    workingRoot = resolveOrDefault(p.working, "working");
+    workingConfigured = true;
+  } else if (p.shoots && String(p.shoots).trim()) {
+    /* Legacy key — honour it but don't promote it. */
+    workingRoot = resolveOrDefault(p.shoots, "working");
+    workingConfigured = true;
+  } else {
+    const newDefault = path.join(PROJECT_DIR, "working");
+    const legacyDefault = path.join(PROJECT_DIR, "shoots");
+    if (fs.existsSync(newDefault)) workingRoot = newDefault;
+    else if (fs.existsSync(legacyDefault)) workingRoot = legacyDefault;
+    else workingRoot = newDefault;
+  }
   cache = {
-    shoots: resolveOrDefault(p.shoots, "shoots"),
+    /* `shoots` is preserved as the cache key for back-compat with isWithinAllowedRoots
+     * + getPaths consumers; it now mirrors `working`. New code reads `working`. */
+    working: workingRoot,
+    shoots: workingRoot,
     output: resolveOrDefault(p.output, "output"),
-    shootsConfigured: !!p.shoots,
+    workingConfigured,
+    shootsConfigured: workingConfigured,
     outputConfigured: !!p.output,
   };
   return cache;
@@ -88,7 +133,29 @@ function ensureDirSync(p) {
   return p;
 }
 
-export function getShootsDir() { return ensureDirSync(loadCache().shoots); }
+/* Workspace working_root override — when an active workspace declares its own
+ * working directory, callers of getWorkingDir() get the workspace's path
+ * instead of the global default. The override is set via setWorkspaceOverride
+ * by workspaces.mjs (or server.mjs, depending on wiring) so paths.mjs stays
+ * decoupled from workspaces.mjs (no cross-import). */
+let _workspaceOverride = null;
+export function setWorkspaceOverride(absPath) {
+  _workspaceOverride = absPath || null;
+  /* Don't invalidate cache — the override lives alongside, not inside, the
+   * cache. getWorkingDir() reads the override at call time. */
+}
+
+/** New primary API. The workspace override (if any) wins, else the configured
+ *  / inherited working root from brand.json. */
+export function getWorkingDir() {
+  if (_workspaceOverride) return ensureDirSync(_workspaceOverride);
+  return ensureDirSync(loadCache().working);
+}
+
+/** Deprecated alias — kept so the ~58 existing call sites don't all need to
+ *  change at once. New code should call getWorkingDir() directly. */
+export function getShootsDir() { return getWorkingDir(); }
+
 export function getOutputDir() { return ensureDirSync(loadCache().output); }
 
 /** Resolve a deliverable sub-folder under the output root. Throws if `key` isn't in the
@@ -114,10 +181,13 @@ export function isWithinAllowedRoots(abs) {
 export function getPaths() {
   const c = loadCache();
   return {
-    shoots: c.shoots,
+    working: c.working,
+    shoots: c.shoots,            /* legacy alias — same value as working */
     output: c.output,
-    shootsConfigured: c.shootsConfigured,
+    workingConfigured: c.workingConfigured,
+    shootsConfigured: c.shootsConfigured,    /* legacy alias */
     outputConfigured: c.outputConfigured,
+    workspaceOverride: _workspaceOverride,
     /* Echo the taxonomy back so settings UI can render the sub-folder list without
      * importing this module on the client. */
     outputSubdirs: { ...OUTPUT_SUBDIRS },
@@ -125,10 +195,18 @@ export function getPaths() {
 }
 
 /** Persist new paths to brand.json. Validates that each path exists OR can be created;
- *  if mkdir fails (permission denied, parent missing) the call rejects without writing. */
-export async function setPaths({ shoots, output }) {
+ *  if mkdir fails (permission denied, parent missing) the call rejects without writing.
+ *
+ *  Accepts both `working` (new) and `shoots` (legacy) — they're the same field; if
+ *  both are passed, `working` wins. The persisted brand.json always uses `paths.working`
+ *  so new installs converge on the modern key. */
+export async function setPaths({ shoots, output, working } = {}) {
   const updates = {};
-  if (typeof shoots === "string" && shoots.trim()) updates.shoots = shoots.trim();
+  /* `working` takes priority over `shoots` so legacy callers don't override new ones. */
+  const newWorking = (typeof working === "string" && working.trim())
+    ? working.trim()
+    : (typeof shoots === "string" && shoots.trim()) ? shoots.trim() : null;
+  if (newWorking) updates.working = newWorking;
   if (typeof output === "string" && output.trim()) updates.output = output.trim();
   if (Object.keys(updates).length === 0) return { ok: true, updated: {} };
 

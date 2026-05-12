@@ -243,6 +243,25 @@ export function add(item) {
 /** Wire DOM + bridge subscriptions. Called once at boot. */
 export function init() {
   refreshDom();
+
+  /* Catch-up: pull existing system warnings the bridge registered before
+   * we connected (e.g. macmon-missing fires at bridge boot, before the
+   * HUD's WebSocket is even established). Without this, the operator
+   * misses the toast on the first session after launching. */
+  fetch("http://localhost:8766/health/warnings", { cache: "no-store" })
+    .then((r) => r.ok ? r.json() : null)
+    .then((j) => {
+      for (const w of (j?.warnings || [])) {
+        add({
+          kind: "error",
+          title: w.title,
+          body: w.body,
+          taskKind: `system-warning:${w.code}`,
+          action: w.action,
+        });
+      }
+    })
+    .catch(() => { /* bridge offline; the bridge.offline toast handler will fire instead */ });
   if (bellEl) {
     bellEl.addEventListener("click", () => {
       if (state.drawerOpen) closeDrawer();
@@ -307,6 +326,64 @@ export function init() {
       body: d.body,
       taskKind: d.kind,                      /* preserve specific kind for filtering / icons */
       action: d.action,
+    });
+  });
+
+  /* System warnings (bridge-detected misconfigurations: macmon missing,
+   * LLM key invalid, etc.). The bridge dedupes by code so we'll only see
+   * each one once per session. Operator gets a toast with an action label. */
+  Bridge.on("system.warning", (m) => {
+    const d = m.data || {};
+    if (!d.code || !d.title) return;
+    add({
+      kind: "error",
+      title: d.title,
+      body: d.body,
+      taskKind: `system-warning:${d.code}`,
+      action: d.action,
+    });
+  });
+
+  /* Unhandled exception in the bridge — crash-reporter has already written
+   * a sanitised row to data/audit/crashes/. We toast so the operator knows
+   * something tripped (the bridge may keep running for `unhandledRejection`,
+   * but `uncaughtException` will exit the process — the toast is the last
+   * UI signal before the WS dies). */
+  Bridge.on("system.crash", (m) => {
+    const d = m.data || {};
+    add({
+      kind: "error",
+      title: `Bridge ${d.source || "exception"}: ${d.name || "Error"}`,
+      body: (d.message || "(no message)").slice(0, 240),
+      taskKind: "system-crash",
+      action: { label: "VIEW DIAGNOSTICS", href: "javascript:document.getElementById('settingsBtn')?.click()" },
+    });
+  });
+
+  /* Bridge connectivity. The synthetic offline/online events from
+   * bridge-client.js fire only after a 2s grace so quick `./launch.sh
+   * restart` cycles don't spam toasts. The offline toast is what an
+   * operator needs to see when their bridge actually died — silent
+   * failure is the worst version of this UX. */
+  let _offlineToasted = false;
+  Bridge.on("bridge.offline", () => {
+    if (_offlineToasted) return;
+    _offlineToasted = true;
+    add({
+      kind: "error",
+      title: "Bridge offline",
+      body: "WebSocket disconnected for >2s. Voice + tools won't respond. Run ./launch.sh restart in Terminal.",
+      taskKind: "bridge-offline",
+    });
+  });
+  Bridge.on("bridge.online", () => {
+    if (!_offlineToasted) return;          // first connect — don't toast
+    _offlineToasted = false;
+    add({
+      kind: "success",
+      title: "Bridge restored",
+      body: "Connection recovered.",
+      taskKind: "bridge-online",
     });
   });
 }

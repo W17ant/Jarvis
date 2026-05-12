@@ -52,6 +52,11 @@ let _bridgeAsk = async () => {};
 let _getSessionId = () => null;
 let _getRecDestination = () => null;
 let _tapTtsToRec = () => {};
+/* TTS mute toggle — when true, speak() and speakStream() skip audio synthesis
+ * entirely. The LLM round-trip still happens (so reply text appears in the
+ * HUD) but no Kokoro / system-speech playback. State is owned by voice.js
+ * (which persists it in localStorage) and read here via _isTtsMuted. */
+let _isTtsMuted = () => false;
 
 /** One-shot wiring from voice.js. Idempotent. */
 export function setHandlers({
@@ -67,6 +72,7 @@ export function setHandlers({
   getSessionId,
   getRecDestination,
   tapTtsToRec,
+  isTtsMuted,
 } = {}) {
   if (typeof setState === "function") _setState = setState;
   if (replyEl) _replyEl = replyEl;
@@ -80,6 +86,7 @@ export function setHandlers({
   if (typeof getSessionId === "function") _getSessionId = getSessionId;
   if (typeof getRecDestination === "function") _getRecDestination = getRecDestination;
   if (typeof tapTtsToRec === "function") _tapTtsToRec = tapTtsToRec;
+  if (typeof isTtsMuted === "function") _isTtsMuted = isTtsMuted;
 }
 
 /** Speak using local Kokoro TTS (free, Apache 2.0). Falls back to system
@@ -87,6 +94,20 @@ export function setHandlers({
  *  can tap the buffer into the existing speaking analyser for the
  *  real-time waveform. */
 export async function speak(text) {
+  /* Mute fast-path: skip ALL synthesis, but keep the state-flicker so the
+   * UI still shows the "speaking" → "idle" transition for visual continuity.
+   * Reply text in _replyEl is set by the caller, so the operator still sees
+   * the response — they just don't hear it. */
+  if (_isTtsMuted()) {
+    _setState("speaking");
+    /* Tiny delay matches the perceived "I read this" beat for symmetry with
+     * the audio path. Long enough to register, short enough not to feel
+     * laggy when typing in a loud environment. */
+    await new Promise((r) => setTimeout(r, 200));
+    _setState("idle");
+    setTimeout(() => { if (_transcript) _transcript.hidden = true; }, 1800);
+    return;
+  }
   _setState("speaking");
   const spoken = TTS.sanitiseForTTS(text);
 
@@ -154,11 +175,25 @@ export async function speakStream(query, history) {
   /* Filler phrase — randomised acknowledgement that buys time while the
    * LLM thinks. Deferred 600ms; cancelled the moment the LLM emits its
    * first sentence (so fast queries skip filler entirely). Slow queries
-   * (diary / shoot / vision tasks) still hear filler. */
+   * (diary / shoot / vision tasks) still hear filler.
+   *
+   * Two output paths:
+   *   - Audio (Kokoro enqueue) — skipped when TTS is muted
+   *   - Visual (jarvis.filler event) — fires regardless of mute, so the
+   *     chat thread in the text-input modal can show "Let me check…" as
+   *     a placeholder bubble while the operator waits. Replaced by the
+   *     real reply text as soon as the first sentence arrives. */
   const filler = TTS.pickFiller({ long: TTS.looksSlow(query) });
   const FILLER_DELAY_MS = 600;
   let fillerTimer = setTimeout(() => {
-    TTS.enqueueSentence(filler, _getKokoroVoice());
+    if (!_isTtsMuted()) {
+      TTS.enqueueSentence(filler, _getKokoroVoice());
+    }
+    try {
+      window.dispatchEvent(new CustomEvent("jarvis.filler", {
+        detail: { runId: session.runId, text: filler },
+      }));
+    } catch {}
   }, FILLER_DELAY_MS);
   const cancelPendingFiller = () => {
     if (fillerTimer) { clearTimeout(fillerTimer); fillerTimer = null; }
@@ -186,9 +221,32 @@ export async function speakStream(query, history) {
       if (session.runId && msg.runId !== session.runId) return;
       const sentence = msg.data?.text || msg.text;
       if (!sentence) return;
+      /* Mark the moment the FIRST sentence of this turn arrives from the LLM
+       * stream. Combined with v.rec-end and v.audio-play this isolates the
+       * LLM-thinking time vs the TTS-synth time. Only mark once per turn to
+       * avoid clobbering on subsequent sentences. */
+      if (!session.firstSentenceMarked) {
+        session.firstSentenceMarked = true;
+        try { performance.mark("v.llm-first-sentence"); } catch {}
+      }
       /* Real reply beat the filler fuse — kill the pending filler. */
       cancelPendingFiller();
-      TTS.enqueueSentence(sentence, _getKokoroVoice());
+      /* Skip Kokoro enqueue when TTS is muted. The reply still streams to
+       * _replyEl below so the operator sees the response on screen — they
+       * just don't hear it. Useful in loud environments + when typing. */
+      if (!_isTtsMuted()) {
+        TTS.enqueueSentence(sentence, _getKokoroVoice());
+      }
+      /* Broadcast for the chat-thread surface in the text-input modal. The
+       * modal subscribes per-turn so it can stream sentences into the
+       * pending assistant bubble. runId scopes events to the current
+       * turn — late sentences from a stale stream are filtered out by
+       * subscribers. */
+      try {
+        window.dispatchEvent(new CustomEvent("jarvis.stream.sentence", {
+          detail: { runId: msg.runId || session.runId, text: sentence },
+        }));
+      } catch {}
       /* Stream into the on-screen transcript so the operator sees + hears
        * in lockstep. */
       if (_replyEl) {
@@ -202,6 +260,12 @@ export async function speakStream(query, history) {
       if (session.cancelled) return;
       const finalText = msg.data?.text || msg.text || session.accumulated;
       session.accumulated = finalText;
+      /* Notify any chat-thread subscribers that this turn is complete. */
+      try {
+        window.dispatchEvent(new CustomEvent("jarvis.stream.done", {
+          detail: { runId: msg.runId || session.runId, text: finalText },
+        }));
+      } catch {}
       /* Resolve once the TTS queue actually finishes playing, not when the
        * LLM finishes generating — otherwise we transition out of "speaking"
        * while audio is still rolling. */
@@ -223,7 +287,10 @@ export async function speakStream(query, history) {
     /* Fire the streaming request. The reply payload arrives via the
      * bridge's id-correlated reply, but we don't need to await it — events
      * drive everything. */
-    _bridgeAsk({ type: "llm.askStream", payload: { query, history, sessionId: _getSessionId() } }).catch((e) => {
+    /* Workspaces v4: forward the window's pinned workspace slug (if any)
+     * so the bridge dispatches the streaming LLM call in that scope. */
+    const pinnedWs = (typeof window !== "undefined" && window.__pinnedWorkspace) || null;
+    _bridgeAsk({ type: "llm.askStream", payload: { query, history, sessionId: _getSessionId(), workspace: pinnedWs } }).catch((e) => {
       console.warn("[Jarvis] askStream failed:", e.message);
       if (session.resolveEarly) session.resolveEarly(session.accumulated || "");
     });
@@ -327,5 +394,15 @@ async function playWavWithAnalyser(wavBuffer) {
       resolve();
     };
     source.start(0);
+    /* Mark the moment audio playback actually starts. Combined with the
+     * "v.wake-start" mark in voice.js this gives us the headline metric:
+     * wake-to-first-audio. Only mark for the FIRST audio of a turn — if a
+     * later sentence buffer plays, we don't re-mark. */
+    try {
+      const existing = performance.getEntriesByName("v.audio-play");
+      if (!existing.length || (Date.now() - existing[existing.length - 1].startTime) > 5000) {
+        performance.mark("v.audio-play");
+      }
+    } catch {}
   });
 }

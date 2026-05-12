@@ -58,12 +58,51 @@ META_DIR="$(mktemp -d)"
 
 # Brand config (no secrets — .env stays out of the tarball).
 [[ -f "$HERE/config/brand.json" ]] && cp "$HERE/config/brand.json" "$META_DIR/brand.json"
+# Plugin manifests (no handler source — manifests only, for "what tools were
+# loaded" attribution). Captures plugin name + version + tools without
+# leaking any user-authored code.
+if [[ -d "$HERE/bridge/plugins" ]]; then
+  mkdir -p "$META_DIR/plugins"
+  for mf in "$HERE/bridge/plugins"/*/manifest.json; do
+    [[ -f "$mf" ]] || continue
+    cp "$mf" "$META_DIR/plugins/$(basename "$(dirname "$mf")").json"
+  done
+fi
+# Per-day session aggregates — last 7 days. Voice spans only (no LLM args
+# / no replies / no tool args). The /health/sessions endpoint summarises
+# this same data live; here we ship the raw rows so a maintainer can
+# spot patterns the summary collapses.
+if [[ -d "$HERE/data/audit/sessions" ]]; then
+  mkdir -p "$META_DIR/sessions"
+  # Find the 7 most recent JSONL files. macOS find lacks -printf so we use
+  # a portable sort-by-name (filenames are YYYY-MM-DD so lexical sort works).
+  for f in $(ls -1 "$HERE/data/audit/sessions"/*.jsonl 2>/dev/null | sort -r | head -7); do
+    cp "$f" "$META_DIR/sessions/$(basename "$f")"
+  done
+fi
+# Crash reports — sanitised at write time (api keys + $HOME paths + sk-tokens
+# redacted by crash-reporter.mjs). Last 7 days of unhandled bridge exceptions
+# + manually-reported worker errors. Critical for diagnosing a "it just dies"
+# bug report; the bundle without crashes is missing the most important context.
+if [[ -d "$HERE/data/audit/crashes" ]]; then
+  mkdir -p "$META_DIR/crashes"
+  for f in $(ls -1 "$HERE/data/audit/crashes"/*.jsonl 2>/dev/null | sort -r | head -7); do
+    cp "$f" "$META_DIR/crashes/$(basename "$f")"
+  done
+fi
+# Live /health/sessions snapshot for "where am I right now" context.
+curl -s -m 2 'http://localhost:8766/health/sessions?days=7' > "$META_DIR/health-sessions.json" 2>/dev/null || true
+# Live /health/timings snapshot — p50/p95 per pipeline stage.
+curl -s -m 2 'http://localhost:8766/health/timings' > "$META_DIR/health-timings.json" 2>/dev/null || true
+# Live /health/plugins snapshot — what plugins were loaded at the time.
+curl -s -m 2 'http://localhost:8766/health/plugins' > "$META_DIR/health-plugins.json" 2>/dev/null || true
 
 tar -czf "$OUT" -C "$META_DIR" . ${LOGS[@]+"${LOGS[@]}"} 2>/dev/null
 rm -rf "$META_DIR"
 
 echo ""
 echo "  ✓ Bundled $(printf "%d" ${#LOGS[@]}) log file(s) + system snapshot"
+echo "  ✓ Bundled brand config + plugin manifests + last 7 days of session telemetry"
 echo "  → $OUT"
 echo ""
 

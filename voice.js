@@ -29,6 +29,12 @@ let WAKE_PHRASE = "hey jarvis";
 let WAKE_VARIANTS = [
   "hey jarvis", "hi jarvis", "hey, jarvis",
   "hey jervis", "hey jarviz", "hey jarves", "hey jervice",
+  /* Whisper mishears observed in the wild — "hey" can render as "penny",
+   * "they", "say", "way" etc. on fast speech or accented input. We list
+   * them as full variants so containsWake matches and extractQuery strips
+   * cleanly (otherwise the prefix word survives into the query and breaks
+   * fast-path regexes). */
+  "penny jarvis", "they jarvis", "say jarvis", "way jarvis", "any jarvis",
   "jarvis", "jervis", "jarviz", "jarves",
 ];
 let AGENT_NAME = "Jarvis";
@@ -45,16 +51,238 @@ async function loadBrandIntoVoice() {
       WAKE_VARIANTS = b.agent.wakeMishears.map(s => String(s).toLowerCase());
     }
     if (b?.agent?.name) AGENT_NAME = String(b.agent.name);
+    /* Sprint 12: when this window is pinned to a workspace via ?workspace=<slug>,
+     * fetch THAT workspace's metadata and override the wake phrase + agent name
+     * if it has them set. Lets two HUD windows listen for different wake words
+     * (Jarvis main → "hey jarvis", Friday tab → "hey friday") simultaneously. */
+    const pinned = (typeof window !== "undefined" && window.__pinnedWorkspace) || null;
+    if (pinned) {
+      try {
+        /* No GET /workspaces/<slug> endpoint exists — list and find. List is
+         * cheap (handful of rows) and avoids a server-side change. */
+        const wr = await fetch(`http://localhost:8766/workspaces`, { cache: "no-store" });
+        if (wr.ok) {
+          const wj = await wr.json();
+          const w = (wj?.workspaces || []).find((x) => x.slug === pinned);
+          if (w?.wakePhrase) {
+            WAKE_PHRASE = String(w.wakePhrase).toLowerCase();
+            /* Build mishears as exact phrase + name-only variant. The operator
+             * can say either "hey friday" or just "friday" and we'll match.
+             * Adding common phonetic mishears would help further but the
+             * tap-to-talk button bypasses wake detection anyway. */
+            const phraseLower = WAKE_PHRASE;
+            const justName = phraseLower.replace(/^hey\s+/, "");
+            WAKE_VARIANTS = [phraseLower, justName].filter(Boolean);
+          }
+          if (w?.agentLabel) AGENT_NAME = String(w.agentLabel);
+        }
+      } catch (e) {
+        console.warn(`[voice] pinned-workspace wake override failed: ${e.message} — using brand default`);
+      }
+    }
     /* Push brand state into the wake-parsing module so containsWake /
      * extractQuery use the right variants + agent name. */
     WakeParse.setBrand({ agentName: AGENT_NAME, wakeVariants: WAKE_VARIANTS });
-    console.log(`[voice] brand loaded: agent="${AGENT_NAME}" wake="${WAKE_PHRASE}" variants=${WAKE_VARIANTS.length}`);
+    console.log(`[voice] brand loaded: agent="${AGENT_NAME}" wake="${WAKE_PHRASE}" variants=${WAKE_VARIANTS.length}${pinned ? ` (pinned to "${pinned}")` : ""}`);
   } catch (e) {
     console.warn("[voice] /brand fetch failed, using Jarvis defaults:", e.message);
   }
 }
 /* Fire-and-forget — boot path doesn't await, but variants are mutated before the first wake check. */
 loadBrandIntoVoice();
+
+/* Sprint 12 — re-load wake phrase + agent name + greeting when the active
+ * workspace changes. Subscribes to the bridge's workspace.switched event so
+ * a switch from Jarvis → Friday in the workspace switcher modal also flips
+ * what the kiosk listens for and how it announces itself. Updates the wake
+ * button label too — was hard-coded "HEY JARVIS", now reflects current. */
+Bridge.on("workspace.switched", (msg) => {
+  const w = msg?.data || null;
+  if (w?.wakePhrase) {
+    WAKE_PHRASE = String(w.wakePhrase).toLowerCase();
+    const justName = WAKE_PHRASE.replace(/^hey\s+/, "");
+    WAKE_VARIANTS = [WAKE_PHRASE, justName].filter(Boolean);
+  } else {
+    /* Switched to a workspace with no custom wake phrase — fall back to
+     * the brand default by re-running the brand load. */
+    loadBrandIntoVoice();
+    return;
+  }
+  if (w?.agentLabel) AGENT_NAME = String(w.agentLabel);
+  WakeParse.setBrand({ agentName: AGENT_NAME, wakeVariants: WAKE_VARIANTS });
+  /* Update the wake button label so the operator sees the right phrase to say. */
+  const lbl = document.querySelector("#wakeBtn .wake__inner");
+  if (lbl) lbl.textContent = `TAP / SAY "${WAKE_PHRASE.toUpperCase()}"`;
+  console.log(`[voice] persona swap: agent="${AGENT_NAME}" wake="${WAKE_PHRASE}" via workspace.switched`);
+});
+
+/* Contextual boot greeting — Jarvis announces itself with a short
+ * Stark-butler-style brief: time of day + weekday + ordinal date +
+ * weather + system status + an open invitation. Skipped if the operator
+ * sets "quietBoot" or if the tab refreshed within 60s of last boot
+ * (so hot reloads don't re-greet). Best-effort — if the bridge is slow
+ * or weather is unreachable, falls back to a simpler greeting line.
+ *
+ * Composed entirely on the frontend so we don't add an LLM round-trip
+ * to first-paint. The text is fixed-phrase so TTS plays it instantly. */
+/** "a", "a and b", "a, b, and c". Used for honest health greeting clauses. */
+function _listNicely(items) {
+  if (!items || !items.length) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+function _capitalize(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
+
+function _ordinal(n) {
+  const s = ["th","st","nd","rd"];
+  const v = n % 100;
+  return n + (s[(v-20)%10] || s[v] || s[0]);
+}
+function _timeOfDayGreeting(hour) {
+  if (hour < 5) return "Good evening, sir";   /* late-night kiosk turn-on */
+  if (hour < 12) return "Good morning, sir";
+  if (hour < 18) return "Good afternoon, sir";
+  return "Good evening, sir";
+}
+function _composeGreeting({ weather, health, agentName }) {
+  const now = new Date();
+  const tod = _timeOfDayGreeting(now.getHours());
+  const dayName = now.toLocaleDateString("en-GB", { weekday: "long" });
+  const dateOrd = _ordinal(now.getDate());
+  const month = now.toLocaleDateString("en-GB", { month: "long" });
+  const time = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+
+  const weatherClause = (() => {
+    if (!weather || weather.error || !weather.label) return null;
+    const article = /^[aeiou]/i.test(weather.label) ? "an" : "a";
+    const temp = weather.now?.temp != null ? `${weather.now.temp} degrees` : null;
+    return temp
+      ? `It's ${article} ${weather.label} ${dayName}, the ${dateOrd} of ${month}, currently ${temp} and ${time}`
+      : `It's ${article} ${weather.label} ${dayName}, the ${dateOrd} of ${month}, currently ${time}`;
+  })();
+
+  const fallbackDateClause = `It's ${dayName}, the ${dateOrd} of ${month}, currently ${time}`;
+
+  /* Sprint 12 — per-persona greeting. Friday's tone is warmer, less formal,
+   * and leads with her specialty (comms/triage) rather than tool count. The
+   * Stark-butler "sir" stays on Jarvis. Other personas fall back to Jarvis's
+   * template since we haven't seeded their voice yet. */
+  if (String(agentName).toLowerCase() === "friday") {
+    const datelineFri = (weatherClause || fallbackDateClause).replace(/^It's/, "It's");
+    /* Friday flavour of the same honesty rule — only promise the inbox if
+     * Ollama is actually up. If something key is missing, drop the closing
+     * triage offer and surface the gap in her tone. */
+    const services = health?.services || {};
+    if (services.ollama === false) {
+      return `Evening, Antony. ${datelineFri}. The language model isn't responding yet — give it a moment.`;
+    }
+    if (services.kokoro === false || services.whisper === false) {
+      const missing = [];
+      if (services.kokoro === false) missing.push("voice");
+      if (services.whisper === false) missing.push("transcription");
+      return `Evening, Antony. ${datelineFri}. I can read the inbox, but ${_listNicely(missing)} ${missing.length > 1 ? "are" : "is"} still warming up.`;
+    }
+    return `Evening, Antony. ${datelineFri}. Inbox is in front of me — want to triage what matters?`;
+  }
+
+  /* Sprint 12 — honest service-state clause. Reads /healthz's services map
+   * and only says "all systems online" when every service is actually up.
+   * If something's down (e.g. Kokoro not started), names what's online and
+   * what's still missing so the operator knows what to expect.
+   *
+   * Spoken aloud by Kokoro, so we keep the names lower-case and short. */
+  const healthClause = (() => {
+    if (!health) return "Bridge connected";
+    const services = health.services || {};
+    /* Map service keys → spoken names. The bridge is implicit (we couldn't
+     * have got the response if it were down) so we only narrate the workers. */
+    const names = { ollama: "the language model", kokoro: "speech", whisper: "transcription" };
+    const up = [], down = [];
+    for (const [key, label] of Object.entries(names)) {
+      if (services[key]) up.push(label);
+      else down.push(label);
+    }
+    /* All-up shorthand — preserves the tight Stark-butler line. */
+    if (down.length === 0) return "All systems online";
+    /* Partial-up case — name what's ready and what we're waiting on. */
+    if (up.length === 0) {
+      return `Bridge connected, but waiting for ${_listNicely(down)}`;
+    }
+    return `${_capitalize(_listNicely(up))} online, waiting for ${_listNicely(down)}`;
+  })();
+  return `${tod}. ${weatherClause || fallbackDateClause}. ${healthClause}. How may I assist you?`;
+}
+
+async function _maybeBootGreeting() {
+  try {
+    if (Storage.get("quietBoot") === "true") return;
+    const lastBootKey = "lastBootGreetingTs";
+    const lastBoot = parseInt(Storage.get(lastBootKey, "0"), 10);
+    if (lastBoot && Date.now() - lastBoot < 60_000) return;
+    /* Wait for Kokoro to be reachable so the greeting actually plays
+     * rather than silently dropping when TTS is still warming. */
+    let kokoroReady = false;
+    for (let i = 0; i < 12; i++) {
+      try {
+        const r = await fetch("http://localhost:8767/health", { cache: "no-store" });
+        if (r.ok) { kokoroReady = true; break; }
+      } catch {}
+      await new Promise(r => setTimeout(r, 500));
+    }
+    if (!kokoroReady) return;
+    Storage.set(lastBootKey, String(Date.now()));
+
+    /* Pull weather + bridge health in parallel; both have short timeouts so
+     * a hung endpoint never blocks the greeting more than 2s. */
+    const fetchWithTimeout = (url, ms) => Promise.race([
+      fetch(url, { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null),
+      new Promise((res) => setTimeout(() => res(null), ms)),
+    ]);
+    /* Sprint 12 fix — was hitting /health which only confirms the bridge is
+     * up. /healthz also probes Ollama/Kokoro/Whisper and reports per-service
+     * status, so the greeting can be honest about what's actually ready
+     * instead of always saying "all systems online". */
+    const [weather, health] = await Promise.all([
+      fetchWithTimeout("http://localhost:8766/weather", 2000),
+      fetchWithTimeout("http://localhost:8766/healthz", 1500),
+    ]);
+
+    const greeting = _composeGreeting({ weather, health, agentName: AGENT_NAME });
+    console.log(`[voice] boot greeting: ${greeting}`);
+
+    /* Drop the greeting into the chat thread as the first assistant
+     * message — visible whenever the operator opens the text-input modal,
+     * regardless of whether they heard the audio. Mute or unmute, the
+     * thread becomes a persistent log starting with this greeting. */
+    try { appendThreadMessage("assistant", greeting); } catch {}
+
+    /* Skip the audio if the operator has muted TTS — they reloaded the
+     * HUD with mute on, they don't want a "Good morning, sir" greeting
+     * blaring out of speakers. Read directly from localStorage rather
+     * than the _ttsMuted module var so this works whether or not the
+     * let-declaration has been reached by module-init time. */
+    try {
+      if (localStorage.getItem("jarvis.tts.muted") === "1") return;
+    } catch {}
+
+    /* Speak directly via TTS module (not speakStream) — fixed phrase, no
+     * LLM round-trip needed. */
+    const wav = await TTS.synthesise(greeting, getKokoroVoice());
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") {
+      try { await audioCtx.resume(); } catch {}
+    }
+    const buf = await audioCtx.decodeAudioData(wav.slice(0));
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start(0);
+  } catch (e) {
+    console.warn("[voice] boot greeting failed:", e.message);
+  }
+}
+_maybeBootGreeting();
 
 const speedo = document.getElementById("speedo");
 const transcript = document.getElementById("transcript");
@@ -131,6 +359,11 @@ function drawMicWave(ctx, w, h, dimmed) {
   const eff = Math.max(0, rms - NOISE_FLOOR);
   const level = Math.min(1, Math.sqrt(eff) * 4);   // 4× empirically maps to full 0..1
   if (window.__speedo) window.__speedo.setMicLevel(level);
+  /* Sprint 12 — also publish to a CSS variable so the Friday faceted-crystal
+   * reactor (CSS-driven, no JS layer) can scale facets/pupil with mic amplitude.
+   * Same value Jarvis's speedo gets, just exposed via custom property so any
+   * persona's centerpiece can react without bespoke JS wiring. */
+  document.documentElement.style.setProperty("--audio-amp", level.toFixed(3));
 }
 
 function wfDraw() {
@@ -176,6 +409,9 @@ function wfDraw() {
     const sRms = Math.sqrt(speakSum / w);
     const ttsLevel = Math.min(1, sRms * 11);   // 11× empirically maps Kokoro RMS to 0..1
     if (window.__speedo) window.__speedo.setTtsLevel(ttsLevel);
+    /* Sprint 12 — same CSS-var publish as drawMicWave so Friday's reactor
+     * pulses with TTS playback as well as mic listening. */
+    document.documentElement.style.setProperty("--audio-amp", ttsLevel.toFixed(3));
   } else if (wf.mode === "speaking") {
     /* Synthetic fallback for non-Kokoro TTS paths. */
     wf.speakingAmp = wf.speakingAmp * 0.85 + Math.random() * 0.15;
@@ -195,6 +431,15 @@ function wfDraw() {
     ctx.stroke();
   } else {
     /* Idle: soft drift, dim brand-red */
+    /* Sprint 12 — bleed --audio-amp toward 0 so Friday's reactor settles
+     * back to the static animation when neither mic nor TTS is active.
+     * Read current var, decay 25% per frame for a smooth fade rather than
+     * a hard snap. */
+    try {
+      const cur = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--audio-amp")) || 0;
+      const next = cur * 0.75;
+      document.documentElement.style.setProperty("--audio-amp", next < 0.005 ? "0" : next.toFixed(3));
+    } catch {}
     wf.phase += 0.6;
     const mid = h / 2;
     ctx.lineWidth = 1;
@@ -234,6 +479,84 @@ const dbg = {
   picker: document.getElementById("dbgDevicePicker"),
 };
 function dbgSet(field, value) { if (dbg[field]) dbg[field].textContent = String(value); }
+
+/* ---------- QUERY-HANDLED EVENT BUS ----------
+ *  Lightweight pub/sub so peripheral modules (the first-run tour, future
+ *  analytics, etc.) can react to "operator just finished a turn" without
+ *  voice.js needing to know about them. Subscribers receive a payload:
+ *    { heard, query, replied }
+ *  where `heard` is the raw transcript, `query` is the wake-stripped
+ *  utterance, and `replied` is true if the LLM produced a reply (false
+ *  if dismissal / empty / inbox follow-up path). */
+const _queryHandledSubs = [];
+export function onQueryHandled(callback) {
+  if (typeof callback !== "function") return () => {};
+  _queryHandledSubs.push(callback);
+  return () => {
+    const i = _queryHandledSubs.indexOf(callback);
+    if (i !== -1) _queryHandledSubs.splice(i, 1);
+  };
+}
+function _emitQueryHandled(payload) {
+  for (const cb of _queryHandledSubs) {
+    try { cb(payload); } catch (e) { console.warn("[Jarvis] query-handled subscriber threw:", e.message); }
+  }
+}
+
+/** Convert performance marks dropped during a voice cycle into named spans
+ *  and POST the summary to the bridge for aggregation. Spans are keyed
+ *  start→end mark name pairs; missing marks are silently skipped (a TTS
+ *  fallback path may not produce v.audio-play, for example). The bridge
+ *  serves the rolling buffer at GET /health/timings. */
+function _reportPerfTimings(heard, whisperTranscribeMs) {
+  if (typeof performance === "undefined" || !performance.getEntriesByName) return;
+  const get = (name) => {
+    const e = performance.getEntriesByName(name);
+    return e.length ? e[e.length - 1].startTime : null;
+  };
+  const marks = {
+    wakeStart:        get("v.wake-start"),
+    recEnd:           get("v.rec-end"),
+    whisperReq:       get("v.whisper-req"),
+    whisperRes:       get("v.whisper-res"),
+    llmFirstSentence: get("v.llm-first-sentence"),
+    audioPlay:        get("v.audio-play"),
+  };
+  /* Compute spans where both endpoints exist. Negative spans indicate the
+   * marks fired out of order (rare, but possible if TTS already started
+   * speaking from a previous turn) — drop them. */
+  const span = (a, b) => (marks[a] != null && marks[b] != null && marks[b] > marks[a])
+    ? Math.round(marks[b] - marks[a]) : null;
+  const payload = {
+    ts: Date.now(),
+    heard: heard.slice(0, 120),
+    spans: {
+      voice_to_recend:    span("wakeStart", "recEnd"),
+      voice_to_whisper:   span("wakeStart", "whisperRes"),
+      whisper_roundtrip:  span("whisperReq", "whisperRes"),
+      whisper_inference:  whisperTranscribeMs,
+      voice_to_audio:     span("wakeStart", "audioPlay"),
+      /* Demo-relevant headline metrics: how long after the operator finishes
+       * speaking before something audible starts. recend_to_audio is the
+       * perceptual lag — the only number that matters for "feels real-time".
+       * llm_thinking isolates the LLM stage; tts_synth isolates Kokoro. */
+      recend_to_audio:    span("recEnd", "audioPlay"),
+      recend_to_whisper:  span("recEnd", "whisperRes"),
+      whisper_to_llm:     span("whisperRes", "llmFirstSentence"),
+      llm_thinking:       span("whisperRes", "llmFirstSentence"),
+      tts_synth:          span("llmFirstSentence", "audioPlay"),
+    },
+  };
+  /* Clear marks so the next cycle starts clean. performance.clearMarks
+   * with the prefix would be ideal but the spec only takes exact names. */
+  ["v.wake-start","v.rec-end","v.whisper-req","v.whisper-res","v.llm-first-sentence","v.audio-play"].forEach(n => {
+    try { performance.clearMarks(n); } catch {}
+  });
+  fetch("http://localhost:8766/perf", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }).catch(() => { /* perf is best-effort */ });
+}
 
 /* ---------- MIC DEVICE SELECTION ----------
  * Why: built-in mic on this machine is broken; user needs to pick a working input (iPhone Continuity etc).
@@ -428,7 +751,12 @@ function applyCameraVisibility(state) {
   cam.classList.toggle("is-revealed", revealed);
 }
 
-/** Set HUD state — drives speedo glow, readout text, and waveform mode. */
+/** Set HUD state — drives speedo glow, readout text, and waveform mode.
+ *
+ *  Sprint 10: also forwards to the Three.js orb when it's the active
+ *  centerpiece. The orb has its own state-driven breathing/scale params;
+ *  the SVG speedo's class-based animation is unaffected (operators on
+ *  the reactor preset see the same behaviour they always have). */
 function setState(state) {
   speedo.classList.remove("is-listening", "is-thinking", "is-speaking");
   switch (state) {
@@ -437,6 +765,11 @@ function setState(state) {
     case "speaking":  speedo.classList.add("is-speaking");  stateText.textContent = "SPEAKING";  wfSetSpeaking(); break;
     default:          stateText.textContent = "STANDBY";    wfSetIdle(); break;
   }
+  /* Forward state to the orb if it's mounted. The setOrbState hook in
+   * hud.js no-ops when the SVG centerpiece is active, so this is safe
+   * to call unconditionally. Imported lazily via the global to avoid
+   * a circular import (voice.js → hud.js → voice.js). */
+  if (window.__hud?.setOrbState) window.__hud.setOrbState(state);
   applyCameraVisibility(state);
   /* Speedo expressiveness: translate the conversational state into a needle mood.
    * Idle baseline is the "breathing" sine. Voice always wins over background tasks. */
@@ -469,6 +802,14 @@ function setState(state) {
 function wireBridgeEvents() {
   Bridge.connect();
   Bridge.on("task.*",                 BridgeEvents.handleTaskEvent);
+  /* Why: conversation mode's idle timer drops the operator back to wake-word
+   * listening if no speech is heard for 5 minutes. While a confirmation gate
+   * is open ("Shall I proceed?"), the operator is mid-task by definition —
+   * lock the timer until the bridge reports the gate resolved. Without this,
+   * a long Jarvis explanation + a beat of operator hesitation could time out
+   * the conversation right when they're about to say "yes". */
+  Bridge.on("task.confirmation_pending", () => Conversation.acquireTaskLock());
+  Bridge.on("task.confirmation_resolved", () => Conversation.releaseTaskLock());
   Bridge.on("video.edit.complete",    BridgeEvents.handleVideoEditComplete);
   Bridge.on("video.edit.error",       BridgeEvents.handleVideoEditError);
   Bridge.on("pdf.complete",           BridgeEvents.handlePdfComplete);
@@ -505,6 +846,193 @@ function handleEnterSleep() {
 let conversationHistory = [];
 const MAX_HISTORY_TURNS = 20;
 
+/* TTS mute toggle — sticky across reloads via localStorage. When true,
+ * speak() and speakStream() skip Kokoro / system-speech synthesis but the
+ * LLM round-trip still runs so the reply text streams to _replyEl as usual.
+ * Used in loud / quiet-courtesy environments alongside the text-input bar. */
+let _ttsMuted = false;
+try { _ttsMuted = localStorage.getItem("jarvis.tts.muted") === "1"; } catch {}
+
+/** Wire the speaker icon left of the wake button. Click toggles, value
+ *  persists to localStorage, aria-pressed drives the strikethrough CSS. */
+function initTtsMuteToggle() {
+  const btn = document.getElementById("ttsMuteBtn");
+  if (!btn) return;
+  const apply = () => {
+    btn.setAttribute("aria-pressed", _ttsMuted ? "true" : "false");
+    btn.setAttribute("aria-label", _ttsMuted ? "Unmute Jarvis voice replies" : "Mute Jarvis voice replies");
+  };
+  apply();
+  btn.addEventListener("click", () => {
+    _ttsMuted = !_ttsMuted;
+    try { localStorage.setItem("jarvis.tts.muted", _ttsMuted ? "1" : "0"); } catch {}
+    apply();
+    /* If the operator hits mute mid-stream, kill the in-flight TTS so the
+     * silence is immediate. The reply on screen continues unchanged. */
+    if (_ttsMuted) try { TtsPipeline.cancelCurrentSpeech(); } catch {}
+  });
+  /* Keyboard shortcut Cmd/Ctrl+M — global mute toggle. All HUD shortcuts use
+   * Cmd modifier so bare letters never get eaten when typing in the text
+   * input modal. preventDefault stops the OS-level Cmd+M (minimize) on Mac. */
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === "m" || e.key === "M")) {
+      e.preventDefault();
+      btn.click();
+    }
+  });
+}
+
+/** Wire the text input bar: toggle button + submit handler + Esc to close +
+ *  T keyboard shortcut to open. Submitted text takes the same path as a
+ *  voice query — pushHistory + speakStream(query, history) — so all the
+ *  tools, confirmations, conversation-mode behaviour are identical. */
+function initTextInputBar() {
+  const toggle = document.getElementById("textInputToggle");
+  const bar    = document.getElementById("textInputBar");
+  const field  = document.getElementById("textInputField");
+  const close  = document.getElementById("textInputClose");
+  if (!toggle || !bar || !field) return;
+
+  const open = () => {
+    bar.hidden = false;
+    /* Body class triggers the reactor shrink/lift (same choreography as
+     * listening mode) so the bottom-centred panel doesn't cover the dial. */
+    document.body.classList.add("is-typing");
+    setTimeout(() => field.focus(), 30);
+    /* Entering text input counts as engagement — keep conversation alive
+     * while the operator is composing. Mirrors what voice does on heard. */
+    if (Conversation.isActive()) Conversation.resetIdleTimer();
+  };
+  const dismiss = () => {
+    bar.hidden = true;
+    field.value = "";
+    document.body.classList.remove("is-typing");
+  };
+
+  toggle.addEventListener("click", () => bar.hidden ? open() : dismiss());
+  if (close) close.addEventListener("click", dismiss);
+
+  field.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); dismiss(); return; }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const query = field.value.trim();
+      if (!query) return;
+      field.value = "";
+      submitTypedQuery(query);
+    }
+  });
+
+  /* Cmd/Ctrl+T opens the text input modal. preventDefault stops the
+   * browser's "new tab" shortcut from running alongside. */
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === "t" || e.key === "T")) {
+      e.preventDefault();
+      open();
+    }
+  });
+}
+
+/** Submit a typed query — same downstream path as a heard utterance.
+ *  Drops the user message into history, paints both sides of the chat
+ *  thread in the text-input modal, fires speakStream (which streams to
+ *  the reply area + plays TTS unless muted), echoes the reply back into
+ *  conversation history. Conversation mode stays engaged on text just
+ *  like it does on voice. */
+async function submitTypedQuery(query) {
+  pushHistory("user", query);
+  if (!Conversation.isActive()) Conversation.enter();
+  Conversation.resetIdleTimer();
+  if (replyEl) replyEl.textContent = "…";
+
+  /* Append the user message to the modal thread and create a pending
+   * assistant bubble. Sentences stream into the pending bubble via the
+   * jarvis.stream.sentence event dispatched by tts-pipeline. */
+  appendThreadMessage("user", query);
+  const pending = appendThreadMessage("assistant", "", { pending: true });
+
+  /* Subscribe per-turn so a stale stream's late sentences (after barge-in
+   * or new query) don't bleed into the bubble. Unsubscribe on done/error.
+   * Filler event populates the bubble with a placeholder ("Let me check…")
+   * while the LLM is thinking; the first real sentence REPLACES that
+   * placeholder rather than appending so the bubble doesn't read like
+   * "Let me check… The references are ready." */
+  const onFiller = (ev) => {
+    const text = ev.detail?.text;
+    if (!text || !pending) return;
+    if (pending.textContent) return; // already has real content, ignore
+    pending.textContent = text;
+    pending.dataset.filler = "true";
+    scrollThreadToEnd();
+  };
+  const onSentence = (ev) => {
+    const text = ev.detail?.text;
+    if (!text || !pending) return;
+    if (pending.dataset.filler === "true") {
+      pending.textContent = text;
+      delete pending.dataset.filler;
+    } else {
+      pending.textContent = pending.textContent ? `${pending.textContent} ${text}` : text;
+    }
+    scrollThreadToEnd();
+  };
+  const onDone = () => {
+    if (pending) pending.removeAttribute("data-pending");
+    cleanup();
+  };
+  const cleanup = () => {
+    window.removeEventListener("jarvis.filler", onFiller);
+    window.removeEventListener("jarvis.stream.sentence", onSentence);
+    window.removeEventListener("jarvis.stream.done", onDone);
+  };
+  window.addEventListener("jarvis.filler", onFiller);
+  window.addEventListener("jarvis.stream.sentence", onSentence);
+  window.addEventListener("jarvis.stream.done", onDone);
+
+  let reply = "";
+  try {
+    reply = await speakStream(query, conversationHistory.slice(0, -1));
+    /* If no streaming sentences arrived (rare — fast-path canned reply,
+     * error, etc), populate the bubble with the final text so the operator
+     * still sees something. */
+    if (pending && !pending.textContent && reply) pending.textContent = reply;
+  } catch (e) {
+    reply = `Sorry — ${e.message || e}`;
+    if (replyEl) replyEl.textContent = reply;
+    if (pending) pending.textContent = reply;
+  } finally {
+    if (pending) pending.removeAttribute("data-pending");
+    cleanup();
+    scrollThreadToEnd();
+  }
+  if (reply) pushHistory("assistant", reply);
+}
+
+/** Append a chat bubble to the text-input thread. Returns the bubble node
+ *  so callers can stream content into it. data-role styles user vs assistant;
+ *  data-pending=true adds the streaming-glow CSS that's removed on done. */
+function appendThreadMessage(role, text, { pending = false } = {}) {
+  const thread = document.getElementById("textInputThread");
+  if (!thread) return null;
+  thread.hidden = false;
+  const node = document.createElement("div");
+  node.className = "text-input-modal__msg";
+  node.dataset.role = role;
+  if (pending) node.dataset.pending = "true";
+  node.textContent = text || "";
+  thread.appendChild(node);
+  scrollThreadToEnd();
+  return node;
+}
+
+function scrollThreadToEnd() {
+  const thread = document.getElementById("textInputThread");
+  if (!thread) return;
+  /* Defer one frame so newly-appended content is laid out before we measure
+   * scrollHeight; otherwise the auto-scroll undershoots by one bubble. */
+  requestAnimationFrame(() => { thread.scrollTop = thread.scrollHeight; });
+}
+
 function pushHistory(role, content) {
   conversationHistory.push({ role, content });
   if (conversationHistory.length > MAX_HISTORY_TURNS * 2) {
@@ -537,9 +1065,20 @@ function getSessionId() {
  * legitimately need ~30-90s when they chain caption+search+synthesis. Bumped to 120s as a
  * backstop; the bridge still logs per-stage timings so genuine hangs are spottable. */
 function askLLM(query, timeoutMs = 120000) {
+  /* Workspaces v4: when this window is pinned to a workspace via the
+   * ?workspace=<slug> URL param (set on window.__pinnedWorkspace by the
+   * inline script in index.html), forward the slug so the bridge dispatches
+   * the call in that workspace's scope — even if a different workspace is
+   * the global active. Default windows (no pin) get the global active. */
+  const pinned = (typeof window !== "undefined" && window.__pinnedWorkspace) || null;
   return Bridge.ask({
     type: "llm.ask",
-    payload: { query, history: conversationHistory.slice(), sessionId: getSessionId() },
+    payload: {
+      query,
+      history: conversationHistory.slice(),
+      sessionId: getSessionId(),
+      workspace: pinned,
+    },
   }, timeoutMs);
 }
 
@@ -548,8 +1087,86 @@ function offlineFallback() {
   return "I'm running offline at the moment — the local model bridge isn't reachable. Check the bridge logs and try again.";
 }
 
-/** Voice id resolver — single source of truth for which Kokoro voice to use. */
-function getKokoroVoice() { return Storage.get("voice", "bm_daniel"); }
+/** Documented Whisper-on-silence hallucinations. Whisper's training corpus
+ *  includes YouTube auto-captions which use these placeholder phrases for
+ *  silent / non-speech audio; the model emits them as fallbacks when given
+ *  near-silent input. Lowercased + stripped of trailing punctuation before
+ *  the comparison so "Music." and "MUSIC" both match. */
+const _WHISPER_HALLUCINATIONS = new Set([
+  "music",
+  "music playing",
+  "the music is playing",
+  "[music]",
+  "♪",
+  "thanks for watching",
+  "thank you",
+  "thank you for watching",
+  "thanks for watching!",
+  "subscribe",
+  "please subscribe",
+  "see you next time",
+  "see you in the next video",
+  "i'm sorry",
+  "good night",
+  "go to sleep",
+  "bye",
+  "bye-bye",
+  "goodbye",
+  "you",
+  "yeah",
+  "okay",
+  "ok",
+  "hmm",
+  "uh",
+  "um",
+  "applause",
+  "[applause]",
+  "laughter",
+  "[laughter]",
+  "silence",
+  "[silence]",
+  "indistinct",
+  "indistinct chatter",
+  "background noise",
+  "mr. pewsey",
+]);
+
+/** True when the transcript looks like a Whisper hallucination given the
+ *  audio blob's size. Conservative — only rejects clear hallucination
+ *  patterns + tiny audio clips. See passive-transcript handler for the
+ *  reasoning behind the thresholds. */
+function _isWhisperHallucination(text, blobSizeKB) {
+  const t = String(text || "").trim().toLowerCase().replace(/[.,!?…♪]+$/g, "").trim();
+  if (!t) return true;
+  /* Tiny clips with any transcript = hallucination. <8KB is ~1.5s of
+   * 16kHz mono PCM audio. Real wake-word + short query is always longer. */
+  if (blobSizeKB < 8) return true;
+  /* Exact match against the documented hallucination set. */
+  if (_WHISPER_HALLUCINATIONS.has(t)) return true;
+  /* Single short word on a small clip — same shape as the hallucinations
+   * but operator's vocabulary may include real one-word queries
+   * ("weather", "calendar"). Threshold tightened to <12KB AND <6 chars
+   * to keep "weather" (7 chars) safe. */
+  if (blobSizeKB < 12 && !t.includes(" ") && t.length < 6) return true;
+  return false;
+}
+
+/** Voice id resolver — single source of truth for which Kokoro voice to use.
+ *
+ *  Workspaces v3: an active workspace can declare its own voice (formal
+ *  British male for consulting, warmer voice for personal, etc). The
+ *  workspace switcher sets `_workspaceVoiceOverride` on workspace.switched
+ *  events so per-turn lookups stay synchronous. Resolution priority:
+ *    1. Active workspace's `voice` field
+ *    2. Operator's localStorage preference (Settings → Voice)
+ *    3. Default "bm_daniel" */
+let _workspaceVoiceOverride = null;
+function getKokoroVoice() {
+  return _workspaceVoiceOverride || Storage.get("voice", "bm_daniel");
+}
+export function setWorkspaceVoice(voiceId) {
+  _workspaceVoiceOverride = voiceId || null;
+}
 
 /* Local aliases for the TTS pipeline so existing call sites stay valid.
  * The TtsPipeline module owns speak/speakStream/cancelCurrentSpeech +
@@ -849,7 +1466,47 @@ function stopPassive() {
   wakeBtn.querySelector(".wake__inner").textContent = "TAP / SAY \"HEY JARVIS\"";
 }
 
-/** Stream-driven cycle: wait for voice → record full utterance → transcribe → check wake. */
+/** Live-dictation hooks. While a voice utterance is being recorded, the
+ *  whisper-stt module's streaming loop fires partial transcriptions every
+ *  ~500ms; _dictationOnPartial writes that text into the typed-input
+ *  textarea so the operator sees their speech transcribed in real time.
+ *  _dictationOpenModal makes sure the modal is visible without grabbing
+ *  focus from the listening UI. */
+function _dictationOpenModal() {
+  try {
+    const bar   = document.getElementById("textInputBar");
+    const field = document.getElementById("textInputField");
+    if (!bar || !field) return;
+    if (bar.hidden) {
+      bar.hidden = false;
+      document.body.classList.add("is-typing");
+    }
+    /* Clear leftover text from a previous turn, but only if no one's currently
+     * typing (the operator may be mid-type when a wake fires in the background). */
+    if (document.activeElement !== field) field.value = "";
+  } catch {}
+}
+
+function _dictationOnPartial(text) {
+  try {
+    const field = document.getElementById("textInputField");
+    /* Strip wake-word from the live preview so the operator doesn't see
+     * "hey jarvis, …" in the textarea as they speak. */
+    const stripped = WakeParse.containsWake(text) ? WakeParse.extractQuery(text) : text;
+    if (field) field.value = stripped;
+    /* Fan out to any other panel that subscribes to live STT partials
+     * (the influencer wizard auto-fills chips from this stream). */
+    window.dispatchEvent(new CustomEvent("jarvis.stt.partial", { detail: { text } }));
+  } catch {}
+}
+
+/** Stream-driven cycle: wait for voice → record full utterance → transcribe → check wake.
+ *
+ *  Performance instrumentation: drops `performance.mark()` calls at every
+ *  pipeline stage (T1 sprint work). Marks are zero-cost in browsers and let
+ *  us measure wake→audio latency without intrusive console.log spam. The
+ *  HUD reads `performance.getEntriesByType("measure")` after each cycle and
+ *  POSTs to `/perf` so the bridge can aggregate p50/p95 across sessions. */
 async function cyclePassive() {
   if (!passive || !wf.micStream) return;
   const stream = wf.micStream;
@@ -858,14 +1515,32 @@ async function cyclePassive() {
   // Step 1: wait until the user starts speaking
   const started = await waitForVoiceStart();
   if (!started) return;
+  /* Mark the moment voice is first detected — this is the beginning of
+   * the perceived "wake" event from the operator's perspective. */
+  try { performance.mark("v.wake-start"); } catch {}
 
   // Step 2: record until VAD says they finished
   const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
   const chunks = [];
   const rec = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 64000 });
   passiveRecorder = rec;
-  rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+  /* Live-dictation: push each MediaRecorder chunk into WhisperStt so its
+   * streaming loop can transcribe the growing audio every ~500ms. The
+   * partial listener writes the latest transcript into the typed-input
+   * textarea so the operator sees their speech transcribed live. On
+   * utterance end (VAD silence) we submit that text through the typed
+   * path instead of waiting for a final whisper round-trip. */
+  WhisperStt.resetForNewTurn();
+  WhisperStt.setPartialListener(_dictationOnPartial);
+  _dictationOpenModal();
+  rec.ondataavailable = (e) => {
+    if (e.data.size > 0) {
+      chunks.push(e.data);
+      WhisperStt.pushChunk(e.data);
+    }
+  };
   rec.start(250);
+  WhisperStt.startStreaming();
   dbgSet("whisper", "(recording…)");
   const t = vadThresholds();
   fetch("http://localhost:8766/log", {
@@ -877,6 +1552,12 @@ async function cyclePassive() {
   if (rec.state !== "inactive") { try { rec.stop(); } catch (_) {} }
   // Wait for the final ondataavailable
   await new Promise((r) => { rec.onstop = r; });
+  try { performance.mark("v.rec-end"); } catch {}
+  /* Stop the streaming whisper loop; from this point we already have the
+   * latest live transcript and don't need more partials. The listener is
+   * detached so the next turn starts clean. */
+  WhisperStt.stopStreaming();
+  WhisperStt.setPartialListener(null);
 
   if (!passive) return;
   if (chunks.length === 0) { cyclePassive(); return; }
@@ -889,17 +1570,35 @@ async function cyclePassive() {
   }).catch(() => {});
 
   let heard = "";
-  try {
-    const res = await fetch(WHISPER_URL, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream" },
-      body: blob,
-    });
-    if (res.ok) {
-      const j = await res.json();
-      heard = (j.text || "").trim();
-    }
-  } catch (e) { console.warn("[Jarvis] passive whisper failed:", e.message); }
+  let whisperTranscribeMs = null;
+  /* Live-dictation fast path: if the streaming loop captured text, use it
+   * and skip the final whisper round-trip (~300-450ms saved). The streaming
+   * transcribes the same audio on a slight delay anyway, so the latest
+   * partial usually matches the final transcript well enough for the
+   * fast-path tools that don't need pinpoint phrasing. */
+  const liveText = WhisperStt.getStreamLatest();
+  if (liveText && liveText.length >= 3) {
+    heard = liveText;
+    try { performance.mark("v.whisper-req"); } catch {}
+    try { performance.mark("v.whisper-res"); } catch {}
+  } else {
+    try {
+      try { performance.mark("v.whisper-req"); } catch {}
+      const res = await fetch(WHISPER_URL, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: blob,
+      });
+      try { performance.mark("v.whisper-res"); } catch {}
+      if (res.ok) {
+        const j = await res.json();
+        heard = (j.text || "").trim();
+        /* Whisper server reports its own internal time (T1.1c) so we can
+         * separate network/serialisation cost from model inference cost. */
+        if (typeof j.transcribe_ms === "number") whisperTranscribeMs = j.transcribe_ms;
+      }
+    } catch (e) { console.warn("[Jarvis] passive whisper failed:", e.message); }
+  }
 
   // Forward every transcript to bridge log
   fetch("http://localhost:8766/log", {
@@ -907,6 +1606,36 @@ async function cyclePassive() {
     body: JSON.stringify({ tag: "passive", msg: heard, data: { wake: WakeParse.containsWake(heard) } }),
   }).catch(() => {});
   dbgSet("whisper", heard ? `"${heard}"` : "(empty)");
+
+  /* Whisper hallucination filter. Whisper's training data includes a lot
+   * of YouTube subtitle text — it falls back to phrases like "music",
+   * "thanks for watching", "subscribe" when given near-silent input.
+   * Without this filter, ambient room noise that sneaks past the VAD
+   * gets transcribed as a coherent phrase, the bridge treats it as a
+   * follow-up query, and Jarvis hallucinates a response (e.g. "playing
+   * driving music" when the operator said nothing).
+   *
+   * Strategy:
+   *   1. Reject any transcript on tiny audio blobs (<8KB ≈ 1-2s).
+   *      Real wake words + queries are almost always >10KB.
+   *   2. Reject known-hallucination phrase exact matches (lowercased,
+   *      stripped of trailing punctuation).
+   *   3. Reject single-word transcripts <6 chars on small blobs (<12KB).
+   *      Catches "Music." / "You." / "Bye." style fallbacks.
+   *
+   * The filter is conservative — false negatives (real speech rejected)
+   * matter more than false positives (hallucinations let through), so
+   * the thresholds err toward letting real input through. The "Hey
+   * Jarvis" wake clip is typically 12-20KB; a one-word query like
+   * "weather" is typically 8-14KB. Real input on the boundary stays
+   * because the wake-word detection downstream still fires correctly. */
+  if (heard && _isWhisperHallucination(heard, blob.size / 1024)) {
+    fetch("http://localhost:8766/log", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tag: "passive-reject", msg: `hallucination filter: "${heard}" (${(blob.size / 1024).toFixed(1)}KB)` }),
+    }).catch(() => {});
+    return;
+  }
 
   if (heard) {
     // 1. In conversation mode, check for dismissal first — save conversation summary before exiting
@@ -939,6 +1668,14 @@ async function cyclePassive() {
         passive = false;
         wakeBtn.querySelector(".wake__inner").textContent = "PROCESSING…";
         await handleHeard(heard, true);
+        /* Summarise the perf marks dropped throughout the cycle into a
+         * single span report and POST to the bridge. The bridge accumulates
+         * a rolling buffer that the debug panel queries via /health/timings.
+         * Wrapped in try/catch so a perf-API quirk never breaks the loop. */
+        try { _reportPerfTimings(heard, whisperTranscribeMs); } catch {}
+        /* Notify any query-handled subscribers (first-run tour, analytics
+         * hooks). Fire-and-forget — subscriber errors are caught upstream. */
+        _emitQueryHandled({ heard, query, replied: true });
         if (passive === false) {
           passive = true;
           setState("listening");
@@ -1143,15 +1880,23 @@ function wireUI() {
     getSessionId,
     getRecDestination: () => DemoRecorder.getRecDestination(),
     tapTtsToRec: (analyser) => DemoRecorder.tapTtsToRec(analyser),
+    isTtsMuted: () => _ttsMuted,
   });
+  /* Wire the mute button + text-input toggle + text-input bar. All three live
+   * in the wake-row HTML and reuse the existing speakStream pipeline so voice
+   * and text take the same path — only the entry point differs. */
+  initTtsMuteToggle();
+  initTextInputBar();
   SetupModal.init({ autoPickMic: MicTest.autoPickMic, getPreferredDeviceId, setPreferredDevice, wf });
   SetupModal.maybeShowSetup();        // first-run setup modal (no-op after first completion)
 
-  // R toggles demo recording (no modifiers — Cmd/Ctrl-R reloads, leave that alone)
+  // Cmd/Ctrl+Shift+R toggles demo recording — Shift gate avoids the bare
+  // Cmd/Ctrl+R reload shortcut while still using a modifier-gated key per
+  // the unified shortcut policy (no bare letters).
   document.addEventListener("keydown", (e) => {
-    if ((e.key === "r" || e.key === "R") && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      const onInput = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
-      if (!onInput) { e.preventDefault(); DemoRecorder.toggleDemoRecording(); }
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "r" || e.key === "R")) {
+      e.preventDefault();
+      DemoRecorder.toggleDemoRecording();
     }
   });
 

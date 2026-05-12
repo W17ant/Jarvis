@@ -34,7 +34,20 @@ let conversationMode = false;
  * This module runs in the HUD (browser), so use ReturnType for portability. */
 /** @type {ReturnType<typeof setTimeout> | 0} */
 let conversationTimeoutId = 0;
-const CONVERSATION_IDLE_MS = 60000;
+/* Why bumped from 60s → 5 min: the previous 60s was scoped per-utterance,
+ * which dropped conversation mode any time the operator paused to think
+ * (or to listen to a long Jarvis reply) for more than a minute. The
+ * operator's mental model is "stay in conversation until I dismiss you" —
+ * 5 minutes is long enough to span any natural pause + a multi-sentence
+ * reply, short enough that walking away from the kiosk still resets to
+ * wake-word listening on its own. resetIdleTimer() is also now called
+ * after every TTS reply (see voice.js) and on every gate-set in the
+ * bridge, so the timer stays fresh through multi-step tool flows. */
+const CONVERSATION_IDLE_MS = 300000;
+/* When a confirmation gate is open ("Shall I proceed?"), the operator is
+ * mid-task by definition — the idle timer must not fire. We track the
+ * lock here and resetIdleTimer() short-circuits to a no-op while held. */
+let _taskLockActive = false;
 const ACK_PHRASES = ["Yes, sir.", "Sir.", "Go ahead.", "I'm here, sir.", "Listening, sir."];
 
 const LABEL_CONVERSATION = "CONVERSATION — TAP TO STOP";
@@ -72,6 +85,9 @@ export function exit() {
 
 export function resetIdleTimer() {
   if (conversationTimeoutId) clearTimeout(conversationTimeoutId);
+  /* If a task is mid-flight (confirmation gate open, tool in progress),
+   * defer the timer entirely. acquireTaskLock/releaseTaskLock manage this. */
+  if (_taskLockActive) { conversationTimeoutId = 0; return; }
   conversationTimeoutId = setTimeout(() => {
     if (conversationMode) {
       conversationMode = false;
@@ -80,6 +96,20 @@ export function resetIdleTimer() {
       console.log("[Jarvis] conversation timed out — back to wake-word listening");
     }
   }, CONVERSATION_IDLE_MS);
+}
+
+/** Take a task lock — pauses the idle timer until release. Use when a
+ *  multi-step flow is awaiting operator input (confirmation, multi-turn
+ *  tool sequence) so a long pause doesn't drop conversation mode. */
+export function acquireTaskLock() {
+  _taskLockActive = true;
+  if (conversationTimeoutId) { clearTimeout(conversationTimeoutId); conversationTimeoutId = 0; }
+}
+
+/** Release the task lock and restart the idle clock from now. */
+export function releaseTaskLock() {
+  _taskLockActive = false;
+  if (conversationMode) resetIdleTimer();
 }
 
 /** Operator said the wake word with no follow-up ("Hey Jarvis." then

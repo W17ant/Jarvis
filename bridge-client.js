@@ -62,13 +62,83 @@ function onMessage(ev) {
   dispatch(m);
 }
 
+/* Synthetic connection-state events. Why: subscribers (toast layer, agent
+ * console, debug panel) need "is the bridge alive?" without polling
+ * isConnected() on a timer. We fire `bridge.online` on first successful
+ * open and `bridge.offline` after the WS has been closed for >2s — the
+ * grace period suppresses toasts for quick reconnects (laptop wake,
+ * `./launch.sh restart`) which finish before anyone notices. */
+let _wasOnline = false;
+let _offlineTimer = null;
+function _emitOnline() {
+  if (_offlineTimer) { clearTimeout(_offlineTimer); _offlineTimer = null; }
+  /* Successful reconnect — reset the backoff so the next disconnect doesn't
+   * inherit a stale long delay. */
+  _retryDelayMs = INITIAL_RETRY_MS;
+  if (_wasOnline) return;
+  _wasOnline = true;
+  dispatch({ type: "bridge.online", ts: Date.now(), data: {} });
+}
+function _scheduleOffline() {
+  if (_offlineTimer) return;
+  _offlineTimer = setTimeout(() => {
+    _offlineTimer = null;
+    if (!_wasOnline) return;
+    _wasOnline = false;
+    dispatch({ type: "bridge.offline", ts: Date.now(), data: {} });
+  }, 2000);
+}
+
+/* Auto-reconnect with exponential backoff. Why: previously bridge-client.js
+ * relied on the next ask() call to re-open after a close, so subscribers
+ * (notifications, palette, audit drawer) went silent after a `./launch.sh
+ * restart` until something happened to trigger an ask. Now connect() schedules
+ * its own retry, capped at 30s, with the delay resetting to 1s on each
+ * successful open. The HUD's own WS in hud.js has the same pattern. */
+const INITIAL_RETRY_MS = 1000;
+const MAX_RETRY_MS = 30_000;
+let _retryDelayMs = INITIAL_RETRY_MS;
+let _retryTimer = null;
+function _scheduleReconnect() {
+  if (_retryTimer) return;
+  _retryTimer = setTimeout(() => {
+    _retryTimer = null;
+    /* Double the delay for next failure; cap at MAX_RETRY_MS. _emitOnline
+     * resets it on a successful open. */
+    _retryDelayMs = Math.min(_retryDelayMs * 2, MAX_RETRY_MS);
+    connect();
+  }, _retryDelayMs);
+}
+
 /** Ensure the socket is connecting or connected. Idempotent. */
 export function connect() {
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
-  try { ws = new WebSocket(URL); } catch { return; }
+  /* Diagnostic instrumentation — Sprint 12 churn investigation. The bridge
+   * keeps appearing to "drop offline" with the WAITING splash even though
+   * server-side health is green. Logging every WS lifecycle event with
+   * timing + close code/reason will tell us whether the close is browser-
+   * initiated, bridge-initiated, network, or our own code calling close(). */
+  const _t0 = Date.now();
+  console.log(`[bridge-client] connect() opening WS to ${URL}`);
+  try { ws = new WebSocket(URL); } catch (e) {
+    console.warn(`[bridge-client] WebSocket constructor threw: ${e.message}`);
+    _scheduleOffline(); _scheduleReconnect(); return;
+  }
+  ws.addEventListener("open", () => {
+    console.log(`[bridge-client] WS open after ${Date.now() - _t0}ms`);
+    _emitOnline();
+  });
   ws.addEventListener("message", onMessage);
-  ws.addEventListener("close", () => { ws = null; });
-  ws.addEventListener("error", () => { /* close handler retries on next ask */ });
+  ws.addEventListener("close", (ev) => {
+    /* CloseEvent fields: code (1000=normal, 1001=going-away, 1006=abnormal,
+     * 1011=server error), reason (string), wasClean (bool). 1006 = no close
+     * frame received → typically a network/transport issue. */
+    console.warn(`[bridge-client] WS closed after ${Date.now() - _t0}ms · code=${ev.code} reason="${ev.reason || ""}" clean=${ev.wasClean}`);
+    ws = null; _scheduleOffline(); _scheduleReconnect();
+  });
+  ws.addEventListener("error", (ev) => {
+    console.warn(`[bridge-client] WS error · readyState=${ws?.readyState ?? "?"}`);
+  });
 }
 
 /**

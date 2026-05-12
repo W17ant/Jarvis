@@ -163,6 +163,49 @@ function buildKeyRow({ name = "", existingHint = "", isExisting = false } = {}) 
   return row;
 }
 
+/** Render the last-7-days session summary into the Diagnostics grid.
+ *  Pure DOM (no innerHTML — the values come from the bridge but we still
+ *  render via textContent to keep the security-hook happy and so XSS
+ *  through a corrupted JSONL line is impossible). */
+function renderDiagSummary(host, summary) {
+  host.replaceChildren();
+  if (!summary.length) {
+    const span = document.createElement("span");
+    span.className = "settings-modal__hint";
+    span.textContent = "No session data yet — use the kiosk for a few turns then reopen Settings.";
+    host.appendChild(span);
+    return;
+  }
+  const table = document.createElement("div");
+  table.className = "settings-modal__diag-table";
+  const head = document.createElement("div");
+  head.className = "settings-modal__diag-row settings-modal__diag-row--head";
+  ["Day", "Turns", "p50 audio", "p95 audio", "Errors"].forEach((label) => {
+    const cell = document.createElement("span");
+    cell.textContent = label;
+    head.appendChild(cell);
+  });
+  table.appendChild(head);
+  for (const day of summary) {
+    const row = document.createElement("div");
+    row.className = "settings-modal__diag-row";
+    const cells = [
+      day.date,
+      String(day.turns ?? 0),
+      day.audioP50 != null ? `${day.audioP50}ms` : "—",
+      day.audioP95 != null ? `${day.audioP95}ms` : "—",
+      String(day.errors ?? 0),
+    ];
+    for (const text of cells) {
+      const cell = document.createElement("span");
+      cell.textContent = text;
+      row.appendChild(cell);
+    }
+    table.appendChild(row);
+  }
+  host.appendChild(table);
+}
+
 /** Render the API keys list from /api-keys response. */
 function renderApiKeyList(host, payload) {
   host.replaceChildren();
@@ -225,6 +268,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   const projectSel = document.getElementById("settingsProject");
   const highContrastChk = document.getElementById("settingsHighContrast");
   const fontScaleSel = document.getElementById("settingsFontScale");
+  const centerpieceSel = document.getElementById("settingsCenterpiece");
   const shootsDirInput = document.getElementById("settingsShootsDir");
   const outputDirInput = document.getElementById("settingsOutputDir");
   const styleTextarea = document.getElementById("settingsCreativeStyle");
@@ -261,6 +305,10 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
   const vadValue = document.getElementById("settingsVadValue");
   const vadMeter = document.getElementById("settingsVadMeter");
   const vadMeterMark = document.getElementById("settingsVadMeterMark");
+  /* Diagnostics — last-7-days session metrics + export ZIP */
+  const diagGrid = document.getElementById("settingsDiagGrid");
+  const diagExportBtn = document.getElementById("settingsDiagExportBtn");
+  const diagExportStatus = document.getElementById("settingsDiagExportStatus");
 
   /* Stash the selected geocode hit so save can skip the second API call when the
    * operator picked an explicit suggestion. Cleared whenever the input mutates. */
@@ -432,6 +480,7 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
      * mutated externally (e.g. via dev console). */
     if (highContrastChk) highContrastChk.checked = Storage.get("highContrast", "false") === "true";
     if (fontScaleSel) fontScaleSel.value = Storage.get("fontScale", "m");
+    if (centerpieceSel) centerpieceSel.value = Storage.get("centerpiece", "reactor");
 
     /* Populate profile picker — list active profiles, mark the current one. */
     if (profileSel) {
@@ -462,6 +511,31 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
         }
       } catch {
         if (apiKeysList) apiKeysList.replaceChildren();
+      }
+    }
+
+    /* Diagnostics — fetch last 7 days of session aggregates + render
+     * a compact day-by-day table. Local-only data; nothing posted unless
+     * the operator clicks Export. */
+    if (diagGrid) {
+      try {
+        const r = await fetch("http://localhost:8766/health/sessions?days=7", { cache: "no-store" });
+        if (r.ok) {
+          const j = await r.json();
+          renderDiagSummary(diagGrid, j.summary || []);
+        } else {
+          diagGrid.replaceChildren();
+          const span = document.createElement("span");
+          span.className = "settings-modal__hint";
+          span.textContent = `bridge returned ${r.status}`;
+          diagGrid.appendChild(span);
+        }
+      } catch (e) {
+        diagGrid.replaceChildren();
+        const span = document.createElement("span");
+        span.className = "settings-modal__hint";
+        span.textContent = `bridge offline (${e.message})`;
+        diagGrid.appendChild(span);
       }
     }
 
@@ -689,6 +763,18 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
       if (newScale !== Storage.get("fontScale", "m")) {
         Storage.set("fontScale", newScale);
         a11yChanged = true;
+      }
+    }
+    /* Sprint 10: centerpiece swap. Hot-applies via window.__hud.setCenterpiece
+     * which mounts/unmounts the orb without reloading the kiosk. */
+    if (centerpieceSel && centerpieceSel.value) {
+      const next = centerpieceSel.value;
+      if (next !== Storage.get("centerpiece", "reactor")) {
+        if (window.__hud?.setCenterpiece) {
+          await window.__hud.setCenterpiece(next);
+        } else {
+          Storage.set("centerpiece", next);
+        }
       }
     }
     if (a11yChanged) applyAccessibilityPrefs?.();
@@ -1357,6 +1443,43 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
     /* Hook lifecycle — start when modal opens, stop on close. */
     document.addEventListener("settings:opened", startVadMeter);
     document.addEventListener("settings:closed", stopVadMeter);
+  }
+
+  /* Diagnostics export button — fires the bridge endpoint that runs
+   * tools/diagnose.sh --no-email and reports back the bundle path on the
+   * Desktop. Operator still has to actually email it themselves; the
+   * bundle is local-only until they do. */
+  if (diagExportBtn) {
+    diagExportBtn.addEventListener("click", async () => {
+      if (diagExportBtn.disabled) return;
+      diagExportBtn.disabled = true;
+      const original = diagExportBtn.textContent;
+      diagExportBtn.textContent = "↻ BUNDLING…";
+      if (diagExportStatus) diagExportStatus.textContent = "";
+      try {
+        const r = await fetch("http://localhost:8766/diagnostics/export", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.ok && j.path) {
+          diagExportBtn.textContent = "✓ EXPORTED";
+          if (diagExportStatus) diagExportStatus.textContent = j.path;
+        } else {
+          diagExportBtn.textContent = "✕ FAILED";
+          if (diagExportStatus) diagExportStatus.textContent = j.error || `bridge returned ${r.status}`;
+        }
+      } catch (e) {
+        diagExportBtn.textContent = "✕ FAILED";
+        if (diagExportStatus) diagExportStatus.textContent = String(e.message || e);
+      } finally {
+        /* Reset after a short pause so the operator sees the outcome. */
+        setTimeout(() => {
+          diagExportBtn.disabled = false;
+          diagExportBtn.textContent = original;
+        }, 4000);
+      }
+    });
   }
 
   /* Tailscale buttons — refresh re-fetches status, setup pops Terminal at

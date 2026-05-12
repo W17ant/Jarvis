@@ -27,6 +27,23 @@ const STYLE_PATH = path.join(PROJECT_DIR, "config", "creative-style.md");
  * to keep the per-turn token budget predictable. ~6000 chars ≈ ~1500 tokens. */
 const MAX_PROMPT_CHARS = 6000;
 
+/* Workspace v1: per-workspace creative-style override. When the active
+ * workspace has creativeStylePath set, server.mjs calls setOverridePath
+ * with the resolved absolute path. The override flows through loadCreativeStyle
+ * so the LLM gets workspace-scoped style guidance. Cleared by passing null
+ * when the workspace is deactivated. Cached separately so switching back
+ * to a workspace doesn't re-read the file when nothing changed. */
+let _overridePath = null;
+export function setOverridePath(absPath) {
+  _overridePath = absPath || null;
+  /* Invalidate cache on any override change so the next loadCreativeStyle
+   * reads from the new file (or back to the default). */
+  cached = null;
+  cachedMtime = 0;
+}
+
+function _activeStylePath() { return _overridePath || STYLE_PATH; }
+
 let cached = null;
 let cachedMtime = 0;
 
@@ -35,7 +52,8 @@ let cachedMtime = 0;
  * @returns {string}
  */
 export function loadCreativeStyle() {
-  if (!existsSync(STYLE_PATH)) {
+  const active = _activeStylePath();
+  if (!existsSync(active)) {
     cached = "";
     cachedMtime = 0;
     return "";
@@ -43,10 +61,10 @@ export function loadCreativeStyle() {
   /* Why mtime check: operator may edit creative-style.md mid-session and we
    * want their changes to take effect on the next askLLM call without forcing
    * a bridge restart. Cheaper than re-reading the file every turn. */
-  const mtime = statSync(STYLE_PATH).mtimeMs;
+  const mtime = statSync(active).mtimeMs;
   if (cached !== null && mtime === cachedMtime) return cached;
   try {
-    let raw = readFileSync(STYLE_PATH, "utf8").trim();
+    let raw = readFileSync(active, "utf8").trim();
     if (raw.length > MAX_PROMPT_CHARS) {
       raw = raw.slice(0, MAX_PROMPT_CHARS) + "\n\n[...truncated — file exceeds 6000 char prompt budget; trim or split]";
     }
@@ -54,7 +72,7 @@ export function loadCreativeStyle() {
     cachedMtime = mtime;
     return cached;
   } catch (e) {
-    console.warn(`[creative-style] could not read ${STYLE_PATH}: ${e.message}`);
+    console.warn(`[creative-style] could not read ${active}: ${e.message}`);
     return "";
   }
 }
@@ -83,7 +101,15 @@ export function invalidateCreativeStyleCache() {
   cachedMtime = 0;
 }
 
-/** Path to the active style file (for /style endpoint + diagnose bundle). */
+/** Path to the active style file (for /style endpoint + diagnose bundle).
+ *  Returns the workspace override when one is set, else the global default. */
 export function creativeStylePath() {
+  return _activeStylePath();
+}
+
+/** Pure default path — the global config/creative-style.md. Used by the /style
+ *  endpoint when the operator wants to edit the global default explicitly,
+ *  not the active workspace's override. */
+export function defaultCreativeStylePath() {
   return STYLE_PATH;
 }

@@ -32,6 +32,15 @@ let activeOperator = "default";
 export function setOperator(id) { activeOperator = String(id || "default"); }
 export function getOperator() { return activeOperator; }
 
+/* Workspaces v3: active-workspace provider injected from server.mjs so every
+ * record() stamps with the active workspace's slug. NULL = unscoped (legacy
+ * rows + tool calls that fired before any workspace was active). The slug is
+ * read lazily so a workspace switch mid-session takes effect on the next call. */
+let _getActiveWorkspaceSlug = () => null;
+export function setActiveWorkspaceProvider(fn) {
+  if (typeof fn === "function") _getActiveWorkspaceSlug = fn;
+}
+
 /** Resolve the per-month log file path. */
 function fileForToday() {
   const now = new Date();
@@ -72,6 +81,7 @@ export async function record(entry) {
     const row = {
       ts: Date.now(),
       operator: activeOperator,
+      workspace: _getActiveWorkspaceSlug() || null,
       tool: entry.tool,
       args: compact(entry.args),
       result: entry.result !== undefined ? compact(entry.result) : undefined,
@@ -95,6 +105,13 @@ export async function record(entry) {
  * @param {string} [filter.tool]      Only entries for this tool name.
  * @param {number} [filter.fromTs]    Inclusive epoch-ms lower bound.
  * @param {number} [filter.toTs]      Inclusive epoch-ms upper bound.
+ * @param {string} [filter.workspace]  Only entries from this workspace slug.
+ *                                    Pre-v3 rows have no workspace field; they
+ *                                    surface in every workspace's filter so
+ *                                    legacy audit data isn't trapped.
+ * @param {boolean} [filter.allWorkspaces]  Bypass the workspace filter entirely.
+ *                                    When false/unset and no `workspace` is
+ *                                    supplied, defaults to the active scope.
  * @param {number} [filter.limit=200] Max entries returned (newest first).
  * @returns {Promise<Array<object>>}
  */
@@ -102,6 +119,9 @@ export async function query(filter = {}) {
   if (!existsSync(AUDIT_DIR)) return [];
   const files = (await readdir(AUDIT_DIR)).filter(f => f.endsWith(".jsonl")).sort().reverse();
   const limit = Math.max(1, Math.min(2000, Number(filter.limit) || 200));
+  /* Resolve workspace filter: explicit `workspace` arg wins over the active
+   * provider; allWorkspaces=true bypasses entirely. */
+  const ws = filter.allWorkspaces ? null : (filter.workspace !== undefined ? filter.workspace : _getActiveWorkspaceSlug());
   const out = [];
   /* Read newest-month-first; stop once we have enough. */
   for (const f of files) {
@@ -115,6 +135,10 @@ export async function query(filter = {}) {
       if (filter.tool && row.tool !== filter.tool) continue;
       if (filter.fromTs && row.ts < filter.fromTs) continue;
       if (filter.toTs && row.ts > filter.toTs) continue;
+      /* Workspace filter: NULL workspace on the row leaks into every scope
+       * (legacy data isn't trapped); an explicit slug match is required when
+       * filtering. */
+      if (ws && row.workspace && row.workspace !== ws) continue;
       out.push(row);
       if (out.length >= limit) return out;
     }

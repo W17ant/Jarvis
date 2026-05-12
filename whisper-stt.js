@@ -42,6 +42,18 @@ let _inflightPartial = null;          // Promise<string>
 let _latestPartialText = "";
 let _partialFiredAtChunkCount = 0;
 
+/* ---- Live-dictation streaming state ----
+ * When enabled, fires whisper transcribes on the growing audio every
+ * STREAM_TICK_MS while recording, calling _partialListener with the latest
+ * text after each. Voice.js subscribes to drive the typed-input textarea so
+ * the operator sees their speech transcribed live. */
+const STREAM_TICK_MS = 500;
+let _streamingTimer = null;
+let _streamingInflight = false;
+let _streamingMinChunks = 4;            // ~1s of audio before first stream call (avoid noise)
+let _partialListener = null;
+let _streamLatestText = "";
+
 /* ---- UI / orchestration callbacks (injected) ---- */
 let _setState = () => {};
 let _replyEl = null;
@@ -78,6 +90,61 @@ export function resetForNewTurn() {
   _inflightPartial = null;
   _latestPartialText = "";
   _partialFiredAtChunkCount = 0;
+  _streamLatestText = "";
+}
+
+/** Subscribe to live partial-transcript updates fired by the streaming loop
+ *  (every ~500ms during recording when startStreaming() is active). Pass null
+ *  to unsubscribe. The listener receives the latest partial as a string. */
+export function setPartialListener(fn) {
+  _partialListener = typeof fn === "function" ? fn : null;
+}
+
+/** The streaming loop's most recent transcript. Empty until the first tick
+ *  fires (~1.5s into recording). Voice.js uses this as the submit text when
+ *  the user pauses, avoiding the final-transcribe round-trip. */
+export function getStreamLatest() {
+  return _streamLatestText;
+}
+
+/** Start firing whisper transcribes on the growing audio buffer every
+ *  STREAM_TICK_MS. Each call resolves to a partial transcript and (a)
+ *  updates _streamLatestText, (b) notifies _partialListener. Stops itself
+ *  if no listener AND no chunks yet. Idempotent — second start is a no-op. */
+export function startStreaming() {
+  if (_streamingTimer) return;
+  _streamingTimer = setInterval(async () => {
+    if (_streamingInflight) return; /* don't pile up — skip this tick */
+    if (_audioChunks.length < _streamingMinChunks) return;
+    _streamingInflight = true;
+    try {
+      const blob = new Blob([..._audioChunks], { type: _audioChunks[0]?.type || "audio/webm" });
+      const r = await fetch(WHISPER_URL, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: blob,
+      });
+      if (!r.ok) return;
+      const j = await r.json().catch(() => null);
+      const text = (j?.text || "").trim();
+      if (text && text !== _streamLatestText) {
+        _streamLatestText = text;
+        if (_partialListener) {
+          try { _partialListener(text); } catch (e) { console.warn("[stream-stt] listener threw:", e.message); }
+        }
+      }
+    } catch (e) {
+      /* Network or whisper-server hiccup — skip this tick and retry next. */
+    } finally {
+      _streamingInflight = false;
+    }
+  }, STREAM_TICK_MS);
+}
+
+/** Stop the streaming loop. Idempotent. The final _streamLatestText stays
+ *  readable via getStreamLatest() so callers can use it as the submit text. */
+export function stopStreaming() {
+  if (_streamingTimer) { clearInterval(_streamingTimer); _streamingTimer = null; }
 }
 
 export function chunkCount() { return _audioChunks.length; }

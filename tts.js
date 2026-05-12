@@ -112,6 +112,11 @@ export async function synthesise(text, voice, speed = DEFAULT_SPEED) {
  * likely to take its time (tool calls, vision passes, anything that hits
  * AppleScript). The caller picks the pool via pickFiller(longHint). Keeping
  * each filler under ~12 words so it doesn't run past the LLM's first sentence. */
+/* Filler pools — expanded to reduce repetition and add more conversational
+ * variety. Operators reported the original 6/8 lines felt "canned" after a
+ * day of use. Goal: every filler reads as natural acknowledgement, not a
+ * scripted preamble. Each line stays under ~12 words so it doesn't run
+ * past the LLM's first real sentence. */
 const FILLERS_SHORT = [
   "On it, sir.",
   "Right away.",
@@ -119,6 +124,15 @@ const FILLERS_SHORT = [
   "One moment.",
   "Coming up.",
   "Just a sec.",
+  "Right then.",
+  "Sure thing.",
+  "Got it.",
+  "Hold on.",
+  "Let me see.",
+  "Of course, sir.",
+  "Looking now.",
+  "Give me a beat.",
+  "Right, here we go.",
 ];
 
 const FILLERS_LONG = [
@@ -130,7 +144,30 @@ const FILLERS_LONG = [
   "Working on it, sir — just a moment to gather everything.",
   "Right you are, let me see what we've got.",
   "Hold tight, I'll have something for you in a moment.",
+  "Right then, let me see what's on the books.",
+  "Bear with me a second — this'll take just a moment.",
+  "Sure thing, sir, just running through the records now.",
+  "Got it. One moment while I fetch that.",
+  "Stand by — pulling the latest now.",
+  "Right, just queueing that up for you.",
 ];
+
+/* Boot greetings — spoken once when the kiosk comes online. Operator can
+ * disable via the settings panel ("quiet boot"). The agent's name is
+ * substituted at speak time so a re-skinned brand reads correctly. */
+const BOOT_GREETINGS = [
+  "Online and at your service.",
+  "Systems online. Standing by.",
+  "Good to see you, sir. Ready when you are.",
+  "All systems nominal. How can I help?",
+  "Online. Just say the word.",
+  "Systems are warm. Standing by.",
+  "Up and running, sir.",
+];
+
+export function pickBootGreeting() {
+  return BOOT_GREETINGS[Math.floor(Math.random() * BOOT_GREETINGS.length)];
+}
 
 /** Pick a random filler. Excludes the most-recent one so back-to-back queries
  *  don't repeat — small touch but meaningfully reduces the "canned" feel.
@@ -274,6 +311,19 @@ async function drain() {
     if (gen !== queue.generation) return;
     drain();
   };
+  /* Mark the first audio of each turn — combined with v.rec-end this gives
+   * the headline "speech-end → first audio" perceptual lag.
+   * Why the 5s freshness check: a still-resolved mark from the PREVIOUS turn
+   * would otherwise be reused, masking the real first-audio time of THIS
+   * turn. 5s is comfortably longer than any expected per-sentence playback,
+   * so any mark older than that is definitely stale. */
+  try {
+    const existing = performance.getEntriesByName("v.audio-play");
+    const last = existing.length ? existing[existing.length - 1].startTime : null;
+    if (last == null || (performance.now() - last) > 5000) {
+      performance.mark("v.audio-play");
+    }
+  } catch {}
   try { source.start(0); } catch { queue.current = null; drain(); }
 }
 

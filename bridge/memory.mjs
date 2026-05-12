@@ -138,6 +138,39 @@ CREATE TRIGGER IF NOT EXISTS doc_chunks_ad AFTER DELETE ON doc_chunks BEGIN
 END;
 `);
 
+/* Workspaces v2: tag every memory row with the workspace it was captured in.
+ * NULL means "no workspace was active when this row was created" — those
+ * rows surface in every scope so legacy data isn't trapped. The ALTER TABLE
+ * migrations are idempotent — they swallow the SQLite "duplicate column"
+ * error so a re-run on a v2 install doesn't crash boot. */
+function _addColumnIfMissing(table, name, decl) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${decl}`); }
+  catch (e) { if (!/duplicate column/i.test(e.message)) throw e; }
+}
+for (const tbl of [
+  "contacts", "projects", "facts",
+  "conversation_summaries", "conversation_turns",
+  "documents",
+]) {
+  _addColumnIfMissing(tbl, "workspace_id", "TEXT");
+}
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_contacts_ws ON contacts(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_projects_ws ON projects(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_facts_ws ON facts(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_conv_turns_ws ON conversation_turns(workspace_id, ts);
+  CREATE INDEX IF NOT EXISTS idx_conv_summaries_ws ON conversation_summaries(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_documents_ws ON documents(workspace_id);
+`);
+
+/* Active-workspace getter injected from outside (server.mjs wires it on boot).
+ * Memory functions read it lazily so the workspace filter follows whatever is
+ * active at the time of the query. Setting null disables the default filter. */
+let _getActiveWorkspaceSlug = () => null;
+export function setActiveWorkspaceProvider(fn) {
+  if (typeof fn === "function") _getActiveWorkspaceSlug = fn;
+}
+
 /* ---------- EMBEDDINGS via Ollama ---------- */
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 
@@ -188,24 +221,28 @@ function levenshtein(a, b) {
 }
 
 /* ---------- CONTACTS ---------- */
-export async function addContact({ name, email = null, phone = null, company = null, role = null, notes = null }) {
+export async function addContact({ name, email = null, phone = null, company = null, role = null, notes = null, workspaceId = undefined } = {}) {
   if (!name) return { ok: false, error: "name required" };
   const now = Date.now();
   /* Composite text for the embedding so semantic search hits across name + role + company + notes */
   const composite = [name, role, company, notes, email].filter(Boolean).join(" — ");
   let emb = null;
   try { emb = vectorToBuffer(await embed(composite)); } catch (e) { console.warn("[memory] embed failed:", e.message); }
+  const ws = workspaceId !== undefined ? workspaceId : _getActiveWorkspaceSlug();
 
   const existing = db.prepare("SELECT id FROM contacts WHERE LOWER(name) = LOWER(?)").get(name);
   if (existing) {
+    /* On update we DON'T re-stamp workspace_id — a contact created in one
+     * scope shouldn't silently jump scopes when the operator updates them
+     * from another workspace. The original scope wins. */
     db.prepare(`UPDATE contacts SET email=COALESCE(?,email), phone=COALESCE(?,phone), company=COALESCE(?,company),
                 role=COALESCE(?,role), notes=COALESCE(?,notes), embedding=COALESCE(?,embedding), updated_at=?
                 WHERE id=?`).run(email, phone, company, role, notes, emb, now, existing.id);
     return { ok: true, action: "updated", id: existing.id, name };
   }
-  const r = db.prepare(`INSERT INTO contacts (name, email, phone, company, role, notes, embedding, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-              .run(name, email, phone, company, role, notes, emb, now, now);
+  const r = db.prepare(`INSERT INTO contacts (name, email, phone, company, role, notes, embedding, created_at, updated_at, workspace_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+              .run(name, email, phone, company, role, notes, emb, now, now, ws || null);
   return { ok: true, action: "created", id: r.lastInsertRowid, name };
 }
 
@@ -262,27 +299,43 @@ export function listContacts({ company = null } = {}) {
 }
 
 /* ---------- FACTS / FREE-FORM MEMORY ---------- */
-export async function remember({ content, tags = [] }) {
+export async function remember({ content, tags = [], workspaceId = undefined } = {}) {
   if (!content) return { ok: false, error: "content required" };
   let emb = null;
   try { emb = vectorToBuffer(await embed(content)); } catch (e) { console.warn("[memory] embed failed:", e.message); }
-  const r = db.prepare(`INSERT INTO facts (content, tags, embedding, created_at) VALUES (?, ?, ?, ?)`)
-              .run(content, JSON.stringify(tags || []), emb, Date.now());
+  const ws = workspaceId !== undefined ? workspaceId : _getActiveWorkspaceSlug();
+  const r = db.prepare(`INSERT INTO facts (content, tags, embedding, created_at, workspace_id) VALUES (?, ?, ?, ?, ?)`)
+              .run(content, JSON.stringify(tags || []), emb, Date.now(), ws || null);
   return { ok: true, id: r.lastInsertRowid, content };
 }
 
-export async function recall({ query, limit = 5 }) {
+/** Workspace-aware semantic recall.
+ *
+ *  Defaults to filtering each source table by the active workspace (rows
+ *  with NULL workspace_id are surfaced everywhere — legacy data isn't
+ *  trapped). Pass allWorkspaces=true to bypass the filter and search the
+ *  full corpus; use when the operator says "search across all workspaces"
+ *  or when a workspace's scope is intentionally porous (a "personal"
+ *  baseline that wants to see consulting facts too). */
+export async function recall({ query, limit = 5, workspaceId = undefined, allWorkspaces = false } = {}) {
   if (!query) return { ok: false, error: "query required" };
   let queryVec;
   try { queryVec = await embed(query); }
   catch (e) { return { ok: false, error: `embed: ${e.message}` }; }
 
+  /* Build the workspace-scope WHERE fragment. The (workspace_id IS NULL OR
+   * workspace_id = ?) shape lets unscoped rows leak into every workspace's
+   * scope — operators who never used workspaces still see their old facts. */
+  const ws = allWorkspaces ? null : (workspaceId !== undefined ? workspaceId : _getActiveWorkspaceSlug());
+  const wsClause = ws ? " WHERE (workspace_id IS NULL OR workspace_id = ?)" : "";
+  const wsParams = ws ? [ws] : [];
+
   /* Search facts + contacts + projects + past conversation summaries in one ranked set */
   const items = [
-    ...db.prepare("SELECT id, content as text, 'fact' as kind, tags, created_at, embedding FROM facts").all(),
-    ...db.prepare("SELECT id, name || ' (' || COALESCE(role,'')|| ' at ' || COALESCE(company,'')|| ') — ' || COALESCE(notes,'') as text, 'contact' as kind, NULL as tags, created_at, embedding FROM contacts").all(),
-    ...db.prepare("SELECT id, name || ' — ' || COALESCE(notes,'') as text, 'project' as kind, NULL as tags, created_at, embedding FROM projects").all(),
-    ...db.prepare("SELECT id, summary as text, 'conversation' as kind, topics as tags, ended_at as created_at, embedding FROM conversation_summaries").all(),
+    ...db.prepare("SELECT id, content as text, 'fact' as kind, tags, created_at, embedding FROM facts" + wsClause).all(...wsParams),
+    ...db.prepare("SELECT id, name || ' (' || COALESCE(role,'')|| ' at ' || COALESCE(company,'')|| ') — ' || COALESCE(notes,'') as text, 'contact' as kind, NULL as tags, created_at, embedding FROM contacts" + wsClause).all(...wsParams),
+    ...db.prepare("SELECT id, name || ' — ' || COALESCE(notes,'') as text, 'project' as kind, NULL as tags, created_at, embedding FROM projects" + wsClause).all(...wsParams),
+    ...db.prepare("SELECT id, summary as text, 'conversation' as kind, topics as tags, ended_at as created_at, embedding FROM conversation_summaries" + wsClause).all(...wsParams),
   ];
   const ranked = items
     .map(r => ({ ...r, score: cosine(queryVec, bufferToVector(r.embedding)) }))
@@ -315,24 +368,47 @@ export async function saveConversation({ summary, topics = [], startedAt, endedA
  * are the literal transcript; summaries are the searchable distillation. */
 
 /** Append a single turn. Synchronous SQLite write — better-sqlite3's
- *  prepared statement is fast enough that we don't need async. */
-export function appendTurn({ sessionId, role, content, tools = null } = {}) {
+ *  prepared statement is fast enough that we don't need async.
+ *
+ *  Workspaces v2: stamps the row with the active workspace slug at write
+ *  time. Caller can override by passing workspaceId explicitly (used by
+ *  iMessage relay and other paths where the active HUD workspace doesn't
+ *  match the conversation's scope). NULL = unscoped (legacy turns + turns
+ *  written before any workspace was activated). */
+export function appendTurn({ sessionId, role, content, tools = null, workspaceId = undefined } = {}) {
   if (!sessionId || !role || !content) return { ok: false, error: "sessionId, role, content required" };
   const toolsJson = (Array.isArray(tools) && tools.length) ? JSON.stringify(tools) : null;
-  const r = db.prepare(`INSERT INTO conversation_turns (session_id, ts, role, content, tools_json) VALUES (?, ?, ?, ?, ?)`)
-              .run(String(sessionId), Date.now(), String(role), String(content), toolsJson);
+  const ws = workspaceId !== undefined ? workspaceId : _getActiveWorkspaceSlug();
+  const r = db.prepare(`INSERT INTO conversation_turns (session_id, ts, role, content, tools_json, workspace_id) VALUES (?, ?, ?, ?, ?, ?)`)
+              .run(String(sessionId), Date.now(), String(role), String(content), toolsJson, ws || null);
   return { ok: true, id: r.lastInsertRowid };
 }
 
 /** Recent turns paginated by timestamp. The HUD's drawer uses limit=50 by
  *  default; the search box does substring filtering client-side because the
- *  result sets are small (max ~1000 turns over a typical week of use). */
-export function recentTurns({ limit = 50, beforeTs = null, sessionId = null } = {}) {
+ *  result sets are small (max ~1000 turns over a typical week of use).
+ *
+ *  Workspaces v2: defaults to filtering by the active workspace's slug.
+ *  Pass workspaceId: null explicitly to bypass the filter ("show me
+ *  conversations from every workspace"). Rows with NULL workspace_id
+ *  (legacy turns) are surfaced in every scope so they're never trapped. */
+export function recentTurns({ limit = 50, beforeTs = null, sessionId = null, workspaceId = undefined, allWorkspaces = false } = {}) {
   const cap = Math.max(1, Math.min(500, Number(limit) || 50));
   const params = [];
   let where = "1=1";
   if (beforeTs) { where += " AND ts < ?"; params.push(Number(beforeTs)); }
   if (sessionId) { where += " AND session_id = ?"; params.push(String(sessionId)); }
+  /* Workspace scoping: default to the active slug; explicit workspaceId
+   * arg overrides; allWorkspaces=true bypasses entirely. The (workspace_id
+   * IS NULL OR workspace_id = ?) shape keeps unscoped legacy rows visible
+   * inside any workspace's drawer. */
+  if (!allWorkspaces) {
+    const ws = workspaceId !== undefined ? workspaceId : _getActiveWorkspaceSlug();
+    if (ws) {
+      where += " AND (workspace_id IS NULL OR workspace_id = ?)";
+      params.push(String(ws));
+    }
+  }
   const rows = db.prepare(`SELECT id, session_id, ts, role, content, tools_json
                            FROM conversation_turns
                            WHERE ${where}
@@ -356,13 +432,14 @@ export function recentTurns({ limit = 50, beforeTs = null, sessionId = null } = 
 /** Insert (or replace) a document row. If a document with the same path
  *  already exists, we delete it first (CASCADE drops its chunks too) so
  *  re-ingest is a clean operation. Returns the new id. */
-export function upsertDocument({ path: filePath, relPath, format, bytes, hash, mtimeMs, title = null, notes = null }) {
+export function upsertDocument({ path: filePath, relPath, format, bytes, hash, mtimeMs, title = null, notes = null, workspaceId = undefined } = {}) {
   if (!filePath) throw new Error("path required");
   db.prepare("DELETE FROM documents WHERE path = ?").run(filePath);
+  const ws = workspaceId !== undefined ? workspaceId : _getActiveWorkspaceSlug();
   const r = db.prepare(`INSERT INTO documents
-    (path, rel_path, format, bytes, hash, mtime_ms, ingested_at, chunk_count, title, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`)
-    .run(filePath, relPath, format, bytes, hash, mtimeMs, Date.now(), title, notes);
+    (path, rel_path, format, bytes, hash, mtime_ms, ingested_at, chunk_count, title, notes, workspace_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`)
+    .run(filePath, relPath, format, bytes, hash, mtimeMs, Date.now(), title, notes, ws || null);
   return r.lastInsertRowid;
 }
 
@@ -412,16 +489,28 @@ export function listDocuments({ limit = 200 } = {}) {
  *
  *  Returns top-K chunks with source document metadata for citation.
  */
-export async function searchKnowledge({ query, topK = 8 } = {}) {
+export async function searchKnowledge({ query, topK = 8, workspaceId = undefined, allWorkspaces = false } = {}) {
   const q = String(query || "").trim();
   if (!q) return { ok: false, error: "query required" };
   const cap = Math.max(1, Math.min(20, Number(topK) || 8));
+
+  /* Workspace scoping for chunks: chunks inherit their parent document's
+   * workspace_id via a JOIN on documents. NULL workspace_id surfaces in
+   * every scope (legacy chunks, never-scoped docs). */
+  const ws = allWorkspaces ? null : (workspaceId !== undefined ? workspaceId : _getActiveWorkspaceSlug());
 
   /* Vector pass: rank every chunk by cosine. */
   let qVec;
   try { qVec = await embed(q.slice(0, 1500)); }
   catch (e) { return { ok: false, error: `embedding failed: ${e.message}` }; }
-  const allChunks = db.prepare(`SELECT id, document_id, chunk_index, content, embedding FROM doc_chunks WHERE embedding IS NOT NULL`).all();
+  const vectorSql = ws
+    ? `SELECT c.id, c.document_id, c.chunk_index, c.content, c.embedding
+       FROM doc_chunks c
+       LEFT JOIN documents d ON d.id = c.document_id
+       WHERE c.embedding IS NOT NULL AND (d.workspace_id IS NULL OR d.workspace_id = ?)`
+    : `SELECT id, document_id, chunk_index, content, embedding FROM doc_chunks WHERE embedding IS NOT NULL`;
+  const vectorParams = ws ? [ws] : [];
+  const allChunks = db.prepare(vectorSql).all(...vectorParams);
   const vectorRanked = allChunks
     .map((c) => ({ id: c.id, score: cosine(qVec, bufferToVector(c.embedding)), content: c.content, documentId: c.document_id, chunkIndex: c.chunk_index }))
     .sort((a, b) => b.score - a.score)
@@ -434,14 +523,23 @@ export async function searchKnowledge({ query, topK = 8 } = {}) {
   let ftsRanked = [];
   if (ftsQuery) {
     try {
-      ftsRanked = db.prepare(`
-        SELECT doc_chunks.id AS id, doc_chunks.document_id AS documentId, doc_chunks.chunk_index AS chunkIndex,
-               doc_chunks.content AS content, bm25(doc_chunks_fts) AS bm25_score
-        FROM doc_chunks_fts JOIN doc_chunks ON doc_chunks.id = doc_chunks_fts.rowid
-        WHERE doc_chunks_fts MATCH ?
-        ORDER BY bm25_score
-        LIMIT ?
-      `).all(ftsQuery, cap * 3);
+      const ftsSql = ws
+        ? `SELECT doc_chunks.id AS id, doc_chunks.document_id AS documentId, doc_chunks.chunk_index AS chunkIndex,
+                  doc_chunks.content AS content, bm25(doc_chunks_fts) AS bm25_score
+           FROM doc_chunks_fts
+           JOIN doc_chunks ON doc_chunks.id = doc_chunks_fts.rowid
+           LEFT JOIN documents d ON d.id = doc_chunks.document_id
+           WHERE doc_chunks_fts MATCH ? AND (d.workspace_id IS NULL OR d.workspace_id = ?)
+           ORDER BY bm25_score
+           LIMIT ?`
+        : `SELECT doc_chunks.id AS id, doc_chunks.document_id AS documentId, doc_chunks.chunk_index AS chunkIndex,
+                  doc_chunks.content AS content, bm25(doc_chunks_fts) AS bm25_score
+           FROM doc_chunks_fts JOIN doc_chunks ON doc_chunks.id = doc_chunks_fts.rowid
+           WHERE doc_chunks_fts MATCH ?
+           ORDER BY bm25_score
+           LIMIT ?`;
+      const ftsParams = ws ? [ftsQuery, ws, cap * 3] : [ftsQuery, cap * 3];
+      ftsRanked = db.prepare(ftsSql).all(...ftsParams);
     } catch { /* malformed FTS query — skip and rely on vector */ }
   }
 
@@ -515,12 +613,13 @@ export function listSessions({ days = 14 } = {}) {
 }
 
 /* ---------- PROJECTS ---------- */
-export async function addProject({ name, client = null, status = null, notes = null }) {
+export async function addProject({ name, client = null, status = null, notes = null, workspaceId = undefined } = {}) {
   if (!name) return { ok: false, error: "name required" };
   const now = Date.now();
   const composite = [name, client, status, notes].filter(Boolean).join(" — ");
   let emb = null;
   try { emb = vectorToBuffer(await embed(composite)); } catch {}
+  const ws = workspaceId !== undefined ? workspaceId : _getActiveWorkspaceSlug();
   const existing = db.prepare("SELECT id FROM projects WHERE LOWER(name) = LOWER(?)").get(name);
   if (existing) {
     db.prepare(`UPDATE projects SET client=COALESCE(?,client), status=COALESCE(?,status), notes=COALESCE(?,notes),
@@ -528,9 +627,9 @@ export async function addProject({ name, client = null, status = null, notes = n
       .run(client, status, notes, emb, now, existing.id);
     return { ok: true, action: "updated", id: existing.id, name };
   }
-  const r = db.prepare(`INSERT INTO projects (name, client, status, notes, embedding, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)`)
-              .run(name, client, status, notes, emb, now, now);
+  const r = db.prepare(`INSERT INTO projects (name, client, status, notes, embedding, created_at, updated_at, workspace_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+              .run(name, client, status, notes, emb, now, now, ws || null);
   return { ok: true, action: "created", id: r.lastInsertRowid, name };
 }
 

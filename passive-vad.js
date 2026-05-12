@@ -35,7 +35,7 @@
  */
 
 /* ---- Constants (single source of truth for VAD tuning) ---- */
-export const VAD_SILENCE_MS    = 1100;   // sustained silence ends the utterance
+export const VAD_SILENCE_MS    = 800;    // sustained silence ends the utterance (was 1100 — operators speak in decisive bursts and 1100 felt sluggish)
 export const VAD_MAX_REC_MS    = 15000;
 export const VAD_TICK_MS       = 60;
 export const VAD_FLOOR_MIN     = 0.005;  // hard minimums so a perfectly silent room doesn't trigger on micro-noise
@@ -45,7 +45,7 @@ export const VAD_START_RATIO   = 2.8;    // start threshold = max(MIN, ambient �
 export const VAD_SUSTAIN_RATIO = 1.8;
 export const VAD_AMBIENT_WIN   = 60;     // ~60 × VAD_TICK_MS = 3.6s rolling window
 export const VAD_SHORT_VOICE_MS  = 1500; // boundary between "wake word alone" vs "wake + question"
-export const VAD_SHORT_SILENCE_MS = 600; // snappy trigger when voice was short
+export const VAD_SHORT_SILENCE_MS = 450; // snappy trigger when voice was short (was 600)
 
 /* ---- Injected handlers ---- */
 let _getAnalyserBuf = () => null;

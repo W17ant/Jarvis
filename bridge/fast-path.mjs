@@ -1,4 +1,6 @@
 // @ts-check
+import * as News from "./news.mjs";
+
 /** fast-path.mjs - Skip-the-LLM handler for instant-answer queries.
  *
  *  The voice loop floor on local hardware is roughly:
@@ -203,7 +205,269 @@ const HANDLERS = [
     test: /^(?:no|nope|nah|never\s*mind|forget\s*it)\.?$/i,
     handle: () => ({ match: true, reply: "Understood." }),
   },
+
+  /* ---------- News panel ----------
+   *  Local qwen2.5:7b reliably narrates "opening the news panel" without
+   *  emitting the actual tool call, so the panel never mounts. Pattern-match
+   *  the common news triggers and fire show_news_panel directly. The reply
+   *  text speaks the top headline from the prewarmed cache so the operator
+   *  hears it as the panel slides in — same UX as the LLM path. */
+  {
+    test: /^(?:show\s+me\s+the\s+news|open\s+the\s+news(?:\s+panel)?|the\s+news\s+please|what(?:'s|s| is)?\s+the\s+news|what(?:'s|s| is)?\s+(?:happening|going\s+on)(?:\s+in\s+the\s+world)?|top\s+(?:stories|headlines)|headlines|catch\s+me\s+up(?:\s+on\s+the\s+news)?|news\s+panel)\.?\??$/i,
+    handle: () => {
+      const cached = News.getCached?.();
+      return {
+        match: true,
+        reply: buildNewsReply(cached),
+        toolCall: { name: "show_news_panel", args: {} },
+      };
+    },
+  },
+  {
+    test: /^(?:close|hide|dismiss|turn\s+off)\s+the\s+news(?:\s+panel)?\.?$/i,
+    handle: () => ({ match: true, reply: "Closing the news.", toolCall: { name: "hide_news_panel", args: {} } }),
+  },
+
+  /* ---------- Asset panel (latest image / video) ----------
+   *  Voice triggers for re-opening the most-recent generated asset. The
+   *  panel ALSO opens automatically on teaser.image_ready / teaser.video_ready
+   *  broadcasts (see asset-panel.js) — this fast-path is for the operator
+   *  asking to see it again after closing. */
+  {
+    test: /^(?:show\s+(?:me\s+)?(?:the\s+)?(?:latest|last)\s+(?:image|video|asset|clip|hero)|pull\s*up\s+(?:the\s+)?(?:image|video|asset|clip|hero)|asset\s+panel)\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Opening the asset panel.",
+      toolCall: { name: "show_asset_panel", args: {} },
+    }),
+  },
+
+  /* ---------- Weather panel ----------
+   *  "Show me the weather" intent gets the panel (visual + actionable); the
+   *  text-only "what's the weather" still hits get_weather above (just speaks
+   *  the temp). The "show me X" generic fallback at the bottom of the file
+   *  would otherwise open Google search — this handler runs FIRST and wins. */
+  {
+    test: /^(?:show\s+(?:me\s+)?(?:the\s+)?(?:weather|forecast)(?:\s+(?:panel|today|outside))?|weather\s+panel|forecast\s+panel|open\s+(?:the\s+)?(?:weather|forecast))\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Opening the weather panel.",
+      toolCall: { name: "show_weather_panel", args: {} },
+    }),
+  },
+
+  /* ---------- Influencer wizard ----------
+   *  Permissive triggers — operator's framing varies a lot for this command.
+   *  Bypass the local LLM (which often narrates "let me create an influencer"
+   *  without firing the tool) and open the wizard directly. */
+  {
+    test: /^(?:create|make|build|spin\s*up|generate)\s+(?:me\s+)?(?:an?\s+)?(?:new\s+)?influencer\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Opening the influencer wizard. Tell me what kind.",
+      toolCall: { name: "show_influencer_wizard", args: {} },
+    }),
+  },
+
+  /* ---------- Weather (no location) ----------
+   *  Permissive set — operator phrases this many ways. ANY query that names a
+   *  place ("weather in Alicante") falls through so the LLM picks up the
+   *  location via the get_weather tool with proper args. Pure home-forecast
+   *  queries are fast-path-eligible and use the 10-min weather cache.
+   *  Reply is a function so we can speak the actual temperature returned by
+   *  the get_weather tool call. */
+  {
+    /* Trailing modifier list is generous — "like today", "right now",
+     * "outside today" etc. all chain naturally onto weather questions. The
+     * regex matches one OR two of: like / today / now / right now / outside /
+     * out, separated by spaces, in any order. */
+    test: /^(?:what(?:'s|s| is)?\s+(?:the\s+)?(?:weather|forecast|temperature)(?:\s+(?:like|today|now|right\s+now|outside|out)){0,3}|how(?:'s|s| is)\s+(?:the\s+)?(?:weather|temperature)(?:\s+(?:like|today|now|right\s+now|outside|out)){0,3}|weather\s+(?:like|today|now|right\s+now|outside)?|forecast|is\s+it\s+(?:raining|sunny|hot|cold|warm)(?:\s+(?:out|outside|today|right\s+now))?|temperature\s+(?:outside|out|today|now)?)\.?\??$/i,
+    handle: () => ({
+      match: true,
+      reply: (r) => r?.summary || "Couldn't fetch the weather.",
+      toolCall: { name: "get_weather", args: {} },
+    }),
+  },
+
+  /* ---------- Today's calendar ----------
+   *  Today / "what's next" / "do I have anything on" — uses the calendar cache.
+   *  Multi-day requests ("what's on this week") fall through to the LLM so it
+   *  picks a sensible `days` argument. */
+  {
+    test: /^(?:what(?:'s|s| is)?\s+(?:on|happening|coming\s+up|next|in\s+the\s+diary)(?:\s+(?:today|now))?|my\s+(?:schedule|day|calendar)(?:\s+today)?|do\s+i\s+have\s+(?:anything|any\s+(?:meetings?|events?))(?:\s+(?:on|today|scheduled))?|what(?:'s|s| is)?\s+(?:the\s+)?(?:day|today)\s+looking\s+like|next\s+(?:meeting|event|appointment)|whens?\s+my\s+next\s+(?:meeting|event|appointment))\.?\??$/i,
+    handle: () => ({
+      match: true,
+      reply: (r) => r?.summary || "Couldn't read the calendar.",
+      toolCall: { name: "get_upcoming_events", args: { days: 1 } },
+    }),
+  },
+
+  /* ---------- Brief me / inbox triage ----------
+   *  Bypasses smart_inbox_briefing (which itself runs an LLM ranking pass).
+   *  The fast-path reads the prewarmed Inbox.aggregate cache, surfaces counts
+   *  + the most imminent item, and skips the LLM. Operator gets a 1-second
+   *  answer rather than a 3-4s LLM-ranked briefing. The full LLM briefing is
+   *  still reachable via slower phrasings ("give me a deep briefing"). */
+  {
+    test: /^(?:brief\s+me(?:\s+please)?|give\s+me\s+(?:a\s+)?(?:quick\s+|short\s+)?(?:briefing|update|rundown)|what(?:'s|s| is)?\s+(?:important|on\s+my\s+plate|the\s+plan|the\s+priority)|what\s+should\s+i\s+do(?:\s+first)?|whats?\s+pressing|my\s+(?:priorities|inbox)|inbox\s+(?:summary|please|briefing)?)\.?\??$/i,
+    handle: async () => {
+      const Inbox = await import("./inbox.mjs");
+      let summary;
+      try {
+        const agg = await Inbox.aggregate({ days: 1, mailMax: 15 });
+        summary = buildInboxReply(agg);
+      } catch (e) {
+        summary = "Couldn't read the inbox.";
+      }
+      return { match: true, reply: summary };
+    },
+  },
+
+  /* ---------- Screenshot ----------
+   *  Action-only — no spoken reply needed beyond confirmation. */
+  {
+    test: /^(?:take\s+a?\s*screenshot|screenshot|capture\s+(?:the\s+)?screen|grab\s+a?\s*screenshot)\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: (r) => r?.summary || "Screenshot taken.",
+      toolCall: { name: "take_screenshot", args: {} },
+    }),
+  },
+
+  /* ---------- Open well-known sites ----------
+   *  Local qwen2.5:7b narrates "Opening the BBC News homepage" without ever
+   *  firing open_url — same hallucination pattern we hit on news / brief.
+   *  Whitelist common site names the operator says by name so the URL
+   *  resolves locally and we fire open_url with a real URL. Anything not in
+   *  the whitelist returns match:false and falls through to the LLM (which
+   *  can still get it right for less-common sites with explicit URLs). */
+  {
+    test: /^(?:open|pull\s*up|bring\s*up|go\s*to)\s+(?:the\s+)?([a-z][a-z'.&\s-]{1,40}?)(?:\s+(?:homepage|website|site|page))?\.?$/i,
+    handle: (_clean, match) => {
+      const raw = (match?.[1] || "").trim().toLowerCase().replace(/\s+/g, " ");
+      /* The regex's optional `(?:the\s+)?` prefix consumes "the" before the
+       * captured name. So "open the times" leaves us with raw="times" — but
+       * the whitelist key is "the times". Try both forms before giving up. */
+      const url = OPEN_URL_WHITELIST[raw] || OPEN_URL_WHITELIST[`the ${raw}`];
+      if (!url) return { match: false }; /* unknown site name — fall through to LLM */
+      const matchedKey = OPEN_URL_WHITELIST[raw] ? raw : `the ${raw}`;
+      const friendly = matchedKey.split(/\s+/).map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+      return {
+        match: true,
+        reply: `Opening ${friendly}.`,
+        toolCall: { name: "open_url", args: { url, reason: `Fast-path: ${friendly}`, confirmed: true } },
+      };
+    },
+  },
+
+  /* ---------- "Show me X" fallback ----------
+   *  Runs LAST. Earlier specific handlers (news panel, brief, weather,
+   *  calendar, screenshot, influencer wizard, open-site) catch their cases
+   *  first. Anything else under "show me X" falls back to a Google search
+   *  for X — Google widgetises weather / stocks / places / definitions /
+   *  conversions so the operator gets a relevant visual answer without us
+   *  building a panel for every topic. A small special-case branch routes
+   *  "show me a map of X" / "directions to X" to Google Maps. */
+  {
+    test: /^show\s+me\s+(.+?)\.?\??$/i,
+    handle: (_clean, match) => {
+      const query = (match?.[1] || "").trim();
+      if (!query) return { match: false };
+      const lower = query.toLowerCase();
+      let url, friendly;
+      const mapMatch = lower.match(/^(?:a\s+map\s+of\s+|directions\s+to\s+)(.+)$/);
+      if (mapMatch) {
+        url = `https://www.google.com/maps/search/${encodeURIComponent(mapMatch[1])}`;
+        friendly = `a map of ${mapMatch[1]}`;
+      } else {
+        url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+        friendly = query;
+      }
+      return {
+        match: true,
+        reply: `Pulling up ${friendly}.`,
+        toolCall: { name: "open_url", args: { url, reason: `show me: ${query}`, confirmed: true } },
+      };
+    },
+  },
 ];
+
+/** Name → URL map for the open-site fast-path. Lowercase keys, normalised
+ *  whitespace. Add entries as the operator finds new common destinations.
+ *  Aliases for the same site share the URL (e.g. both "bbc" and "bbc news"
+ *  resolve to news.bbc.co.uk). */
+const OPEN_URL_WHITELIST = {
+  /* UK news */
+  "bbc":              "https://www.bbc.co.uk/news",
+  "bbc news":         "https://www.bbc.co.uk/news",
+  "sky news":         "https://news.sky.com",
+  "the guardian":     "https://www.theguardian.com/uk",
+  "guardian":         "https://www.theguardian.com/uk",
+  "the times":        "https://www.thetimes.co.uk",
+  "the telegraph":    "https://www.telegraph.co.uk",
+  /* Tech news */
+  "hacker news":      "https://news.ycombinator.com",
+  "hn":               "https://news.ycombinator.com",
+  "the verge":        "https://www.theverge.com",
+  "techcrunch":       "https://techcrunch.com",
+  "ars technica":     "https://arstechnica.com",
+  /* General search / mail */
+  "google":           "https://www.google.com",
+  "gmail":            "https://mail.google.com",
+  "google maps":      "https://www.google.com/maps",
+  "maps":             "https://www.google.com/maps",
+  "google drive":     "https://drive.google.com",
+  "calendar":         "https://calendar.google.com",
+  "google calendar":  "https://calendar.google.com",
+  /* Social */
+  "youtube":          "https://www.youtube.com",
+  "tiktok":           "https://www.tiktok.com",
+  "instagram":        "https://www.instagram.com",
+  "twitter":          "https://x.com",
+  "x":                "https://x.com",
+  "linkedin":         "https://www.linkedin.com",
+  "reddit":           "https://www.reddit.com",
+  /* Dev */
+  "github":           "https://github.com",
+  "stack overflow":   "https://stackoverflow.com",
+  "chatgpt":          "https://chatgpt.com",
+  "claude":           "https://claude.ai",
+};
+
+/** Compose a quick inbox spoken summary from the cached aggregate. Mirrors
+ *  the LLM-ranked briefing in spirit but without the 2-4s LLM round-trip:
+ *  counts + the single most imminent item, picked by Inbox.aggregate's
+ *  default sort (events first, then by `when` ascending). */
+function buildInboxReply(agg) {
+  if (!agg) return "Inbox empty.";
+  const counts = agg.sources || { mail: 0, events: 0, reminders: 0 };
+  const items  = Array.isArray(agg.items) ? agg.items : [];
+  if (items.length === 0) return "Clean plate — nothing in the inbox.";
+  const parts = [];
+  if (counts.events)    parts.push(`${counts.events} event${counts.events !== 1 ? "s" : ""}`);
+  if (counts.mail)      parts.push(`${counts.mail} unread email${counts.mail !== 1 ? "s" : ""}`);
+  if (counts.reminders) parts.push(`${counts.reminders} reminder${counts.reminders !== 1 ? "s" : ""}`);
+  const top = items[0];
+  /* Lead with counts, then the most-imminent headline so the operator
+   * decides whether to dig deeper. */
+  const head = parts.length ? parts.join(", ") : "items pending";
+  const next = top ? ` Top: ${top.who} — ${top.what}.` : "";
+  return `${head}.${next}`;
+}
+
+/** Compose the spoken summary using the prewarmed cache. Mirrors
+ *  buildNewsSpokenSummary in server.mjs — the LLM path and the fast-path
+ *  should sound the same to the operator. */
+function buildNewsReply(cache) {
+  if (!cache) return "Opening the news now.";
+  const top = cache.topStories?.[0];
+  const hn  = cache.hn?.[0];
+  if (!top && !hn) return "Opening the news — feeds are still loading.";
+  const parts = [];
+  if (top) parts.push(`Top story: ${top.title}.`);
+  if (hn)  parts.push(`In tech: ${hn.title}.`);
+  return parts.join(" ");
+}
 
 /**
  * Match a query against the fast-path handlers. Returns null when no
@@ -212,17 +476,26 @@ const HANDLERS = [
  *
  * @param {string} query  the operator's transcribed utterance
  */
-export function tryFastPath(query) {
+export async function tryFastPath(query) {
   const q = String(query || "").trim();
   if (!q) return null;
-  /* Strip a trailing period the LLM punctuator added — patterns use \.?$
-   * but be defensive about leading filler too ("um, what's the time"). */
-  const clean = q.replace(/^(?:uh|um|er|hey)[\s,]+/i, "").trim();
+  /* Defensive normalisation. WakeParse strips "hey jarvis" but commonly
+   * leaves residual punctuation ("hey jarvis, brief me" → ", brief me"),
+   * which would defeat ^…$ regex anchors. Strip:
+   *   - leading punctuation/whitespace
+   *   - leading filler tokens (uh, um, er, hey) and any commas after them
+   *   - then trim again
+   * Order matters: punctuation first so "uh" inside "um, uh" gets handled. */
+  const clean = q
+    .replace(/^[\s,.;:!?-]+/, "")
+    .replace(/^(?:uh|um|er|hey)[\s,]+/i, "")
+    .replace(/^[\s,.;:!?-]+/, "")
+    .trim();
   for (const h of HANDLERS) {
     const m = clean.match(h.test);
     if (m) {
       try {
-        const result = h.handle(clean, m);
+        const result = await h.handle(clean, m);
         if (result?.match) return result;
       } catch (e) {
         console.warn(`[fast-path] handler crashed on "${clean}": ${e.message}`);

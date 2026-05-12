@@ -2,6 +2,15 @@
  *  All values here are demo-realistic mocks. Phase 2 wires real data from jarvis backend. */
 
 import * as Storage from "./storage.js";
+import * as Tour from "./onboarding-tour.js";
+import * as Voice from "./voice.js";
+import * as WorkspaceSwitcher from "./workspace-switcher.js";
+import * as Inbox from "./inbox.js";
+import * as Orb from "./orb.js";
+/* Sprint 12 — share bridge-client's WS instead of opening hud.js's own.
+ * Two WSes per tab × N tabs was overwhelming Chrome's localhost networking
+ * stack, causing the cycling-disconnects bug. One WS per tab now. */
+import * as Bridge from "./bridge-client.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -96,6 +105,91 @@ function setMonthRing() {
  * synthesised pulse when speaking, soft drift when idle). hud.js leaves the canvas alone. */
 function startWaveform() { /* no-op */ }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Centerpiece picker — Sprint 10
+ *
+ * The kiosk has two centerpiece options:
+ *   "reactor" (default) — the existing SVG instrument cluster (rim chips,
+ *                          per-core arcs, voice waveform centerpiece, scan
+ *                          line). Lives inside .speedo.
+ *   "orb"               — Three.js audio-reactive particle sphere. Mounts
+ *                          a canvas inside .speedo on top of the SVG, with
+ *                          the SVG dimmed via CSS so the orb reads cleanly.
+ *
+ * Operator picks via Settings → Centerpiece. Hot-swap on change without
+ * reload — initCenterpiece() reads Storage and wires the chosen module. */
+let _orbHandle = null;
+async function initCenterpiece() {
+  const choice = Storage.get("centerpiece", "reactor");
+  document.body.dataset.centerpiece = choice;
+  if (choice === "orb") {
+    const speedoEl = document.getElementById("speedo");
+    if (!speedoEl) return;
+    /* Mount orb inside the speedo container so it occupies the same
+     * grid cell. CSS in body[data-centerpiece="orb"] dims the SVG. */
+    try {
+      _orbHandle = await Orb.init(speedoEl, { analyser: window.__speedo?.analyser || null });
+      /* If the voice analyser isn't bound yet (it's lazy-acquired on first
+       * mic prompt), poll until it is and pass it to the orb. */
+      const wait = setInterval(() => {
+        const a = window.__speedo?.analyser;
+        if (a && _orbHandle) {
+          _orbHandle.setAnalyser(a);
+          clearInterval(wait);
+        }
+      }, 500);
+      /* Stop polling after 30s — operator hasn't engaged voice. Orb stays
+       * in pure-breathing mode until they do; analyser binds on next try. */
+      setTimeout(() => clearInterval(wait), 30000);
+    } catch (e) {
+      console.warn("[hud] orb init failed:", e.message, "— falling back to reactor");
+      document.body.dataset.centerpiece = "reactor";
+    }
+  }
+}
+
+/** Public hook for settings — operator picks a new centerpiece, we
+ *  destroy the old + mount the new without reloading. */
+export async function setCenterpiece(choice) {
+  const next = choice === "orb" ? "orb" : "reactor";
+  Storage.set("centerpiece", next);
+  if (_orbHandle) {
+    _orbHandle.destroy();
+    _orbHandle = null;
+  }
+  document.body.dataset.centerpiece = next;
+  if (next === "orb") {
+    const speedoEl = document.getElementById("speedo");
+    if (speedoEl) {
+      _orbHandle = await Orb.init(speedoEl, { analyser: window.__speedo?.analyser || null });
+    }
+  }
+}
+
+/** Push the current voice state through to the orb (idle/listening/
+ *  thinking/speaking). voice.js's setState callback wires this — same
+ *  hook the SVG state chip uses, just forwarded. */
+export function setOrbState(state) {
+  if (_orbHandle) _orbHandle.setState(state);
+}
+
+/** Refresh the orb's accent colour after a workspace switch. Called
+ *  from workspace-switcher.js's _paintChip when the persona changes. */
+export function refreshOrbAccent() {
+  if (_orbHandle) Orb.refreshAccent();
+}
+
+/* Cross-module access without circular imports — voice.js + workspace-
+ * switcher.js call setOrbState / refreshOrbAccent through this surface
+ * so they don't have to import hud.js (which imports them). */
+if (typeof window !== "undefined") {
+  window.__hud = {
+    setCenterpiece,
+    setOrbState,
+    refreshOrbAccent,
+  };
+}
+
 /* ---------- WEATHER (mocked) ---------- */
 function renderWeather() {
   const dayShort = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -131,9 +225,9 @@ function startIdleNeedle() {
 
 /* ---------- LIVE STATS via bridge websocket ----------
  * Why: browsers can't read CPU/RAM/net directly. Bridge polls the OS and pushes here.
- * Falls back to mocked data if bridge isn't running so the demo still looks alive. */
-const BRIDGE_URL = "ws://localhost:8766";
-let bridgeWS = null;
+ * Falls back to mocked data if bridge isn't running so the demo still looks alive.
+ * Sprint 12: no longer opens its own WS — subscribes to bridge-client.js's
+ * shared pubsub. BRIDGE_URL constant retired; bridgeWS variable retired. */
 let lastStatsTs = 0;
 
 /** Sets a half-arc gauge by id from a 0..100 percentage. Reused for CPU / GPU / RAM. */
@@ -573,70 +667,93 @@ function applyLiveStats(s) {
   if ($("latValue")) $("latValue").textContent = "—";  // not measured by bridge yet
 }
 
+/* Sprint 12 — connectBridge() previously opened hud.js's OWN WebSocket
+ * (separate from bridge-client.js's WS). Two WSes per tab × N tabs was
+ * overwhelming Chrome's localhost networking stack, manifesting as
+ * connect/disconnect cycling visible in /tmp/jarvis-bridge.log.
+ *
+ * Now: subscribe to bridge-client's pubsub for the same event types we
+ * used to handle directly. One WS per tab, same behaviour. The function
+ * keeps its old name + signature so the boot sequence (which calls
+ * connectBridge() once) still works without touching the call site. */
 function connectBridge() {
-  try {
-    bridgeWS = new WebSocket(BRIDGE_URL);
-  } catch (e) { return; }
+  /* Ensure the shared WS is connecting — bridge-client.connect() is idempotent. */
+  Bridge.connect();
 
-  bridgeWS.addEventListener("open", () => {
-    console.log("[Jarvis HUD] bridge connected");
-    bridgeWS.send(JSON.stringify({ id: "weather-init", type: "weather", payload: {} }));
+  /* Fire the initial weather fetch once the WS is online. Why bridge.online
+   * not on import: the page may have loaded before the WS finished its
+   * upgrade, in which case Bridge.ask would queue indefinitely. Listening
+   * for online means we send weather-init exactly once per connection. */
+  let weatherInitSent = false;
+  Bridge.on("bridge.online", () => {
+    if (weatherInitSent) return;
+    weatherInitSent = true;
+    Bridge.ask({ type: "weather", payload: {} }, 5000)
+      .then((data) => applyWeather(data))
+      .catch((err) => console.warn(`[Jarvis HUD] weather-init failed: ${err.message}`));
+  });
+  /* If the WS drops, allow the next reconnect to fire weather-init again. */
+  Bridge.on("bridge.offline", () => { weatherInitSent = false; });
+
+  /* Live stats stream. Bridge.on's wildcard "*" would also work, but
+   * subscribing per-type is clearer and bridge-client filters efficiently. */
+  Bridge.on("stats", (m) => applyLiveStats(m.data));
+
+  /* Brand changed — soft reload so CSS vars + wordmarks re-bootstrap. */
+  Bridge.on("brand.updated", (m) => {
+    console.log("[Jarvis HUD] brand updated — reloading to apply", { payload: m.data, ts: m.ts });
+    console.trace("[Jarvis HUD] reload-trace");
+    setTimeout(() => window.location.reload(), 250);
   });
 
-  bridgeWS.addEventListener("message", (ev) => {
-    /* Defensive parse: a malformed bridge frame must not break the rest of
-     * the message loop. Log + drop so subsequent messages keep flowing. */
-    let m;
-    try { m = JSON.parse(ev.data); }
-    catch (err) { console.warn("[Jarvis HUD] dropped malformed bridge frame:", err.message); return; }
-    if (!m || typeof m !== "object") return;
-    if (m.type === "stats") applyLiveStats(m.data);
-    if (m.type === "brand.updated") {
-      /* Brand identity changed via the settings editor. Soft-reload the HUD
-       * so colours / agent name / wake variants re-bootstrap without the
-       * operator having to refresh manually. The brand bootstrap script in
-       * index.html re-runs on reload and re-applies CSS variables. */
-      console.log("[Jarvis HUD] brand updated — reloading to apply");
-      setTimeout(() => window.location.reload(), 250);
-    }
-    if (m.type === "weather.reply") applyWeather(m.data);
-    /* Patch B: typed-confirm modal for £25-30 purchases. The LLM can't authorise
-     * these — the operator must type the exact amount. We mount the modal on
-     * first event so the DOM cost is zero until a typed-tier purchase happens. */
-    if (m.type === "purchase.typed_confirm.required") openPurchaseTypedConfirm(m.data);
-    if (m.type === "purchase.recorded") flashPurchaseAuditBadge(m.data);
-    /* Tool-router live transparency — collect a ring buffer of the last 12
-     * tool-picks so the Agent Console can render them on demand. We don't
-     * render directly here (the modal might not exist yet); the ring buffer
-     * is read at modal-open time. */
-    if (m.type === "tool.picked") rememberToolPick(m.data);
-    /* Crew orchestrator — render parallel lanes for each in-flight crew.
-     * Five event types map to lifecycle hooks on a single CrewLanes object. */
-    if (m.type === "crew.started")        crewLanesOnStart(m.data);
-    if (m.type === "crew.agent.started")  crewLanesOnAgentStart(m.data);
-    if (m.type === "crew.agent.tool")     crewLanesOnAgentTool(m.data);
-    if (m.type === "crew.agent.complete") crewLanesOnAgentComplete(m.data);
-    if (m.type === "crew.agent.failed")   crewLanesOnAgentFailed(m.data);
-    if (m.type === "crew.complete")       crewLanesOnComplete(m.data);
-  });
+  /* Server can also push weather updates spontaneously (e.g. on settings
+   * change to operator location). Apply unconditionally. */
+  Bridge.on("weather.reply", (m) => applyWeather(m.data));
 
-  bridgeWS.addEventListener("close", () => {
-    console.warn("[Jarvis HUD] bridge disconnected, retrying in 3s");
-    setTimeout(connectBridge, 3000);
-  });
+  /* Typed-confirm modal for £25-30 purchases — mount on first event so DOM
+   * cost is zero until a typed-tier purchase happens. */
+  Bridge.on("purchase.typed_confirm.required", (m) => openPurchaseTypedConfirm(m.data));
+  Bridge.on("purchase.recorded", (m) => flashPurchaseAuditBadge(m.data));
 
-  bridgeWS.addEventListener("error", () => { /* close handler will retry */ });
+  /* Tool-router transparency ring buffer for the Agent Console. */
+  Bridge.on("tool.picked", (m) => rememberToolPick(m.data));
+
+  /* Crew orchestrator lane events. */
+  Bridge.on("crew.started",        (m) => crewLanesOnStart(m.data));
+  Bridge.on("crew.agent.started",  (m) => crewLanesOnAgentStart(m.data));
+  Bridge.on("crew.agent.tool",     (m) => crewLanesOnAgentTool(m.data));
+  Bridge.on("crew.agent.complete", (m) => crewLanesOnAgentComplete(m.data));
+  Bridge.on("crew.agent.failed",   (m) => crewLanesOnAgentFailed(m.data));
+  Bridge.on("crew.complete",       (m) => crewLanesOnComplete(m.data));
+
+  console.log("[HUD-WS] subscribed via bridge-client pubsub (single shared WS)");
 }
 
-/** Fallback: if bridge hasn't sent stats in the last 4s, drift the gauge so HUD doesn't freeze. */
+/** Fallback gauge drift: only runs when the bridge has gone quiet so we
+ *  don't burn 40 wake-ups/minute when bridge stats are arriving fine.
+ *
+ *  Why a self-rescheduling timeout instead of setInterval: when the bridge
+ *  is alive (lastStatsTs fresh), we sleep on a 4s heartbeat — just enough
+ *  to notice if stats stop. When stats stall, we drop to the 1.5s drift
+ *  cadence so the gauge keeps moving and the HUD doesn't look frozen.
+ *  This pattern was flagged by the code-review audit: the original
+ *  setInterval ran every 1.5s forever even with a healthy bridge. */
+let _statsFallbackTimer = null;
 function startStatsFallback() {
   let cpu = 28;
-  setInterval(() => {
-    if (Date.now() - lastStatsTs < 4000) return;
-    cpu += (Math.random() - 0.5) * 6;
-    cpu = Math.max(8, Math.min(82, cpu));
-    setCpuGauge(cpu);
-  }, 1500);
+  const tick = () => {
+    const stale = Date.now() - lastStatsTs >= 4000;
+    if (stale) {
+      cpu += (Math.random() - 0.5) * 6;
+      cpu = Math.max(8, Math.min(82, cpu));
+      setCpuGauge(cpu);
+      _statsFallbackTimer = setTimeout(tick, 1500);
+    } else {
+      /* Bridge alive — light heartbeat, no drift work. */
+      _statsFallbackTimer = setTimeout(tick, 4000);
+    }
+  };
+  tick();
 }
 
 /** Apply real weather from bridge. WMO weather codes drive both the short label
@@ -1050,20 +1167,18 @@ async function pollDiary() {
 function startDiaryPoll() { pollDiary(); setInterval(pollDiary, 15_000); }
 
 /* Why: when the bridge writes a new event via the LLM tool path, it broadcasts
- * { type: "diary.refresh" } so the HUD updates immediately. We hook into the same
- * websocket the live-stats use rather than opening a second connection. */
+ * { type: "diary.refresh" } so the HUD updates immediately.
+ * Sprint 12 — was hooking into bridgeWS directly; now subscribes via the
+ * shared bridge-client pubsub. No more own-WS to bind to. */
 function bindDiaryRefreshHook() {
-  if (!bridgeWS) { setTimeout(bindDiaryRefreshHook, 500); return; }
-  bridgeWS.addEventListener("message", (ev) => {
-    try {
-      const m = JSON.parse(ev.data);
-      if (m && m.type === "diary.refresh") pollDiary();
-    } catch {}
-  });
+  Bridge.on("diary.refresh", () => pollDiary());
 }
 
-/* ---------- FULLSCREEN: press F to toggle, double-click speedo also toggles ----------
- * Why: requestFullscreen must come from a user gesture, so we hook keypress + dblclick. */
+/* ---------- FULLSCREEN: Cmd/Ctrl+F to toggle, double-click speedo also toggles ----------
+ * Why: requestFullscreen must come from a user gesture, so we hook keypress + dblclick.
+ * Why Cmd/Ctrl+F (not bare F): the text-input modal lets the operator type to Jarvis
+ * mid-session — a bare F shortcut ate the letter every time they tried to type a word
+ * starting with f. Modifier-gated keeps the shortcut available without blocking typing. */
 function wireFullscreen() {
   const toggle = async () => {
     try {
@@ -1072,7 +1187,13 @@ function wireFullscreen() {
     } catch (e) { console.warn("[Jarvis HUD] fullscreen blocked:", e.message); }
   };
   document.addEventListener("keydown", (e) => {
-    if (e.key === "f" || e.key === "F") toggle();
+    /* Cmd+F on macOS, Ctrl+F elsewhere. Shift/Alt allowed (some keyboards
+     * fire e.shiftKey on Cmd+F by accident). preventDefault stops the
+     * browser's find-in-page from also opening. */
+    if ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F")) {
+      e.preventDefault();
+      toggle();
+    }
   });
   document.getElementById("speedo")?.addEventListener("dblclick", toggle);
 }
@@ -1676,6 +1797,109 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ---------- LATENCY DEBUG PANEL (Shift+Cmd+P) ----------
+ *  T1 sprint instrumentation. Polls /health/timings every 2s while open
+ *  and renders p50/p95 per pipeline stage so the operator can see where
+ *  the voice loop is spending time. Hidden by default; toggled by
+ *  Shift+Cmd+P. All values rendered via textContent — never innerHTML. */
+let _perfPanelEl = null;
+let _perfPanelPoll = null;
+let _perfPanelGrid = null;
+let _perfPanelMeta = null;
+
+function _buildPerfPanel() {
+  const root = document.createElement("div");
+  root.id = "perfDebugPanel";
+  root.style.cssText = `position: fixed; top: 60px; right: 20px; z-index: 9999;
+    background: rgba(2, 6, 12, 0.95); border: 1px solid var(--accent);
+    padding: 14px 18px; min-width: 320px;
+    font-family: var(--font-mono, monospace); font-size: 11px;
+    color: var(--text); box-shadow: 0 0 24px rgba(0,212,255,0.3);
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);`;
+
+  const title = document.createElement("div");
+  title.textContent = "// VOICE PIPELINE p50/p95";
+  title.style.cssText = "font-family:var(--font-display);letter-spacing:0.22em;color:var(--accent);font-size:10px;margin-bottom:8px;";
+  root.appendChild(title);
+
+  const grid = document.createElement("div");
+  grid.style.cssText = "display:grid;grid-template-columns:1fr auto;gap:4px 12px;";
+  root.appendChild(grid);
+
+  const meta = document.createElement("div");
+  meta.style.cssText = "opacity:0.5;font-size:9px;margin-top:8px;";
+  meta.textContent = "Shift+Cmd+P to close";
+  root.appendChild(meta);
+
+  document.body.appendChild(root);
+  _perfPanelEl = root;
+  _perfPanelGrid = grid;
+  _perfPanelMeta = meta;
+}
+
+function _spanRow(label, span, highlight) {
+  const k = document.createElement("div");
+  k.textContent = label;
+  if (highlight) { k.style.color = "var(--accent)"; k.style.fontWeight = "600"; }
+  const v = document.createElement("div");
+  if (highlight) { v.style.color = "var(--accent)"; v.style.fontWeight = "600"; }
+  if (span == null) {
+    v.textContent = "—";
+  } else {
+    const p50 = document.createElement("span");
+    p50.style.color = "var(--accent)";
+    p50.textContent = String(span.p50);
+    const sep = document.createTextNode("/" + span.p95 + "ms ");
+    const n = document.createElement("span");
+    n.style.opacity = "0.5";
+    n.textContent = "n=" + span.n;
+    v.appendChild(p50);
+    v.appendChild(sep);
+    v.appendChild(n);
+  }
+  return [k, v];
+}
+
+function openPerfPanel() {
+  if (!_perfPanelEl) _buildPerfPanel();
+  _perfPanelEl.hidden = false;
+  refreshPerfPanel();
+  _perfPanelPoll = setInterval(refreshPerfPanel, 2000);
+}
+function closePerfPanel() {
+  if (_perfPanelEl) _perfPanelEl.hidden = true;
+  if (_perfPanelPoll) { clearInterval(_perfPanelPoll); _perfPanelPoll = null; }
+}
+async function refreshPerfPanel() {
+  if (!_perfPanelEl || !_perfPanelGrid) return;
+  try {
+    const r = await fetch("http://localhost:8766/health/timings", { cache: "no-store" });
+    if (!r.ok) return;
+    const j = await r.json();
+    _perfPanelGrid.replaceChildren();
+    const rows = [
+      ["voice → rec end",     j.spans.voice_to_recend,    false],
+      ["voice → whisper",     j.spans.voice_to_whisper,   false],
+      ["whisper r/t",         j.spans.whisper_roundtrip,  false],
+      ["whisper inference",   j.spans.whisper_inference,  false],
+      ["voice → audio",       j.spans.voice_to_audio,     true ],
+    ];
+    for (const [label, span, hl] of rows) {
+      const [k, v] = _spanRow(label, span, hl);
+      _perfPanelGrid.appendChild(k);
+      _perfPanelGrid.appendChild(v);
+    }
+    if (_perfPanelMeta) _perfPanelMeta.textContent = `samples: ${j.samples} · Shift+Cmd+P to close`;
+  } catch {}
+}
+document.addEventListener("keydown", (e) => {
+  if (e.shiftKey && (e.metaKey || e.ctrlKey) && (e.key === "P" || e.key === "p")) {
+    e.preventDefault();
+    if (_perfPanelEl && !_perfPanelEl.hidden) closePerfPanel();
+    else openPerfPanel();
+  }
+});
+
 /* ---------- DEMO / CLEAN MODE (Shift+Cmd+D) ----------
  *  Shift+Cmd+D toggles `body.is-demo`. CSS rules in styles.css hide the
  *  numeric readouts, REC indicator, history drawer, notification timestamps
@@ -1823,8 +2047,15 @@ function ensureHelpModal() {
   root.hidden = true;
   const style = document.createElement("style");
   style.textContent = `
+    /* CRITICAL: [hidden] must override the explicit display:flex below.
+     * Without !important the user-agent [hidden]{display:none} rule loses
+     * to the more-specific #helpModal selector and the modal stays visible
+     * even when root.hidden=true. This was a "modal won't close" bug. */
+    #helpModal[hidden] { display: none !important; }
     #helpModal { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10001; display: flex; align-items: center; justify-content: center; font-family: var(--mono, "JetBrains Mono", monospace); }
-    #helpModal .hm-frame { background: #0b0b0b; border: 2px solid var(--accent); padding: 24px 28px; width: 760px; max-width: 92vw; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(0,212,255,0.3); }
+    #helpModal .hm-frame { background: #0b0b0b; border: 2px solid var(--accent); padding: 24px 28px; width: 760px; max-width: 92vw; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 0 60px rgba(0,212,255,0.3); position: relative; }
+    #helpModal .hm-close { position: absolute; top: 8px; right: 12px; background: transparent; border: 0; color: #888; font-size: 22px; line-height: 1; cursor: pointer; padding: 4px 8px; }
+    #helpModal .hm-close:hover { color: var(--accent); }
     #helpModal h2 { color: var(--accent); margin: 0 0 4px; font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; }
     #helpModal .hm-sub { color: #888; font-size: 11px; margin-bottom: 14px; }
     #helpModal input.hm-search { background: #000; color: #fff; border: 1px solid #2a2a2a; padding: 10px 12px; width: 100%; font-family: inherit; font-size: 14px; box-sizing: border-box; margin-bottom: 14px; }
@@ -1842,6 +2073,11 @@ function ensureHelpModal() {
   `;
   root.appendChild(style);
   const frame = el("div", { className: "hm-frame" });
+  /* Explicit close button — backstop for when keyboard handlers misbehave
+   * or focus is somewhere odd. Always works. */
+  const closeBtn = el("button", { className: "hm-close", attrs: { type: "button", "aria-label": "Close" }, text: "×" });
+  closeBtn.addEventListener("click", () => { root.hidden = true; });
+  frame.appendChild(closeBtn);
   frame.appendChild(el("h2", { text: "Voice command cheat sheet" }));
   const sub = el("div", { className: "hm-sub", text: "Loading…" });
   frame.appendChild(sub);
@@ -1860,6 +2096,19 @@ function ensureHelpModal() {
   return root;
 }
 
+/* Category display order — matches the actions.meta.json _categories block.
+ * Anything uncategorised falls into "other" rendered last. */
+const HELP_CATEGORY_ORDER = ["communication", "productivity", "creative", "system", "memory"];
+const HELP_CATEGORY_LABELS = {
+  communication: "Communication",
+  productivity:  "Productivity",
+  creative:      "Creative",
+  system:        "System",
+  memory:        "Memory",
+  plugin:        "Plugins",
+  other:         "Other",
+};
+
 function renderHelpList(root, filter = "") {
   const { list, sub } = root._refs;
   if (!_helpManifest) {
@@ -1869,7 +2118,11 @@ function renderHelpList(root, filter = "") {
   const q = filter.trim().toLowerCase();
   const matches = _helpManifest.filter((a) => {
     if (!q) return true;
-    return a.name.toLowerCase().includes(q) || (a.description || "").toLowerCase().includes(q);
+    if (a.name.toLowerCase().includes(q)) return true;
+    if ((a.description || "").toLowerCase().includes(q)) return true;
+    if ((a.label || "").toLowerCase().includes(q)) return true;
+    if (Array.isArray(a.phrasings) && a.phrasings.some(p => p.toLowerCase().includes(q))) return true;
+    return false;
   });
   while (list.firstChild) list.removeChild(list.firstChild);
   sub.textContent = `${matches.length} of ${_helpManifest.length} commands`;
@@ -1877,22 +2130,53 @@ function renderHelpList(root, filter = "") {
     list.appendChild(el("div", { className: "hm-empty", text: `No matches for "${filter}".` }));
     return;
   }
+
+  /* Group matches by category. Tools without a category land in "other". */
+  const grouped = {};
   for (const a of matches) {
-    const row = el("div", { className: "hm-row" });
-    row.appendChild(el("div", { className: "hm-name", text: a.name }));
-    row.appendChild(el("div", { className: "hm-desc", text: (a.description || "").slice(0, 200) }));
-    /* Compact flag column: CONFIRM and/or ALWAYS, comma-separated. Empty
-     * column when neither applies — keeps the eye scanning down the names. */
-    const flagBits = [];
-    if (a.flags?.requiresConfirmation) flagBits.push({ text: "confirm", cls: "hm-flag-confirm" });
-    if (a.flags?.alwaysOn) flagBits.push({ text: "always", cls: "hm-flag-always" });
-    const flagsCell = el("div", { className: "hm-flags" });
-    flagBits.forEach((b, i) => {
-      if (i) flagsCell.appendChild(document.createTextNode(" · "));
-      flagsCell.appendChild(el("span", { className: b.cls, text: b.text }));
-    });
-    row.appendChild(flagsCell);
-    list.appendChild(row);
+    const cat = a.category || "other";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(a);
+  }
+  const orderedKeys = [...HELP_CATEGORY_ORDER, "plugin", "other"].filter(k => grouped[k]?.length);
+
+  for (const catKey of orderedKeys) {
+    const items = grouped[catKey];
+    /* Category header — collapses naturally when filtering. */
+    const header = el("div", { className: "hm-cat" });
+    header.appendChild(el("span", { className: "hm-cat__label", text: HELP_CATEGORY_LABELS[catKey] || catKey }));
+    header.appendChild(el("span", { className: "hm-cat__count", text: `${items.length}` }));
+    list.appendChild(header);
+
+    for (const a of items) {
+      const row = el("div", { className: "hm-row" });
+      /* Prefer the human label when present; fall back to the raw tool name. */
+      const displayName = a.label || a.name;
+      const nameCell = el("div", { className: "hm-name" });
+      nameCell.appendChild(el("span", { className: "hm-name__label", text: displayName }));
+      if (a.label && a.label !== a.name) {
+        nameCell.appendChild(el("span", { className: "hm-name__id", text: a.name }));
+      }
+      row.appendChild(nameCell);
+      /* Description + first phrasing as a try-it example. */
+      const descCell = el("div", { className: "hm-desc" });
+      descCell.appendChild(el("div", { className: "hm-desc__text", text: (a.description || "").slice(0, 160) }));
+      if (Array.isArray(a.phrasings) && a.phrasings.length) {
+        descCell.appendChild(el("div", { className: "hm-desc__example", text: `"${a.phrasings[0]}…"` }));
+      }
+      row.appendChild(descCell);
+      /* Flag column: CONFIRM (destructive) / ALWAYS (always-on). */
+      const flagBits = [];
+      if (a.destructive || a.flags?.requiresConfirmation) flagBits.push({ text: "confirm", cls: "hm-flag-confirm" });
+      if (a.flags?.alwaysOn) flagBits.push({ text: "always", cls: "hm-flag-always" });
+      const flagsCell = el("div", { className: "hm-flags" });
+      flagBits.forEach((b, i) => {
+        if (i) flagsCell.appendChild(document.createTextNode(" · "));
+        flagsCell.appendChild(el("span", { className: b.cls, text: b.text }));
+      });
+      row.appendChild(flagsCell);
+      list.appendChild(row);
+    }
   }
 }
 
@@ -1940,6 +2224,17 @@ document.addEventListener("keydown", (e) => {
     _helpModalEl.hidden = true;
   }
 });
+
+/* Permanent ? button next to SETTINGS. Click toggles the same help modal
+ * as the ? key. Wired here (not in settings-modal.js) because the modal
+ * lives in hud.js. */
+const _helpBtn = document.getElementById("helpBtn");
+if (_helpBtn) {
+  _helpBtn.addEventListener("click", () => {
+    if (_helpModalEl && !_helpModalEl.hidden) _helpModalEl.hidden = true;
+    else openHelpModal();
+  });
+}
 
 /* ---------- CREW LANES ----------
  *  Live visualisation of in-flight multi-agent crews. Mounts a panel
@@ -2606,9 +2901,10 @@ async function openHistoryDrawer() {
 }
 
 document.addEventListener("keydown", (e) => {
-  const tag = (e.target?.tagName || "").toLowerCase();
-  if (tag === "input" || tag === "textarea" || tag === "select") return;
-  if ((e.key === "h" || e.key === "H") && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+  /* Cmd/Ctrl+H toggles the history drawer. Modifier-gated per the unified
+   * shortcut policy so bare H never gets eaten when typing in the text
+   * input modal. preventDefault stops macOS hide-app from also firing. */
+  if ((e.metaKey || e.ctrlKey) && (e.key === "h" || e.key === "H")) {
     e.preventDefault();
     if (_historyDrawerEl && !_historyDrawerEl.hidden) {
       _historyDrawerEl.hidden = true;
@@ -2731,6 +3027,37 @@ async function boot() {
   /* First-run onboarding tips — per-profile. Quiet pinned panel; never shown
    * twice for the same operator. */
   maybeShowOnboarding();
+  /* 90-second guided tour — only fires after the setup wizard has been
+   * completed AND the operator has never seen the tour. Wires into
+   * voice.js's onQueryHandled bus so step matching reacts to actual
+   * spoken queries. Lazy subscription — Tour.init receives a function
+   * that returns the subscriber, so the tour module doesn't import
+   * voice.js itself (avoids a module cycle). */
+  Tour.init({ getQuerySubscriber: () => Voice.onQueryHandled });
+  /* Workspace switcher — must init AFTER bridge-client is connected since
+   * it pulls /workspaces on bootstrap. The Bridge.connect() call earlier in
+   * boot guarantees the WS is connecting; the chip's bootstrap fetch is
+   * over plain HTTP so it doesn't actually wait on the WS. */
+  WorkspaceSwitcher.init();
+  /* Smart Inbox panel — polls /inbox every 5min for the workspace-aware
+   * "what should I look at" surface. Voice command "brief me" still
+   * fires the briefing tool independently; the panel is the visual
+   * always-on reminder that operators can spot at a glance. */
+  Inbox.init();
+
+  /* Centerpiece picker. Default = "reactor" (existing SVG instrument
+   * cluster). Operators who pick "orb" via Settings → Centerpiece get
+   * the Three.js audio-reactive particle sphere instead. The orb mounts
+   * INSIDE the .speedo container so it inherits the layout slot the
+   * SVG previously owned; the SVG fades to transparent when the orb is
+   * active so the centerpiece swap is visually clean.
+   *
+   * The orb dynamically imports Three.js from CDN, so operators on the
+   * reactor preset never pay the network round-trip. */
+  initCenterpiece();
+  /* Slight delay so the tour mounts after the setup modal has fully
+   * dismissed (if the operator just finished setup). */
+  setTimeout(() => { Tour.maybeStart(); }, 600);
   /* buildTicks/buildNumerals belonged to the rev-gauge centerpiece — the
    * white-label rebuild dropped the 0–200 RPM scale + needle for a clean
    * arc reactor, so neither generator runs. */

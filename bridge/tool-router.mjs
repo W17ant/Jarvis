@@ -48,6 +48,12 @@ const ALWAYS_ON = new Set([
   "save_fact",
   "save_conversation",
   "list_shoots",
+  "show_news_panel",
+  "hide_news_panel",
+  "show_influencer_wizard",
+  "start_influencer_pipeline",
+  "show_asset_panel",
+  "show_weather_panel",
 ]);
 
 /* In-memory cached index. Built once at boot, queried thereafter. */
@@ -76,9 +82,35 @@ function toolEmbeddingText(tool) {
   return `${fn.name}: ${fn.description || ""} (params: ${paramNames})`;
 }
 
+/** Tiny LRU for recent query embeddings — saves a ~150-400ms Ollama roundtrip
+ *  whenever the operator repeats themselves (common during testing / demos /
+ *  conversation-mode follow-ups). Keyed by exact normalised string; cap small
+ *  because most queries are unique. Sprint 11 perf pass. */
+const _QUERY_EMBED_CACHE_MAX = 64;
+const _queryEmbedCache = new Map();
+function _cacheGet(key) {
+  if (!_queryEmbedCache.has(key)) return null;
+  /* Refresh recency by re-inserting */
+  const v = _queryEmbedCache.get(key);
+  _queryEmbedCache.delete(key);
+  _queryEmbedCache.set(key, v);
+  return v;
+}
+function _cacheSet(key, value) {
+  _queryEmbedCache.set(key, value);
+  if (_queryEmbedCache.size > _QUERY_EMBED_CACHE_MAX) {
+    const oldest = _queryEmbedCache.keys().next().value;
+    _queryEmbedCache.delete(oldest);
+  }
+}
+
 /** Embed a string via Ollama's nomic-embed-text endpoint. Returns a 768-dim
- *  Float32-equivalent number array. Throws on transport / model failure. */
+ *  Float32-equivalent number array. Throws on transport / model failure.
+ *  Cached by normalised query to skip the roundtrip on repeats. */
 async function embed(text) {
+  const key = String(text || "").trim().toLowerCase();
+  const cached = _cacheGet(key);
+  if (cached) return cached;
   const r = await fetch(`${OLLAMA_URL}/api/embeddings`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -87,6 +119,7 @@ async function embed(text) {
   if (!r.ok) throw new Error(`nomic-embed-text returned ${r.status}`);
   const j = await r.json();
   if (!Array.isArray(j.embedding)) throw new Error("embedding response missing 'embedding' array");
+  _cacheSet(key, j.embedding);
   return j.embedding;
 }
 

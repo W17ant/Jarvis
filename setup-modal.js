@@ -74,13 +74,59 @@ export async function maybeShowSetup() {
   const coordsEl = document.getElementById("setupCoords");
   const voiceEl = document.getElementById("setupVoice");
   const agencyEl = document.getElementById("setupAgency");
+  const agentEl = document.getElementById("setupAgent");
+  const wakeEl = document.getElementById("setupWake");
+  const accentChipsEl = document.getElementById("setupAccentChips");
+  const accentHexEl = document.getElementById("setupAccentHex");
 
   cityEl.value = op.city || "";
   if (op.latitude && op.longitude) {
     coordsEl.textContent = `lat ${op.latitude.toFixed(4)}, lon ${op.longitude.toFixed(4)} • ${op.timezone || "Europe/London"}`;
   }
   voiceEl.value = loadSavedVoice();
-  agencyEl.value = getSavedAgency();
+
+  /* Pre-fill brand identity from the live /brand response so the operator
+   * sees their current state (or the embedded Jarvis defaults on first run)
+   * rather than empty fields. /brand always returns a complete object —
+   * brand.mjs falls back to defaults if config/brand.json doesn't exist. */
+  let liveBrand = null;
+  try {
+    const r = await fetch("http://localhost:8766/brand");
+    if (r.ok) liveBrand = await r.json();
+  } catch {}
+  agentEl.value = liveBrand?.agent?.name || "Jarvis";
+  agencyEl.value = liveBrand?.agency?.name || getSavedAgency();
+  wakeEl.value = liveBrand?.agent?.wakePhrase || `hey ${(liveBrand?.agent?.name || "Jarvis").toLowerCase()}`;
+  /* Auto-derive wake phrase as the operator types the agent name — but only
+   * if they haven't manually customised the wake field. The "manually
+   * customised" signal: wake doesn't equal "hey {previous-agent}". */
+  agentEl.addEventListener("input", () => {
+    const expectedWake = `hey ${(agentEl.value || "").toLowerCase().trim()}`;
+    const currentlyDerived = wakeEl.value === `hey ${(liveBrand?.agent?.name || "jarvis").toLowerCase()}`;
+    if (currentlyDerived || !wakeEl.value) wakeEl.value = expectedWake;
+  });
+
+  /* Accent chips — clicking one fills the hex field + paints the live
+   * --accent CSS variable so the operator sees the colour change in real
+   * time. The hex field is the source of truth on submit. */
+  const initialAccent = liveBrand?.colors?.primary || "#00d4ff";
+  accentHexEl.value = initialAccent;
+  const paintAccent = (hex) => {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+    document.documentElement.style.setProperty("--accent", hex);
+    /* Mark the matching chip as selected for visual feedback. */
+    for (const chip of accentChipsEl.querySelectorAll(".setup__accent-chip")) {
+      chip.classList.toggle("is-selected", chip.dataset.accent?.toLowerCase() === hex.toLowerCase());
+    }
+  };
+  accentChipsEl.addEventListener("click", (e) => {
+    const chip = e.target.closest(".setup__accent-chip");
+    if (!chip) return;
+    accentHexEl.value = chip.dataset.accent;
+    paintAccent(chip.dataset.accent);
+  });
+  accentHexEl.addEventListener("input", () => paintAccent(accentHexEl.value.trim()));
+  paintAccent(initialAccent);
 
   // Performance tier — pre-pick from detected hardware, show chip + RAM
   const tierEl = document.getElementById("setupTier");
@@ -130,8 +176,52 @@ export async function maybeShowSetup() {
     Storage.set(AGENCY_KEY, agencyEl.value || "Jarvis AI");
     Storage.set(TIER_KEY, tierEl.value);
 
-    /* If the operator typed a city different from the detected one, geocode it via Open-Meteo
-     * (free, no key) and POST as override. Bridge persists to config.json + locks against IP redetect. */
+    /* Brand identity — POST to /brand which writes config/brand.json,
+     * invalidates the bridge cache, and broadcasts brand.updated so the
+     * HUD live-reloads. We send a partial patch (only the fields the
+     * setup modal owns) — bridge.saveBrand merges shallowly so existing
+     * logo / mishears / fonts stay untouched. */
+    const agentName = (agentEl.value || "Jarvis").trim();
+    const agencyName = (agencyEl.value || "Jarvis AI").trim();
+    const wakePhrase = (wakeEl.value || `hey ${agentName.toLowerCase()}`).trim().toLowerCase();
+    const accentHex = (accentHexEl.value || "").trim();
+    /* Validate hex before persisting — a malformed value would let the
+     * default cyan stick rather than fail noisily. */
+    const validHex = /^#[0-9a-fA-F]{6}$/.test(accentHex) ? accentHex : null;
+    const brandPatch = {
+      agent: { name: agentName, wakePhrase },
+      agency: { name: agencyName },
+    };
+    if (validHex) {
+      /* Derive deep / glow / tint from the primary so the operator only
+       * picks one colour, not four. The same shading function the kiosk
+       * uses for per-profile accent overrides — keep them in sync. */
+      const r2 = parseInt(validHex.slice(1, 3), 16);
+      const g2 = parseInt(validHex.slice(3, 5), 16);
+      const b2 = parseInt(validHex.slice(5, 7), 16);
+      const shade = (amt) => {
+        const adj = (c) => Math.max(0, Math.min(255, Math.round(c + (amt < 0 ? c * amt : (255 - c) * amt))));
+        const toHex = (c) => c.toString(16).padStart(2, "0").toUpperCase();
+        return "#" + toHex(adj(r2)) + toHex(adj(g2)) + toHex(adj(b2));
+      };
+      brandPatch.colors = {
+        primary: validHex.toUpperCase(),
+        primaryDeep: shade(-0.45),
+        primaryGlow: `rgba(${r2},${g2},${b2},0.55)`,
+        primaryTint: `rgba(${r2},${g2},${b2},0.06)`,
+      };
+    }
+    try {
+      await fetch("http://localhost:8766/brand", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(brandPatch),
+      });
+    } catch (e) { console.warn("[Jarvis] brand save failed:", e.message); }
+
+    /* Location override — bridges geocodes via Open-Meteo if the operator
+     * typed a different city. Separate POST from /brand because location
+     * lives in config.json, not config/brand.json. */
     const enteredCity = (cityEl.value || "").trim();
     const detectedCity = (op.city || "").trim();
     if (enteredCity && enteredCity.toLowerCase() !== detectedCity.toLowerCase()) {
@@ -139,25 +229,18 @@ export async function maybeShowSetup() {
         const g = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(enteredCity)}&count=1&language=en`);
         const j = await g.json();
         const r = j.results && j.results[0];
-        const payload = {
-          city: enteredCity,
-          country: r?.country || op.country,
-          latitude: r?.latitude ?? op.latitude,
-          longitude: r?.longitude ?? op.longitude,
-          timezone: r?.timezone || op.timezone,
-          agency: agencyEl.value || "Jarvis AI",
-        };
         await fetch("http://localhost:8766/config/override", {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            city: enteredCity,
+            country: r?.country || op.country,
+            latitude: r?.latitude ?? op.latitude,
+            longitude: r?.longitude ?? op.longitude,
+            timezone: r?.timezone || op.timezone,
+            agency: agencyName,
+          }),
         });
       } catch (e) { console.warn("[Jarvis] location override failed:", e.message); }
-    } else if (agencyEl.value && agencyEl.value !== "Jarvis AI") {
-      // Agency name change only
-      await fetch("http://localhost:8766/config/override", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agency: agencyEl.value }),
-      }).catch(() => {});
     }
 
     Storage.set(SETUP_DONE_KEY, "true");

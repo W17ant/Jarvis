@@ -13,16 +13,22 @@ import { promisify } from "node:util";
 import os from "node:os";
 import { buildProductionTeaser, TEASER_STAGES } from "./edit.mjs";
 import { createPdf, listTemplates as listPdfTemplates } from "./pdf.mjs";
-import { getUpcomingEvents, addCalendarEvent } from "./calendar.mjs";
+import { getUpcomingEvents, addCalendarEvent, invalidate as invalidateCalendar } from "./calendar.mjs";
 import { getMailSummary, draftEmail } from "./mail.mjs";
 import { runShell, writeFileSandboxed, shellAllowlist } from "./shell.mjs";
 import * as Memory from "./memory.mjs";
 import * as Vision from "./vision.mjs";
 import * as Agency from "./agency.mjs";
 import * as Youtube from "./youtube.mjs";
+import * as Fal from "./fal.mjs";
+import * as Influencers from "./influencers.mjs";
+import * as VideoDownload from "./video-download.mjs";
 import { loadBrand, invalidateBrandCache, saveBrand } from "./brand.mjs";
-import { creativeStylePromptBlock, loadCreativeStyle, invalidateCreativeStyleCache, creativeStylePath } from "./creative-style.mjs";
+import { creativeStylePromptBlock, loadCreativeStyle, invalidateCreativeStyleCache, creativeStylePath, setOverridePath as setCreativeStyleOverride } from "./creative-style.mjs";
 import * as Tasks from "./tasks.mjs";
+import * as News from "./news.mjs";
+import * as InfluencerPipeline from "./influencer-pipeline.mjs";
+import * as Prewarm from "./prewarm.mjs";
 import * as Audit from "./audit.mjs";
 import * as Usage from "./usage.mjs";
 import * as ModelRouter from "./model-router.mjs";
@@ -54,6 +60,15 @@ import * as CodeAgent from "./code-agent.mjs";
 import * as Office from "./office.mjs";
 import * as ToolRouter from "./tool-router.mjs";
 import * as Macmon from "./macmon.mjs";
+import * as PluginLoader from "./plugin-loader.mjs";
+import * as PluginGenerator from "./plugin-generator.mjs";
+import * as Workspaces from "./workspaces.mjs";
+import * as WorkspaceExport from "./workspace-export.mjs";
+import * as Inbox from "./inbox.mjs";
+import { withWorkspace, getCallWorkspace } from "./call-context.mjs";
+import * as Sessions from "./sessions.mjs";
+import * as SystemWarnings from "./system-warnings.mjs";
+import * as CrashReporter from "./crash-reporter.mjs";
 
 const execp = promisify(exec);
 
@@ -73,8 +88,9 @@ function loadEnvFile(path) {
 }
 loadEnvFile(FOM_ENV_PATH);
 /* Why: project-root .env (written by tools/setup-wizard.mjs) holds local overrides like
- * OLLAMA_MODEL, VL_MODEL, VL_KEEP_ALIVE, FRAMEIO_TOKEN. Loaded AFTER the FOM_ENV_PATH so
- * a per-install .env wins over a shared key file when both define the same var. */
+ * OLLAMA_MODEL, VL_MODEL, VL_KEEP_ALIVE, ANTHROPIC_API_KEY, OPENAI_API_KEY, plus any
+ * operator-added custom keys via the settings panel. Loaded AFTER the shared key file
+ * so a per-install .env wins over a shared file when both define the same var. */
 const PROJECT_ENV_PATH = new URL("../.env", import.meta.url).pathname;
 loadEnvFile(PROJECT_ENV_PATH);
 
@@ -83,6 +99,40 @@ loadEnvFile(PROJECT_ENV_PATH);
  * later in the file (one of those is now redundant; both expressions resolve
  * to the same path). */
 const PROJECT_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+
+/* Voice-pipeline performance buffer (T1 sprint instrumentation). Rolling
+ * window of the last 50 cycles' span summaries; reset on bridge restart.
+ * GET /health/timings exposes p50/p95 per stage for the HUD debug panel. */
+const _perfBuffer = [];
+
+/* Sprint 12 — 1-second cache for /healthz so dual-tab boot bursts don't
+ * double-fanout to Ollama/Kokoro/Whisper. Shape: { ts: ms, body: string }.
+ * Cap freshness at 1s — operators can't perceive that lag, but two tabs
+ * polling near-simultaneously share one probe round. */
+let _healthzCache = null;
+
+/* Sprint 12 — same pattern for /diary, but with a 12s TTL because /diary
+ * legitimately takes 8-20s (AppleScript fanout to Calendar + Mail). The HAR
+ * file from a 2-tab Chrome session showed /diary requests piling up in
+ * Chrome's 6-slot per-origin pool, blocking /healthz polls behind them. With
+ * a server-side cache + a single in-flight gate, two tabs share ONE
+ * AppleScript run instead of doubling it. _diaryInFlight holds the Promise
+ * for the active fanout so concurrent callers await the same resolution. */
+let _diaryCache = null;
+let _diaryInFlight = null;
+
+/* Sprint 12 follow-up — same shape for /inbox and /comms which were
+ * showing 120-second SLOW logs (AppleScript Mail/Calendar/Reminders
+ * occasionally hangs on permission prompts or background-sync). Without
+ * caps, those connections poison Chrome's 6-slot per-origin pool for
+ * minutes, manifesting as the BR icon flashing even on a single tab.
+ *
+ * Cap shape: 8s hard timeout on the fanout, 60s cache TTL on the body.
+ * If a fanout exceeds 8s, we fall back to the previous cached body
+ * (stale-while-revalidate style); empty result if no prior cache. */
+let _inboxCache = null, _inboxInFlight = null;
+let _commsCache = null, _commsInFlight = null;
+const SLOW_TIMEOUT_MS = 8000;
 
 /** Parse "#RRGGBB" → { r, g, b }. Trusts caller-side regex validation. */
 function hexToRgb(hex) {
@@ -443,16 +493,25 @@ async function gatherContext(query) {
   }
 
   if (/\b(weather|temp|temperature|rain|sun|sunny|cloud|cloudy|forecast|hot|cold|wind|fog)\b/.test(q)) {
-    try {
-      const w = await getWeather();
-      if (w && w.now) {
-        ctx.push(`Current ${CONFIG.operator.city} weather: ${w.now.temp}°C, ${wmoLabel(w.now.code)}.`);
-        if (Array.isArray(w.forecast)) {
-          const days = w.forecast.slice(0, 5).map(d => `${d.date}: ${d.lo}–${d.hi}°C ${wmoLabel(d.code)}`);
-          ctx.push(`Forecast next 5 days: ${days.join("; ")}.`);
+    /* Why: previously we auto-injected the operator's HOME forecast for any weather
+     * mention, so "weather in Alicante" got UK data parroted back. Now we only inject
+     * home-forecast context when the query has NO location preposition AND NO future
+     * horizon beyond ~5 days. For everything else (named place, "next week"+), stay
+     * silent so the LLM is forced to call get_weather with the right args. */
+    const namesPlace   = /\b(?:in|at|for|around)\s+[a-zA-Z][a-zA-Z\s'-]{2,}/.test(q);
+    const longHorizon  = /\b(next week|next month|in (?:[7-9]|1[0-4]) days|fortnight)\b/.test(q);
+    if (!namesPlace && !longHorizon) {
+      try {
+        const w = await getWeather();
+        if (w && w.now) {
+          ctx.push(`Current ${CONFIG.operator.city} weather: ${w.now.temp}°C, ${wmoLabel(w.now.code)}.`);
+          if (Array.isArray(w.forecast)) {
+            const days = w.forecast.slice(0, 5).map(d => `${d.date}: ${d.lo}–${d.hi}°C ${wmoLabel(d.code)}`);
+            ctx.push(`Forecast next 5 days: ${days.join("; ")}.`);
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
   }
 
   if (/\b(cpu|ram|memory|disk|storage|performance|usage|load|space)\b/.test(q)) {
@@ -473,6 +532,24 @@ const TOOLS = [
       name: "web_search",
       description: "Search the live web for current information. Use when the user asks about news, recent reviews, prices, releases, or anything time-sensitive. Returns top 5 results with URL + snippet — synthesise an answer from them.",
       parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_weather",
+      /* Why call this out so explicitly: previously the weather phrase was auto-injected
+       * with the operator's home lat/lon regardless of the spoken location, so "weather
+       * in Alicante" returned UK forecasts. Force the LLM to use this tool whenever a
+       * place is named or the horizon is beyond ~5 days. */
+      description: "Look up current conditions and the daily forecast (up to 14 days) for ANY named location worldwide. Free Open-Meteo, no key. Use this whenever the operator names a place ('weather in Alicante', 'is it going to rain in Tokyo Friday') OR asks beyond a 5-day horizon. Omit `location` to get the operator's home town. Returns { now: {temp, code}, forecast: [{date, hi, lo, code}], location: {name, country} }.",
+      parameters: {
+        type: "object",
+        properties: {
+          location: { type: "string", description: "Place name to geocode (e.g. 'Alicante', 'Tokyo'). Omit for operator's home." },
+          days: { type: "integer", description: "Forecast days to return (1-14). Default 7." },
+        },
+      },
     },
   },
   {
@@ -718,6 +795,184 @@ const TOOLS = [
           cta: { type: "string", description: "Optional call to action." },
         },
         required: ["subject"],
+      },
+    },
+  },
+  /* ─── Sprint 13 — voice-driven teaser-ad pipeline ───
+   * make_teaser_storyboard → generate_teaser_image → animate_teaser_image
+   * The LLM is expected to walk through these in conversation order:
+   * storyboard first (no API cost), then propose the image (gated), then
+   * propose the video (gated). Operator can refine the prompt at any step.  */
+  {
+    type: "function",
+    function: {
+      name: "make_teaser_storyboard",
+      description: "Step 1 of the teaser-ad pipeline. Generates a short social-media advert script with an `influencer` persona, broken into time-coded beats (visual + voiceover + on-screen text). Also produces a single `heroPrompt` describing the most striking still frame to render via generate_teaser_image. Use when the operator says 'make me an advert for X with influencer Y, Z seconds long', 'draft a teaser for ___', 'storyboard a TikTok ad'. NO external API cost — purely LLM. Always speak the script aloud to the operator BEFORE proposing image generation.",
+      parameters: {
+        type: "object",
+        properties: {
+          product: { type: "string", description: "What's being advertised — product, app, brand, event, etc. e.g. 'Nike Air Max 95' or 'Jarvis AI assistant'." },
+          influencer: { type: "string", description: "Persona/character driving the ad. Free-text — 'a 22-year-old streetwear creator', 'a posh British satirical narrator', 'an athletic morning-runner type'. The script's tone, dialogue, and visual style match this persona." },
+          duration_s: { type: "integer", description: "Target ad duration in seconds. Default 15 — matches TikTok's most-used short-form length and the 15s cap of most image-to-video models. Use 5 or 10 for very short hooks; only go above 15 if the operator explicitly asked for a longer cut. ALWAYS take the duration from the operator's exact words ('5 second teaser' → 5, 'fifteen-second clip' → 15) — do NOT pick a default mid-range like 30 unless they said so." },
+          platform: { type: "string", enum: ["tiktok", "instagram_reels", "youtube_shorts", "linkedin", "facebook_ads"], description: "Where the ad will run. Default tiktok. Affects aspect (9:16 vs 16:9) and tone (TikTok = looser hooks, LinkedIn = polished)." },
+          tone: { type: "string", description: "Optional override — 'cheeky', 'aspirational', 'irreverent', 'cinematic'. Default lets the influencer persona drive it." },
+        },
+        required: ["product", "influencer", "duration_s"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "generate_teaser_image",
+      description: "Step 2 of the teaser-ad pipeline. Generates the hero still image for an advert via fal.ai's nano-banana-pro family (Google Gemini 3 Pro Image, 1K resolution). Use AFTER make_teaser_storyboard has produced a heroPrompt and the operator says 'yes generate the image'. Costs ~$0.04 per image — REQUIRES CONFIRMATION. Saves to output/teasers/<run_id>/hero.png and opens it in Preview.\n\nIF the operator named a locked influencer ('using Marcus', 'with Lena'), pass their slug as `influencer` — the bridge resolves their canonical face and conditions the generation on it (via nano-banana-pro/edit) so the SAME PERSON appears across every piece of content from that channel. Without `influencer`, the model interprets the persona description in the prompt freely (different face each call).",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: { type: "string", description: "Detailed scene description for the hero frame. Should describe subject, setting, lighting, style. Pulled from make_teaser_storyboard's heroPrompt unless the operator wants a refinement. When `influencer` is set, you can refer to them by name in the prompt — the model has the face reference, you provide the scene." },
+          aspect: { type: "string", enum: ["9:16", "16:9", "1:1", "4:5"], description: "Aspect ratio. Match the platform — 9:16 for TikTok/Reels/Shorts, 16:9 for YouTube ads, 1:1 for Instagram feed, 4:5 for LinkedIn. Default 9:16." },
+          style: { type: "string", description: "Optional style modifier — 'editorial photography', 'cinematic still', 'street photography', 'commercial product render'. Appended to the prompt." },
+          influencer: { type: "string", description: "Optional locked influencer slug (lowercase first name, e.g. 'marcus', 'lena'). When set, the bridge looks up output/influencers/<slug>/canonical.png and uses it as the character reference so the hero shot features THAT specific face. Required for 'make me an ad with [name]' / 'use [name] in this' style requests so the resulting content is on-brand for that channel." },
+          run_id: { type: "string", description: "Optional: pass the previous run_id to keep this image in the same teaser folder. Omit to start a fresh run." },
+        },
+        required: ["prompt"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "animate_teaser_image",
+      description: "Step 3 of the teaser-ad pipeline. Animates a generated hero image into a 5-15 second video via fal.ai's Alibaba happy-horse image-to-video (720p). Use AFTER generate_teaser_image when the operator says 'now make the video', 'animate it', or similar. Costs ~$0.14 per second of video — REQUIRES CONFIRMATION. Saves to output/teasers/<run_id>/clip.mp4 and opens it in QuickTime. HARD CAP: 15 seconds — never propose longer; the model rejects above that.",
+      parameters: {
+        type: "object",
+        properties: {
+          run_id: { type: "string", description: "The run_id returned by generate_teaser_image. Locates the hero.png to animate." },
+          motion_prompt: { type: "string", description: "Cinematic motion description for the clip. Happy-horse follows specific physical direction much better than vibe — so be CONCRETE and DRAMATIC. Always include at least two of: a camera move (slow push-in, orbital pan, dolly out, whip pan, dutch tilt), a subject motion (hair toss, head turn to camera, confident step forward, slow blink, smile breaking), a lighting/atmosphere beat (lens flare flicker, palm-tree shadows shifting, golden-hour rim-light catching hair, ocean breeze in hair, slow-motion fabric ripple), and a product accent if there's a hero product (lingering close-up on the trainer, soft spotlight on the logo). Keep it under ~80 words, present-tense, specific. AVOID vague words like 'cinematic vibe' or 'aesthetic mood' — those produce mush. Example for a Nike marketing clip: 'Slow camera push-in as she tosses her hair and turns to meet the lens with a confident smile. Golden-hour light catches her face, lens flare flickers across the frame. Camera tilts down to a close-up on the white Nike Air Max as she takes a half-step forward, swoosh in sharp focus.'" },
+          duration_s: { type: "integer", description: "Clip length in seconds. Range 5-15 (HARD CAP at 15 — model rejects longer). Default 5. Take the value from the operator's exact words; do not pick a mid-range default like 10 unless they said so." },
+        },
+        required: ["run_id", "motion_prompt"],
+      },
+    },
+  },
+  /* ─── AI INFLUENCER PIPELINE ───
+   * Persistent fake characters that anchor a social-content channel. Once
+   * locked, an influencer's canonical face is reused across hero shots,
+   * animations and video recreations — so the same person appears in every
+   * post on the channel. Three tools cover the lifecycle:
+   *   create_influencer → lock_influencer → recreate_video_with_influencer
+   * The storyboard / image / animate teaser tools above can ALSO reference
+   * a locked influencer by passing their slug as the `influencer` field. */
+  {
+    type: "function",
+    function: {
+      name: "create_influencer",
+      description: "Generate 2-3 reference portrait stills for a new AI-influencer character via fal.ai's nano-banana-2 (~$0.08 per image, max 4 per call). Use when the operator wants to create a fake persona for a social channel — TikTok, IG, etc. Gather the persona conversationally first; you need at least a name + persona/vibe + look (gender/age/ethnicity included if relevant). Costs ~$0.16-$0.32 per call (2-4 images) — REQUIRES CONFIRMATION. Saves to output/influencers/<slug>/refs/. After this fires, the operator picks a reference and you call lock_influencer to set their canonical face.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Operator-given first name (\"Marcus\", \"Lena\"). Becomes the folder slug. Voice-friendly so the operator can later say 'using Marcus' to recall the character." },
+          persona: { type: "string", description: "Free-text persona summary covering vibe, archetype, content niche. Example: 'mid-20s British skater, into streetwear and specialty coffee, dry sense of humour'." },
+          look: { type: "string", description: "Free-text physical description. Example: 'dark hair short on sides, scruffy beard, hoodie always, around 5'10, mid-tone skin'." },
+          aesthetic: { type: "string", description: "Visual style hint. Example: 'candid phone photography', 'cinematic editorial', 'polished commercial', 'film grain 35mm'. Default lets nano-banana-2 choose." },
+          platform: { type: "string", enum: ["tiktok", "instagram", "youtube", "x", "facebook"], description: "Primary platform — biases aspect-ratio defaults for downstream content. Default tiktok." },
+          count: { type: "integer", description: "How many reference variations to generate (1-4). Default 3 — gives the operator real choice without burning budget." },
+        },
+        required: ["name", "persona", "look"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "lock_influencer",
+      description: "Lock the operator-chosen reference as the influencer's canonical face. NO API cost — this is a local file copy + persona-record stamp. Call AFTER create_influencer when the operator says 'use the second one' / 'lock the first / 'go with reference 3' (or via the HUD picker modal). After lock, the slug is reusable across all teaser-pipeline tools.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Influencer slug (returned by create_influencer)." },
+          ref_idx: { type: "integer", description: "1-based index of the reference to lock (1 = ref-1.png, 2 = ref-2.png, …)." },
+        },
+        required: ["slug", "ref_idx"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "recreate_video_with_influencer",
+      description: "Drive a locked influencer's face with the motion of a reference video via fal.ai's Kling Motion Control v3 Pro. Use when operator says 'recreate this TikTok using Marcus', 'do that dance with Lena', 'put Marcus in this video'. Costs ~$0.168 per second of output (5s ≈ $0.84) — REQUIRES CONFIRMATION. If no source_url or source_local_path is supplied, the bridge opens a HUD modal asking the operator to paste a URL or drop a local file, then completes the call — DO NOT loop or re-call; one call is enough.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Locked influencer slug whose canonical face will replace the person in the source video." },
+          source_url: { type: "string", description: "Optional source video URL (TikTok / IG Reels / YT Shorts / X). yt-dlp downloads it locally before driving the model. Omit BOTH source_url and source_local_path to trigger the HUD URL-modal — the bridge then waits up to 5 minutes for the operator to provide a source." },
+          source_local_path: { type: "string", description: "Optional absolute path to a local mp4. Used when the operator drag-drops a file or yt-dlp can't reach the URL. If both this and source_url are set, source_local_path wins." },
+          prompt: { type: "string", description: "Optional motion / action description (Kling uses it as a hint). Example: 'A man dancing'. Default empty." },
+          character_orientation: { type: "string", enum: ["image", "video"], description: "Optional. 'video' (DEFAULT — use for body-motion / dance recreations, max 30s output) or 'image' (use when the source video is a camera-move around a static character, max 10s output). Operator usually doesn't need to think about this; default 'video' fits the TikTok-recreation use case." },
+        },
+        required: ["slug"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "show_influencer_wizard",
+      description:
+        "Open the influencer creation wizard side panel. Use when the operator says 'create me an influencer', 'make a new influencer', 'spin up an influencer', or 'build me a TikTok face'. The panel asks for sex / vibe / content type / optional reference URL, then runs the create → lock → hero → video → caption pipeline. After the wizard appears the operator drives it via clicks or by continuing to speak — do not ask follow-up questions, the panel handles that.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "start_influencer_pipeline",
+      description:
+        "Internal: kick off the influencer pipeline run with explicit answers. The HUD wizard's GO button calls this directly via POST /api/influencer/pipeline/start; the LLM rarely calls it directly. If the LLM is asked to fire it, ensure all four answers (sex, vibe, content_type, optional source_url) are present from the conversation.",
+      parameters: {
+        type: "object",
+        properties: {
+          sex:          { type: "string", enum: ["male", "female", "other"] },
+          vibe:         { type: "string", description: "One of: cinematic, candid, polished, editorial — or a free-text vibe phrase." },
+          content_type: { type: "string", enum: ["brand-product", "faceless", "dances"] },
+          source_url:   { type: "string", description: "Optional TikTok / Instagram / YouTube URL to drive motion-control replication." },
+        },
+        required: ["sex", "vibe", "content_type"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "show_asset_panel",
+      description:
+        "Open the asset panel — shows the most recently generated image or video with actions (regenerate, animate, copy, save, open). Use when the operator says 'show me the latest image', 'pull up the image', 'show that image again', 'show the last video'.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "show_weather_panel",
+      description:
+        "Open the weather panel with current conditions + 5-day forecast for the operator's home location. Use when the operator says 'show me the weather' or 'weather panel'. For 'what's the weather' (no panel-intent verb) the existing get_weather tool is sufficient.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "triage_failed_tool",
+      description: "DIAGNOSTIC tool — call when another tool returned ok:false with a confusing schema/format error (NOT for safety rejects; for those just rephrase + retry). Pass the failing tool's name, the args you sent, and the error string. The bridge looks up that tool's schema and runs an LLM that suggests corrected args. Returns { suggestion: { fixed_args, reasoning } }. Then YOU re-call the original tool with the suggested args + confirmed:true. Don't loop more than twice. NO direct API cost — runs entirely on the local model.",
+      parameters: {
+        type: "object",
+        properties: {
+          tool_name: { type: "string", description: "Name of the tool that failed (the one whose args need fixing)." },
+          args: { type: "object", description: "The exact arguments you passed to that tool when it errored." },
+          error: { type: "string", description: "The error message returned by the tool (the value of the result's .error field)." },
+        },
+        required: ["tool_name", "args", "error"],
       },
     },
   },
@@ -1084,6 +1339,24 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "show_news_panel",
+      description:
+        "Open the news panel: live Sky News YouTube on the left, merged top UK headlines (Sky/BBC/Guardian) and Hacker News top tech stories on the right. Use when the operator asks for 'the news', 'headlines', 'top stories', 'what's happening', 'catch me up', or 'what's the news'. The panel uses cached data so it appears instantly. After opening, briefly speak the top headline so the operator hears it as the panel mounts.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "hide_news_panel",
+      description:
+        "Close the news panel and stop the live Sky News stream. Use when the operator says 'close the news', 'hide the news', 'turn that off' while the news panel is showing, or naturally moves on to another topic.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "request_browse",
       description:
         "Drive a real Chromium browser to accomplish a web-based goal. The bridge runs a vision-driven inner loop using Claude or GPT to click around, read pages, and report back. Use for: 'find me the cheapest X', 'check if Y is in stock', 'summarise this article at <url>', 'fill in this form for me'. NEVER use for purchases (use request_purchase) or for sensitive sites (banks, broker accounts, gov.uk login). Returns a final answer the LLM can speak to the operator. Costs API tokens — keep maxSteps modest (default 12).",
@@ -1227,6 +1500,208 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "create_workspace",
+      description: "Create a new operating-context workspace. A workspace is a bounded scope the operator works inside (e.g. 'consulting', 'photo-agency', 'personal'). When active: (1) the LLM sees a system-prompt fragment with the workspace's description + handbook, (2) tool calls resolve working-dir paths to this workspace's working_root, (3) only tools in the toolAllowlist are exposed to the LLM (NULL = all tools), (4) the workspace's creative-style.md (if any) overrides the global one. Use when the operator says 'create a workspace called …', 'set up a new workspace for …', 'I want a separate context for …'.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Stable identifier — lowercase, alphanumeric + hyphen, 2-41 chars (e.g. 'consulting', 'photo-agency')." },
+          label: { type: "string", description: "Human-readable display name (e.g. 'Consulting practice', 'Photo agency')." },
+          description: { type: "string", description: "OPTIONAL one-line description of what this workspace is for." },
+          handbook: { type: "string", description: "OPTIONAL multi-line workspace handbook — operator's scope-specific rules / vocabulary / preferences. Injected into the LLM system prompt verbatim when this workspace is active." },
+          workingRoot: { type: "string", description: "OPTIONAL absolute path to the working directory for this workspace. When set, tools that resolve working-dir paths use this root instead of the global default. Useful for scoping a workspace to a specific project folder." },
+          toolAllowlist: { type: "array", items: { type: "string" }, description: "OPTIONAL list of tool names to allow in this workspace. When set, the LLM only sees these tools (built-in + plugin) — narrows the catalog from 60+ to a workspace-relevant subset. Omit or pass null to allow all tools." },
+          creativeStylePath: { type: "string", description: "OPTIONAL path to a creative-style.md file specific to this workspace. Overrides the global config/creative-style.md when active. Relative paths resolve under the project root or workspace working_root." },
+          voice: { type: "string", description: "OPTIONAL Kokoro voice id for this workspace's TTS. e.g. 'bm_daniel' (formal British male — default for consulting), 'bf_emma' (warmer British female — for personal). When active, the workspace's voice overrides the global Settings → Voice preference. List available voices with `list_voices`." },
+          accentColor: { type: "string", description: "OPTIONAL #rrggbb hex colour for the workspace persona. When this workspace is pinned to a window (via ?workspace=slug URL param), the HUD's --accent + derived deep/glow/tint variables follow this colour. Lets the operator distinguish personas at a glance — cyan Jarvis vs amber Friday." },
+          agentLabel: { type: "string", description: "OPTIONAL persona name shown in the wordmark when this workspace is pinned to a window. e.g. 'Friday', 'Aria'. Defaults to the global brand agent name when unset." },
+        },
+        required: ["slug", "label"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "switch_workspace",
+      description: "Set or clear the active workspace. The system prompt fragment for the active workspace is injected into every LLM call going forward. Pass slug=null (or omit) to clear the active workspace and operate without scope.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Workspace slug to activate. Omit or pass null to clear active workspace." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_workspaces",
+      description: "List all workspaces, last-used first. Surfaces slug, label, description, and which one is currently active. Use when the operator says 'what workspaces do I have', 'show my workspaces', 'which one am I in'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "act_on_inbox_item",
+      description: "Operate on an inbox item the operator just heard about in a smart_inbox_briefing. Resolves an ordinal (1-based: 'the first one', 'second', 'third') against the cached aggregate, then routes to the appropriate downstream action: reply (drafts an email pre-populated with the sender + subject), open (opens Mail/Calendar/Reminders to that item), snooze (Reminders only — pushes due date forward), accept/decline (Calendar only — RSVP to the event), complete (Reminders — ticks it off). Use when the operator says 'reply to the first one', 'open the second', 'snooze that', 'accept the next meeting', 'tick off the third reminder'.",
+      parameters: {
+        type: "object",
+        properties: {
+          ordinal: { type: "number", description: "1-based index into the most-recent briefing's item list. 1 = first item the operator heard." },
+          action: { type: "string", enum: ["reply", "open", "snooze", "accept", "decline", "complete"], description: "What to do. 'reply' drafts an email response (mail items only). 'open' surfaces the item in its native app. 'snooze' pushes a reminder's due date by 1 day. 'accept'/'decline' RSVP a calendar event. 'complete' ticks off a reminder." },
+          replyBody: { type: "string", description: "OPTIONAL. For action='reply', the operator's draft text. If omitted, the email is created empty for the operator to type into Mail.app." },
+          snoozeMinutes: { type: "number", description: "OPTIONAL. For action='snooze', minutes to push the due date forward. Default 60." },
+        },
+        required: ["ordinal", "action"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_reminders",
+      description: "List open (uncompleted) reminders from Reminders.app — every list by default, or one specific list. Returns title + due date + notes + list name. Used by the Smart Inbox aggregator and by direct voice queries like 'what reminders do I have', 'show my to-dos', 'what's pending'.",
+      parameters: {
+        type: "object",
+        properties: {
+          listName: { type: "string", description: "OPTIONAL list name to scope to (e.g. 'Work', 'Shopping'). Omit for all lists." },
+          includeCompleted: { type: "boolean", description: "OPTIONAL. Default false. Set true to include reminders the operator has already ticked off." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "smart_inbox_briefing",
+      description: "The 'what's important right now' answer. Aggregates unread mail + today's calendar + (later) reminders, then ranks by what matters per the active workspace's handbook + standard urgency heuristics (imminent events, sender-known emails, deadline-tight reminders). Returns a structured briefing: top 3-5 priorities, each with a one-line rationale + a suggested next action. Use when the operator says 'what's important', 'what should I do first', 'brief me', 'what's on my plate', 'what's the day looking like'.",
+      parameters: {
+        type: "object",
+        properties: {
+          topN: { type: "number", description: "OPTIONAL. Default 3. Number of priorities to surface in the briefing. Cap 8 — beyond that, the operator is reading a list, not a briefing." },
+          force: { type: "boolean", description: "OPTIONAL. Default false. Skip the 60s aggregation cache and re-fetch every source. Use when the operator says 'fresh briefing' or just acted on an email/event." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "workspace_insights",
+      description: "Summarise what's in a workspace: turn count (all-time + last 7 days), conversation summaries, contacts, projects, facts, indexed documents. Use when the operator says 'how active is the consulting workspace', 'what's in this workspace', 'show me workspace stats'. Defaults to the active workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "OPTIONAL workspace slug. Omit to inspect the currently-active workspace." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "refresh_workspace_knowledge",
+      description: "Re-scan the active workspace's working directory and ingest every supported document (.md, .txt, .pdf, .docx, .html, .rtf) into its scoped knowledge base. Idempotent — files that haven't changed since the last scan (matched by sha256 hash) are skipped without re-embedding. Use when the operator says 'refresh my workspace knowledge', 'index this folder', 'ingest the new files'. Auto-runs in the background on workspace switch when the workspace has working_root set, so the operator usually doesn't need to call this directly.",
+      parameters: {
+        type: "object",
+        properties: {
+          force: { type: "boolean", description: "OPTIONAL. Default false. Set true to force re-embed every file even if its hash hasn't changed (rare — useful after switching embedding model)." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "export_workspace",
+      description: "Bundle a workspace (manifest + handbook + creative-style + facts/contacts/projects/summaries scoped to it) into a portable .jarvis-workspace.tgz on the operator's Desktop. Default EXCLUDES raw conversation_turns (the most personal data); pass includeTurns:true to bundle them too. Use when the operator says 'export the consulting workspace', 'back up my workspace', 'I want to move this to a different Mac'.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Slug of the workspace to export." },
+          includeTurns: { type: "boolean", description: "OPTIONAL. Default false. Set true to include the raw conversation transcript in the bundle. Summaries are always included; turns are opt-in for privacy." },
+        },
+        required: ["slug"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "import_workspace",
+      description: "Restore a workspace from a .jarvis-workspace.tgz bundle. The bundle's manifest provides the slug + label + handbook + creative-style + scoped data. Refuses to clobber an existing workspace of the same slug unless overwrite:true. Operator confirmation required (writes to memory.db).",
+      parameters: {
+        type: "object",
+        properties: {
+          bundlePath: { type: "string", description: "Absolute path to the .jarvis-workspace.tgz file." },
+          overwrite: { type: "boolean", description: "OPTIONAL. Default false. Set true to replace an existing workspace of the same slug." },
+          includeTurns: { type: "boolean", description: "OPTIONAL. Default true. When the bundle contains conversation turns, restore them. Set false to import metadata + summaries only." },
+        },
+        required: ["bundlePath"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_workspace",
+      description: "Permanently remove a workspace. The workspace's handbook is deleted. If the deleted workspace was active, active is cleared. Operator confirmation required.",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Slug of the workspace to delete." },
+        },
+        required: ["slug"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "build_plugin",
+      description: "Scaffold a new Jarvis plugin from a voice command. Creates bridge/plugins/<name>/{manifest.json, handler.mjs} and triggers the hot-reload watcher so the new tool is callable in the same session — no restart. Use when the operator says something like 'build me a plugin that…', 'make a tool to…', 'I want jarvis to be able to…'. Two modes: STUB (default) writes a working placeholder handler the operator fills in by hand; CODE-AGENT (set `behaviour` arg) writes a manifest and seeds a handler, then the LLM should call `code_agent_run` with the agent prompt returned in the result to fill in real logic. Operator confirmation required (writes to filesystem).",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Plugin slug — lowercase letters, digits, hyphens. 2-41 chars. e.g. \"hackernews\", \"weather-pro\", \"slack-relay\". This becomes the directory name under bridge/plugins/.",
+          },
+          description: {
+            type: "string",
+            description: "One-line description of what the plugin does. Operator-facing — surfaced in the tool catalogue and the COMMANDS panel.",
+          },
+          toolName: {
+            type: "string",
+            description: "Snake_case identifier for the voice-callable tool the plugin registers. e.g. \"fetch_top_hn\". 2-61 chars. Becomes the function name the LLM dispatches.",
+          },
+          voiceIntent: {
+            type: "string",
+            description: "Short phrase the operator says to invoke the tool — e.g. \"top hacker news\", \"latest crypto prices\". Goes in the manifest's tool description so the tool router and selector can match voice → tool.",
+          },
+          behaviour: {
+            type: "string",
+            description: "OPTIONAL. If provided, switches to code-agent mode: a longer description of what the handler should DO. e.g. \"fetch https://hacker-news.firebaseio.com/v0/topstories.json, get top 10, fetch each story's title + url, return as a list\". The LLM should follow up with code_agent_run using the agent prompt this tool returns.",
+          },
+          force: {
+            type: "boolean",
+            description: "OPTIONAL. Default false. Set true to overwrite an existing plugin with the same slug. Operator must explicitly grant this in the voice command (e.g. \"replace the existing one\").",
+          },
+        },
+        required: ["name", "description", "toolName", "voiceIntent"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_knowledge",
       description: "Search the operator's curated knowledge base — brand briefs, client onboarding docs, past press releases, anything they dropped into docs/knowledge/. Hybrid retrieval: vector cosine similarity + BM25 keyword fusion via Reciprocal Rank Fusion. Returns top-K chunks with source citations (rel path, title, format) so replies can quote the source. Use whenever the operator asks something that might be in their docs — 'what did the client brief say about deliverables', 'what's the brand voice on hashtags', 'how did we phrase the Bentley press release'.",
       parameters: {
@@ -1313,6 +1788,95 @@ const TOOLS = [
   },
 ];
 
+/** Workspace v1: apply a workspace's overrides (working dir, creative style).
+ *  Called from both the switch_workspace tool case AND the POST /workspaces/active
+ *  HTTP endpoint, so the side-effect logic stays in one place.
+ *
+ *  Side effects:
+ *    1. Paths.setWorkspaceOverride — getWorkingDir() returns the workspace's
+ *       working_root for the rest of the turn (or until next switch).
+ *    2. setCreativeStyleOverride — creative-style.md loaded for prompt
+ *       injection becomes the workspace's file (resolved against working_root
+ *       if relative).
+ *
+ *  Pass null/undefined to clear overrides. */
+function applyWorkspaceOverrides(w) {
+  Paths.setWorkspaceOverride(w?.workingRoot || null);
+  /* Creative-style override path can be absolute or relative. If relative,
+   * resolve under the workspace's working_root first; if no working_root,
+   * resolve under PROJECT_ROOT. Empty / missing → clear override (back to
+   * config/creative-style.md global default). */
+  if (w?.creativeStylePath) {
+    const raw = String(w.creativeStylePath).trim();
+    let abs;
+    if (path.isAbsolute(raw)) {
+      abs = raw;
+    } else if (w.workingRoot) {
+      abs = path.resolve(w.workingRoot, raw);
+    } else {
+      abs = path.resolve(PROJECT_ROOT, raw);
+    }
+    setCreativeStyleOverride(abs);
+  } else {
+    setCreativeStyleOverride(null);
+  }
+  /* Workspaces v3: auto-ingest the workspace's working directory in the
+   * background. Idempotent — Knowledge.ingestAll skips files whose sha256
+   * hasn't changed since the last scan, so re-running on every switch is
+   * cheap once warm. The Memory.upsertDocument call inside ingestFile
+   * stamps with the active workspace via the slug provider wired in
+   * Sprint 5, so documents land in the workspace's scoped knowledge base.
+   *
+   * Skipped when no workspace is active OR no working_root is set
+   * (default "personal" workspace has none — operator opts in by setting
+   * one). The .catch() swallows scan failures so a missing dir / permission
+   * issue doesn't crash the switch path. */
+  if (w?.workingRoot) {
+    /* Fire-and-forget — the switch returns immediately; the scan
+     * progresses in the background and broadcasts events. */
+    Knowledge.ingestAll(w.workingRoot)
+      .then((r) => {
+        if (r?.ok && (r.ingested || r.removed)) {
+          broadcastToClients({
+            type: "knowledge.workspace.scanned",
+            data: { slug: w.slug, ingested: r.ingested, skipped: r.skipped, failed: r.failed, removed: r.removed },
+          });
+        }
+      })
+      .catch((e) => console.warn(`[workspaces] auto-ingest of "${w.slug}" failed: ${e.message}`));
+  }
+}
+
+/** Workspace v1: return the TOOLS array filtered by the active workspace's
+ *  toolAllowlist. When no workspace is active, or the active workspace has
+ *  no allowlist set, returns the full TOOLS array unchanged. The filter
+ *  applies to BUILT-IN tools (TOOLS array) only — plugin tools are added
+ *  by PluginLoader.init AFTER this declaration; we filter both via the
+ *  same name-set check at call time.
+ *
+ *  Why a function (not a cached value): the allowlist can change mid-session
+ *  when the operator switches workspaces, and TOOLS itself can change when
+ *  a plugin hot-reloads. Recomputing per LLM call is cheap (small array
+ *  filter, ~200ns) and keeps every askLLM call in lockstep with the current
+ *  scope.
+ *
+ *  Always-allowed: the workspace-management tools themselves. An allowlist
+ *  that hides switch_workspace would trap the operator inside a workspace
+ *  with no escape, which is awful UX. */
+const _ALWAYS_AVAILABLE_TOOLS = new Set([
+  "create_workspace", "switch_workspace", "list_workspaces", "delete_workspace",
+]);
+function getEffectiveTools() {
+  const w = Workspaces.getActive();
+  if (!w?.toolAllowlist) return TOOLS;
+  const allowed = new Set(w.toolAllowlist);
+  return TOOLS.filter((t) => {
+    const name = t?.function?.name;
+    if (!name) return false;
+    return allowed.has(name) || _ALWAYS_AVAILABLE_TOOLS.has(name);
+  });
+}
+
 /* ---------- ASYNC VIDEO RUN STATE ---------- */
 let currentVideoRun = null;
 /**
@@ -1331,6 +1895,32 @@ function broadcastToClients(payload) {
 }
 /* Wire the broadcaster into the task lifecycle module so its emissions land on every client. */
 Tasks.setBroadcaster(broadcastToClients);
+/* Wire the system-warnings registry — bridge-detected misconfigurations
+ * (macmon missing, LLM key invalid, etc.) emit `system.warning` events the
+ * HUD turns into toasts so they don't get buried in /tmp/jarvis-bridge.log. */
+SystemWarnings.setBroadcaster(broadcastToClients);
+/* Wire the crash reporter — installs process-level uncaughtException +
+ * unhandledRejection hooks. The bridge's package.json version is the
+ * canonical version string. Without this, an unhandled error would
+ * silently kill the bridge with the operator never knowing. */
+import { readFileSync as _crashReaderfs } from "node:fs";
+let _bridgePkgVersion = "?";
+try { _bridgePkgVersion = JSON.parse(_crashReaderfs(new URL("../package.json", import.meta.url), "utf8")).version || "?"; } catch {}
+CrashReporter.init({ version: _bridgePkgVersion, broadcaster: broadcastToClients });
+/* Background news cache — populate on boot, refresh every 60 min. Failures
+ * here must NOT block startup; the news.mjs module logs warnings internally. */
+try { News.start(); } catch (e) { console.warn(`[server] News.start failed: ${e.message}`); }
+/* Pre-warm the inbox / weather / calendar caches so the first "brief me" /
+ * "what's the weather" / "what's on today" answer is instant. Each fetcher
+ * forces a fresh refresh inside the owning module's cache; tool handlers
+ * keep using the normal call path and just happen to hit a warm entry. */
+try {
+  Prewarm.start({
+    warmInbox:    () => Inbox.aggregate({ days: 1, mailMax: 15, force: true }),
+    warmWeather:  () => getWeather(CONFIG.operator.latitude, CONFIG.operator.longitude, 6, { force: true }),
+    warmCalendar: () => getUpcomingEvents({ days: 1, force: true }),
+  });
+} catch (e) { console.warn(`[server] Prewarm.start failed: ${e.message}`); }
 /* Wire the personal-assistant timer broadcaster — fires timer.set/timer.fire/timer.cancel
  * events the HUD listens for to render the countdown badge + speak the label on fire. */
 Personal.setBroadcaster(broadcastToClients);
@@ -1356,6 +1946,9 @@ Knowledge.ingestAll().then((r) => {
   else console.warn(`[knowledge] initial scan failed: ${r.error}`);
 }).catch((e) => console.warn(`[knowledge] initial scan threw: ${e.message}`));
 Knowledge.startWatcher();
+/* Plugin loader is initialised lower in the module — after NEEDS_CONFIRMATION
+ * + executeTool are declared (TDZ would fire here). See PluginLoader.init()
+ * call further down. */
 
 /* Inbound iMessage listener — disabled by default (operator opts in via
  * data/imessage-config.json). When enabled and an allowlisted sender
@@ -1446,9 +2039,83 @@ Tasks.recoverInterrupted((entry) => Audit.record(entry));
  *              Qwen MUST speak the summary and wait for "yes"/"go ahead"/"proceed" from operator.
  *   2nd call:  args.confirmed: true → tool actually runs.
  *
+ * Auto-replay safety net: Qwen 2.5 7b is unreliable at re-emitting the second
+ * tool_call with confirmed:true — it tends to narrate "generating the hero image…"
+ * without actually firing. So when the gate trips, the bridge stashes the call
+ * in _pendingConfirmation; on the next user turn, if the transcript matches an
+ * affirmative phrase ("yes", "go ahead", "do it", …), the bridge fires the
+ * gated tool itself with confirmed:true before involving the LLM. The LLM's
+ * own re-call path still works if Qwen DOES get it right — the slot is
+ * single-use and clears after the tool runs.
+ *
  * The summary is built per-tool so the operator hears the consequential details
  * ("send email TO ben@... ABOUT the press car v3 — proceed?") not a generic prompt. */
+
+/* Single-user kiosk → single in-flight pending confirmation. 90s window:
+ * generous enough to let the operator hear the "Shall I proceed?" prompt,
+ * think, and reply, but short enough that an unrelated "yes" thirty minutes
+ * later won't accidentally fire a $0.30 video gen. */
+let _pendingConfirmation = null;
+const _PENDING_CONFIRMATION_TTL_MS = 90_000;
+
+function _setPendingConfirmation(name, args) {
+  _pendingConfirmation = { name, args, expiresAt: Date.now() + _PENDING_CONFIRMATION_TTL_MS };
+  console.log(`[bridge] pending confirmation set: ${name}`);
+  /* Why: HUD pauses the conversation idle timer while a confirmation is
+   * pending — operator is mid-task by definition and shouldn't get dropped
+   * back to wake-word listening if they take a moment to respond. */
+  try { broadcastToClients({ type: "task.confirmation_pending", data: { tool: name, expiresAt: _pendingConfirmation.expiresAt } }); } catch {}
+}
+
+function _clearPendingConfirmation() {
+  if (!_pendingConfirmation) return;
+  const tool = _pendingConfirmation.name;
+  _pendingConfirmation = null;
+  try { broadcastToClients({ type: "task.confirmation_resolved", data: { tool } }); } catch {}
+}
+
+/* Why: matched against a single-utterance reply, so we anchor with ^ to
+ * avoid catching "yes I want a coffee" as confirmation. Trailing punctuation
+ * stripped before the test. Phrases mirror the wake-parsing isAffirmative
+ * regex but tightened — only short standalone affirmations qualify here. */
+const _AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|go on|proceed|do it|hit it|fire away|fire it up|confirmed?|let'?s do it|let'?s go|please do)\.?\s*$/i;
+
+function _consumePendingConfirmation(query) {
+  if (!_pendingConfirmation) return null;
+  if (Date.now() > _pendingConfirmation.expiresAt) {
+    _clearPendingConfirmation();
+    return null;
+  }
+  const t = String(query || "").trim().replace(/[.,!?]+$/, "");
+  if (!_AFFIRMATIVE_RE.test(t)) return null;
+  const c = { name: _pendingConfirmation.name, args: _pendingConfirmation.args };
+  _clearPendingConfirmation();
+  return { name: c.name, args: { ...c.args, confirmed: true } };
+}
 const NEEDS_CONFIRMATION = {
+  /* Sprint 13 — fal.ai teaser pipeline costs real money per call. Both image
+   * gen (~$0.04) and video gen (~$0.30) gate so the operator has to OK the
+   * spend before bytes leave for fal. The storyboard step is LLM-only and
+   * NOT gated — operator can iterate on the script freely without cost. */
+  /* Sprint 13 — these summaries are spoken aloud by Kokoro, so we keep
+   * them operator-friendly: the prompt + aspect + clip length, no model
+   * names (fal / nano-banana / happy-horse), no dollar amounts. The
+   * cost-tracking happens in the bridge log instead. */
+  generate_teaser_image: (a) => `Generate the hero image with this prompt: "${(a?.prompt || "").slice(0, 120)}${(a?.prompt || "").length > 120 ? "…" : ""}", at ${a?.aspect || "9:16"} aspect. Shall I proceed?`,
+  animate_teaser_image: (a) => `Animate the hero image into a ${a?.duration_s || 5}-second clip with this motion: "${(a?.motion_prompt || "").slice(0, 120)}${(a?.motion_prompt || "").length > 120 ? "…" : ""}". Shall I proceed?`,
+  /* Influencer pipeline. create_influencer fires N image gens (~$0.08 each)
+   * so we say "three reference portraits" not "an image". Recreation uses
+   * Kling Motion Control at ~$0.168/s — operator hears the duration so the
+   * spend implication is implicit (5s ≈ £0.65 at current rates). */
+  create_influencer: (a) => {
+    const count = Math.max(1, Math.min(4, Number(a?.count) || 3));
+    return `Generate ${count} reference portrait${count === 1 ? "" : "s"} for ${a?.name || "(no name)"} — ${(a?.persona || "").slice(0, 80)}${(a?.persona || "").length > 80 ? "…" : ""}. Shall I proceed?`;
+  },
+  recreate_video_with_influencer: (a) => {
+    const src = a?.source_url || a?.source_local_path;
+    const where = src ? `from ${a?.source_url ? "the linked video" : "the local clip"}` : "(awaiting source from the modal)";
+    return `Recreate ${where} starring ${a?.slug || "(no influencer)"}. Shall I proceed?`;
+  },
   draft_email: (a) => `Draft email to ${a.to || "(no recipient)"} with subject "${a.subject || "(no subject)"}". Send it?`,
   add_calendar_event: (a) => `Add calendar event "${a.title || "(no title)"}" on ${a.startDate || a.date || "(no date)"}. Confirm?`,
   run_shell: (a) => `Run shell command: ${(a.command || "").slice(0, 120)}${a.command?.length > 120 ? "…" : ""}. Confirm?`,
@@ -1484,6 +2151,35 @@ const NEEDS_CONFIRMATION = {
     const tools = Array.isArray(a?.allowedTools) ? a.allowedTools.slice(0, 6).join(", ") : "(none)";
     const lines = String(a?.code || "").split("\n").length;
     return `Run a code-agent script — purpose: "${purpose}". Allowed tools: ${tools}. ${lines} lines. Confirm before execution?`;
+  },
+  /* Workspace deletion is destructive — drops the workspace row + its handbook
+   * permanently. Operator hears the slug + label before approving. Voice
+   * accident protection: a misheard slug is announced verbatim so the
+   * operator can catch a wrong one. */
+  delete_workspace: (a) => {
+    const slug = String(a?.slug || "(no slug)").slice(0, 60);
+    return `Permanently delete workspace "${slug}" (handbook + scope rules will be lost). Confirm?`;
+  },
+  /* Import OVERWRITES on opt-in only; the gate spells out whether the
+   * destination workspace exists and what's about to happen. */
+  import_workspace: (a) => {
+    const file = String(a?.bundlePath || "(no path)").split("/").pop().slice(0, 60);
+    const overwrite = a?.overwrite ? " (will overwrite an existing workspace of the same slug)" : "";
+    return `Import workspace bundle "${file}"${overwrite}. Proceed?`;
+  },
+  /* Plugin generation writes to the filesystem — bridge/plugins/<slug>/{manifest.json,
+   * handler.mjs}. The plugin-loader's fs.watch then hot-loads the new directory,
+   * registering a new voice-callable tool. The operator hears the slug + tool name +
+   * voice intent BEFORE any files are written so they can catch a misheard slug
+   * before it lands. force=true gets called out so an accidental clobber requires
+   * a separate explicit "yes". */
+  build_plugin: (a) => {
+    const slug = String(a?.name || "(unnamed)").slice(0, 60);
+    const tool = String(a?.toolName || "(unnamed)").slice(0, 60);
+    const intent = String(a?.voiceIntent || "(no intent)").slice(0, 80);
+    const mode = a?.behaviour ? "code-agent will fill the handler" : "stub handler — you fill it in";
+    const overwrite = a?.force ? " · OVERWRITES the existing plugin of the same name" : "";
+    return `Build plugin "${slug}" with tool ${tool} for "${intent}" — ${mode}${overwrite}. Proceed?`;
   },
 };
 
@@ -1561,6 +2257,8 @@ function summariseToolCall(name, args) {
       const lines = String(a.code || "").split("\n").length;
       return `Run code-agent: ${(a.purpose || "(no purpose)").slice(0, 50)} · ${lines} lines`;
     }
+    case "build_plugin":
+      return `Scaffold plugin "${(a.name || "?").slice(0, 30)}" → tool ${(a.toolName || "?").slice(0, 40)}${a.behaviour ? " (agent-filled)" : " (stub)"}`;
     case "generate_pptx":
       return `Build PPTX deck "${(a.title || "?").slice(0, 50)}" — ${Array.isArray(a.slides) ? a.slides.length : 0} slides`;
     case "generate_docx":
@@ -1591,6 +2289,111 @@ function summariseToolCall(name, args) {
       return `Note "${(a.title || "").slice(0, 50)}" → ${a.app || "Apple Notes"}`;
     default: return `${name}(${JSON.stringify(a).slice(0, 80)})`;
   }
+}
+
+/** Build a short spoken summary of upcoming calendar events. Used by the
+ *  fast-path so the operator hears "3 events today, next is X at Y" instead
+ *  of an LLM paraphrase. `days=1` (today) gets a tighter phrasing than the
+ *  multi-day case. */
+function buildEventsSpokenSummary(events, days) {
+  const list = Array.isArray(events) ? events : [];
+  const horizon = (days ?? 1) <= 1 ? "today" : `in the next ${days} days`;
+  if (list.length === 0) return `Nothing on the calendar ${horizon}.`;
+  const next = list[0];
+  const time = next?.start
+    ? new Date(next.start).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" })
+    : null;
+  const where = time ? `at ${time}` : "coming up";
+  return list.length === 1
+    ? `One event ${horizon}: ${next.title || "(no title)"} ${where}.`
+    : `${list.length} events ${horizon}. Next: ${next.title || "(no title)"} ${where}.`;
+}
+
+/** Scan output/teasers/ for the most-recent run directory. Returns
+ *  `{ run_id, kind, path, prompt, mtime }` for the panel, or null if nothing
+ *  has been generated yet. The kind is determined by which file is newer:
+ *  clip.mp4 (video) wins over hero.png (image) within the same run dir. */
+async function _findLatestTeaserRun() {
+  try {
+    const path2 = await import("node:path");
+    const fsp = await import("node:fs/promises");
+    const teasersDir = path2.join(PROJECT_ROOT, "output", "teasers");
+    const entries = await fsp.readdir(teasersDir, { withFileTypes: true }).catch(() => []);
+    let best = null;
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const dir = path2.join(teasersDir, e.name);
+      const hero = path2.join(dir, "hero.png");
+      const clip = path2.join(dir, "clip.mp4");
+      const [hs, cs] = await Promise.all([
+        fsp.stat(hero).catch(() => null),
+        fsp.stat(clip).catch(() => null),
+      ]);
+      const pick = (cs && (!hs || cs.mtimeMs > hs.mtimeMs)) ? { path: clip, kind: "video", mtime: cs.mtimeMs } : (hs ? { path: hero, kind: "image", mtime: hs.mtimeMs } : null);
+      if (!pick) continue;
+      if (!best || pick.mtime > best.mtime) best = { run_id: e.name, ...pick };
+    }
+    return best;
+  } catch (e) {
+    console.warn(`[asset-panel] _findLatestTeaserRun: ${e.message}`);
+    return null;
+  }
+}
+
+/** Recent teaser runs (last N) for the asset-panel history strip. Returns
+ *  an array sorted newest-first; each entry has the same shape as
+ *  _findLatestTeaserRun's return value, plus an optional `prompt` read from
+ *  meta.json when present. */
+async function _listTeaserRuns(limit = 3) {
+  try {
+    const path2 = await import("node:path");
+    const fsp = await import("node:fs/promises");
+    const teasersDir = path2.join(PROJECT_ROOT, "output", "teasers");
+    const entries = await fsp.readdir(teasersDir, { withFileTypes: true }).catch(() => []);
+    const rows = [];
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const dir = path2.join(teasersDir, e.name);
+      const hero = path2.join(dir, "hero.png");
+      const clip = path2.join(dir, "clip.mp4");
+      const meta = path2.join(dir, "meta.json");
+      const [hs, cs, ms] = await Promise.all([
+        fsp.stat(hero).catch(() => null),
+        fsp.stat(clip).catch(() => null),
+        fsp.readFile(meta, "utf8").catch(() => null),
+      ]);
+      const pick = (cs && (!hs || cs.mtimeMs > hs.mtimeMs)) ? { path: clip, kind: "video", mtime: cs.mtimeMs } : (hs ? { path: hero, kind: "image", mtime: hs.mtimeMs } : null);
+      if (!pick) continue;
+      let prompt = "";
+      try { prompt = JSON.parse(ms || "{}")?.prompt || ""; } catch {}
+      rows.push({ run_id: e.name, ...pick, prompt });
+    }
+    rows.sort((a, b) => b.mtime - a.mtime);
+    return rows.slice(0, limit);
+  } catch (e) {
+    return [];
+  }
+}
+
+/** Tracks currently-running influencer pipeline runs by runId so the POST
+ *  endpoint can return immediately and the orchestrator continues in the
+ *  background. The map is intentionally never cleaned up — runs are tiny
+ *  ({ runId, startedAt }) and the process restarts daily anyway. */
+const _influencerRuns = new Map();
+
+/** Build a 1–2 sentence summary the LLM can speak while the news panel mounts.
+ *  Picks the freshest top-story headline and, if there's also fresh HN content,
+ *  appends a one-clause tech tease. Falls back to a generic line on a cold,
+ *  empty cache (boot before any successful fetch). */
+function buildNewsSpokenSummary(cache) {
+  if (!cache) return "Opening the news panel now.";
+  const top = cache.topStories?.[0];
+  const hn  = cache.hn?.[0];
+  if (!top && !hn) return "Opening the news panel now — feeds are still loading.";
+  const parts = [];
+  if (top) parts.push(`Top story: ${top.title}.`);
+  if (hn)  parts.push(`In tech: ${hn.title}.`);
+  return parts.join(" ");
 }
 
 async function executeTool(name, args) {
@@ -1639,6 +2442,9 @@ async function _executeToolInner(name, args) {
      * only gates when exclusive: true). Falsy summary → no gate, run as normal. */
     const summary = summarize(args || {});
     if (summary) {
+      /* Stash for auto-replay so a single "yes" from the operator fires the
+       * tool even if Qwen forgets to re-emit the call with confirmed:true. */
+      _setPendingConfirmation(name, args || {});
       return {
         ok: false,
         requires_confirmation: summary,
@@ -1646,10 +2452,33 @@ async function _executeToolInner(name, args) {
       };
     }
   }
+  /* If the LLM correctly re-called with confirmed:true, the pending slot for
+   * that tool is now stale — clear it so a stray "yes" later doesn't refire. */
+  if (args?.confirmed && _pendingConfirmation?.name === name) _clearPendingConfirmation();
   switch (name) {
     case "web_search": {
       const results = await webSearch(String(args.query || "").trim(), 5);
       return { results };
+    }
+    case "get_weather": {
+      const loc = String(args.location || "").trim();
+      const days = Number(args.days) || 7;
+      let w, place;
+      if (!loc) {
+        w = await getWeather(undefined, undefined, days);
+        place = { name: CONFIG.operator.city, country: CONFIG.operator.country };
+      } else {
+        const geo = await geocodeLocation(loc);
+        if (!geo) return { ok: false, error: `Couldn't find a place called "${loc}". Try a more specific name (e.g. 'Alicante, Spain').` };
+        w = await getWeather(geo.lat, geo.lon, days);
+        place = { name: geo.name, country: geo.country, lat: geo.lat, lon: geo.lon, timezone: geo.timezone };
+      }
+      /* Spoken summary used by the fast-path so the operator hears the current
+       * temperature + condition instead of the LLM paraphrasing the raw object. */
+      const summary = w?.now
+        ? `It's ${w.now.temp} degrees and ${wmoLabel(w.now.code)} in ${place.name}.`
+        : (w?.error ? `Weather lookup failed: ${w.error}` : `Weather data unavailable.`);
+      return { ...w, location: place, summary };
     }
     case "send_imessage":  return await Personal.sendIMessage(args);
     case "add_reminder":   return await Personal.addReminder(args);
@@ -1659,10 +2488,29 @@ async function _executeToolInner(name, args) {
     case "play_music":     return await Personal.playMusic(args);
     case "pause_music":    return await Personal.pauseMusic(args);
     case "read_article":   return await Personal.readArticle(args);
-    case "take_screenshot":return await Personal.takeScreenshot(args);
+    case "take_screenshot": {
+      const r = await Personal.takeScreenshot(args);
+      if (r?.ok) {
+        r.summary = "Screenshot captured.";
+        /* Broadcast so the screenshot side panel can pop with the captured
+         * image. Falls back gracefully if no panel is listening. */
+        broadcastToClients({ type: "screenshot.taken", data: { path: r.path, region: args?.region || "screen", takenAt: Date.now() } });
+      }
+      return r;
+    }
     case "set_focus":      return await Personal.setFocus(args);
     case "lookup_password":return await Personal.lookupPassword(args);
     case "compose_note":   return await Personal.composeNote(args);
+    case "show_news_panel": {
+      const cached = News.getCached();
+      const summary = buildNewsSpokenSummary(cached);
+      broadcastToClients({ type: "news.show", data: cached });
+      return { ok: true, summary };
+    }
+    case "hide_news_panel": {
+      broadcastToClients({ type: "news.hide" });
+      return { ok: true };
+    }
     case "enter_sleep_mode": {
       /* Broadcast a sleep cue. The HUD listens, mutes the mic via stopListening(),
        * dims the speedometer, and waits for an explicit wake action (click or
@@ -1718,6 +2566,249 @@ async function _executeToolInner(name, args) {
     case "search_knowledge": return await Memory.searchKnowledge(args || {});
     case "ingest_knowledge": return await Knowledge.ingestAll();
     case "code_agent_run":   return await CodeAgent.runCode(args || {});
+    case "create_workspace": {
+      try {
+        const w = Workspaces.create(args || {});
+        broadcastToClients({ type: "workspace.created", data: w });
+        return { ok: true, workspace: w, hint: `Workspace "${w.label}" created. Say "switch to ${w.slug}" to activate it.` };
+      } catch (e) {
+        return { ok: false, error: String(e.message || e) };
+      }
+    }
+    case "switch_workspace": {
+      try {
+        const w = Workspaces.setActive(args?.slug ?? null);
+        applyWorkspaceOverrides(w);
+        broadcastToClients({ type: "workspace.switched", data: w });
+        return { ok: true, workspace: w, hint: w ? `Now operating inside the "${w.label}" workspace.` : "Workspace cleared - operating without scope." };
+      } catch (e) {
+        return { ok: false, error: String(e.message || e) };
+      }
+    }
+    case "list_workspaces": {
+      const workspaces = Workspaces.list();
+      const active = Workspaces.getActive();
+      return { ok: true, workspaces, activeSlug: active?.slug || null };
+    }
+    case "delete_workspace": {
+      const slug = String(args?.slug || "");
+      const removed = Workspaces.remove(slug);
+      if (!removed) return { ok: false, error: `workspace "${slug}" not found` };
+      broadcastToClients({ type: "workspace.deleted", data: { slug } });
+      return { ok: true, slug };
+    }
+    case "list_reminders":   return await Personal.listReminders(args || {});
+    case "act_on_inbox_item": {
+      /* Resolve the ordinal against the most recent briefing's cached
+       * aggregate. If the cache has expired or the operator never ran a
+       * briefing in this session, we ask them to run one first — better
+       * than silently picking from a stale list. */
+      const item = Inbox.getItemByOrdinal(args?.ordinal);
+      if (!item) {
+        return { ok: false, error: `Couldn't find item ${args?.ordinal} — say "brief me" first to refresh the inbox.` };
+      }
+      const action = String(args?.action || "").toLowerCase();
+      try {
+        switch (action) {
+          case "open": {
+            /* Each kind opens its native app. We use the URL handler
+             * that openUrl already understands so we don't have to
+             * touch AppleScript per kind. Apple Mail's `message:` URL
+             * scheme + Calendar's `ical://` work natively. */
+            if (item.kind === "email" && item.raw?.id) {
+              await execp(`open "message://%3c${encodeURIComponent(item.raw.id)}%3e"`);
+              return { ok: true, opened: "Mail.app", item: item.what };
+            }
+            if (item.kind === "event") {
+              /* Calendar.app doesn't have a stable per-event URL scheme,
+               * so we fall back to opening Calendar focused on the day. */
+              await execp(`open -a "Calendar"`);
+              return { ok: true, opened: "Calendar.app", item: item.what };
+            }
+            if (item.kind === "reminder") {
+              await execp(`open -a "Reminders"`);
+              return { ok: true, opened: "Reminders.app", item: item.what };
+            }
+            return { ok: false, error: `Don't know how to open a "${item.kind}" item.` };
+          }
+          case "reply": {
+            if (item.kind !== "email") {
+              return { ok: false, error: `Reply only works for email items (this is a ${item.kind}).` };
+            }
+            const to = item.raw?.from || item.who;
+            const subject = item.raw?.subject || item.what;
+            const body = String(args?.replyBody || "").trim();
+            return await draftEmail({
+              to,
+              subject: subject.toLowerCase().startsWith("re:") ? subject : `Re: ${subject}`,
+              body,
+              confirmed: true,   /* operator already said "reply to the first one" */
+            });
+          }
+          case "snooze": {
+            if (item.kind !== "reminder") {
+              return { ok: false, error: `Snooze only works for reminder items.` };
+            }
+            const minutes = Math.max(1, Math.min(60 * 24 * 30, Number(args?.snoozeMinutes) || 60));
+            const newDue = new Date(Date.now() + minutes * 60_000).toISOString();
+            /* No native Reminders.app "snooze" — we just update the due date.
+             * The existing addReminder doesn't update; we'd need a new
+             * Personal.updateReminder. Sprint 9 ships the voice surface,
+             * the Personal-side updater is a follow-up. */
+            return { ok: false, error: `Reminder snooze needs Personal.updateReminder() — wired in next patch. For now, edit "${item.what}" in Reminders.app directly (newDue would be ${newDue}).`, newDue };
+          }
+          case "accept":
+          case "decline": {
+            if (item.kind !== "event") {
+              return { ok: false, error: `${action} only works for calendar events.` };
+            }
+            return { ok: false, error: `Calendar RSVP needs an Events.app updater — wired in next patch. For now, open "${item.what}" in Calendar.app and RSVP there.` };
+          }
+          case "complete": {
+            if (item.kind !== "reminder") {
+              return { ok: false, error: `Complete only works for reminders.` };
+            }
+            return { ok: false, error: `Reminder completion needs Personal.completeReminder() — wired in next patch. For now, tick "${item.what}" off in Reminders.app.` };
+          }
+          default:
+            return { ok: false, error: `Unknown action "${action}".` };
+        }
+      } finally {
+        /* Any successful action invalidates the cache so the next
+         * briefing reflects the new state. */
+        Inbox.invalidate();
+      }
+    }
+    case "smart_inbox_briefing": {
+      /* Pull the latest aggregate, then ask the LLM to triage per the
+       * active workspace's handbook. The handbook fragment is the primary
+       * priority signal — operator's prose ("client emails outrank
+       * internal newsletters", "calendar items in the next hour are
+       * sacred") gets injected verbatim into the rank prompt. */
+      const topN = Math.max(1, Math.min(8, Number(args?.topN) || 3));
+      const force = !!args?.force;
+      const inbox = await Inbox.aggregate({ days: 1, mailMax: 15, force });
+      if (!inbox.items.length) {
+        return { ok: true, briefing: "Nothing in the inbox right now — clean plate.", items: [], topN };
+      }
+      /* Compose a compact ranking prompt. Items are pre-sorted by the
+       * default heuristic (imminent events first); the LLM re-ranks
+       * against the workspace handbook + makes the rationale explicit. */
+      const w = Workspaces.getActive();
+      const handbookFragment = w?.handbook ? `\n\nWorkspace priority directives (operator's scope-specific rules — apply strictly when ranking):\n${w.handbook}\n` : "";
+      const itemList = inbox.items.slice(0, 25).map((it, i) => {
+        const minutes = it.urgency_hints?.minutesAway != null
+          ? ` (${it.urgency_hints.minutesAway > 0 ? "in " : ""}${Math.abs(it.urgency_hints.minutesAway)} min${it.urgency_hints.minutesAway < 0 ? " ago" : ""})`
+          : "";
+        return `${i + 1}. [${it.kind}] ${it.who}: ${it.what}${minutes}${it.preview ? ` — ${it.preview.slice(0, 80)}` : ""}`;
+      }).join("\n");
+      const rankPrompt = `You are a triage assistant. The operator wants a briefing of what to handle first.
+
+Inbox items (${inbox.items.length} total, calendar + mail aggregated):
+${itemList}
+${handbookFragment}
+Pick the top ${topN} priorities. For each, output exactly one line in this format:
+<rank>. <one-line summary>  —  <why this matters now, max 18 words>
+
+After the list, output a one-sentence overall take describing the shape of the day (e.g. tone like "tight calendar morning — clear the most time-pressured item first" — but reflect the actual items above, not this example phrasing) on its own line.
+
+Output ONLY the ranked list + the one-sentence take. No headers, no bullet markers other than the ranks, no prose preamble.`;
+      let briefing;
+      try {
+        briefing = await askLLM(rankPrompt, [], { sessionId: null, workspace: w?.slug || null });
+      } catch (e) {
+        return { ok: false, error: `LLM ranking failed: ${e.message}`, items: inbox.items.slice(0, topN) };
+      }
+      return {
+        ok: true,
+        briefing,
+        items: inbox.items.slice(0, topN),
+        sources: inbox.sources,
+        generatedAt: inbox.generatedAt,
+        fromCache: inbox.fromCache,
+      };
+    }
+    case "workspace_insights": {
+      const slug = args?.slug || Workspaces.getActive()?.slug;
+      if (!slug) return { ok: false, error: "no active workspace and no slug provided" };
+      const insights = Workspaces.insights(slug);
+      if (!insights) return { ok: false, error: `workspace "${slug}" not found` };
+      return { ok: true, ...insights };
+    }
+    case "refresh_workspace_knowledge": {
+      const w = Workspaces.getActive();
+      if (!w) return { ok: false, error: "no active workspace — switch to one first" };
+      if (!w.workingRoot) return { ok: false, error: `workspace "${w.slug}" has no working_root set` };
+      try {
+        broadcastToClients({ type: "knowledge.workspace.scanning", data: { slug: w.slug, root: w.workingRoot } });
+        const result = await Knowledge.ingestAll(w.workingRoot);
+        broadcastToClients({ type: "knowledge.workspace.scanned", data: { slug: w.slug, ...result } });
+        return { ok: true, workspace: w.slug, ...result };
+      } catch (e) { return { ok: false, error: String(e.message || e) }; }
+    }
+    case "export_workspace": {
+      try {
+        const result = await WorkspaceExport.exportWorkspace({
+          slug: args?.slug,
+          includeTurns: !!args?.includeTurns,
+        });
+        broadcastToClients({ type: "workspace.exported", data: { slug: args?.slug, path: result.path, sizeBytes: result.sizeBytes } });
+        return result;
+      } catch (e) { return { ok: false, error: String(e.message || e) }; }
+    }
+    case "import_workspace": {
+      try {
+        const result = await WorkspaceExport.importWorkspace({
+          bundlePath: args?.bundlePath,
+          overwrite: !!args?.overwrite,
+          includeTurns: args?.includeTurns !== false,
+        });
+        broadcastToClients({ type: "workspace.imported", data: result });
+        return result;
+      } catch (e) { return { ok: false, error: String(e.message || e) }; }
+    }
+    case "build_plugin": {
+      /* Plugin generator — scaffolds bridge/plugins/<slug>/{manifest.json,
+       * handler.mjs} from voice-supplied spec. The plugin-loader's fs.watch
+       * picks up the new directory within ~500ms and hot-loads the tool;
+       * by the time this case returns, the operator can call the new tool
+       * on the next turn.
+       *
+       * Two modes are baked into PluginGenerator.buildPlugin:
+       *   - stub: writes a placeholder handler the operator fills in by hand.
+       *   - agent-seeded: writes a placeholder, returns a code-agent prompt
+       *     the LLM should pass to code_agent_run on its next call to fill
+       *     in real handler logic.
+       *
+       * We don't auto-chain to code_agent_run here because that would
+       * bypass the second confirmation gate. The LLM gets the agent prompt
+       * back in the response and can decide to make the follow-up call. */
+      const spec = {
+        name: args?.name,
+        description: args?.description,
+        toolName: args?.toolName,
+        voiceIntent: args?.voiceIntent,
+        behaviour: args?.behaviour || null,
+        force: !!args?.force,
+      };
+      const result = await PluginGenerator.buildPlugin(spec);
+      if (!result.ok) return result;
+      /* Surface the agent prompt so the LLM can use it as the `code` arg
+       * for code_agent_run when behaviour was provided. We don't put the
+       * full prompt in the spoken summary — only the hint for the operator
+       * — but the LLM sees it via the tool reply. */
+      if (result.needsAgentFill) {
+        result.agentPrompt = PluginGenerator.buildAgentPrompt(spec);
+        result.followupHint = "Now call code_agent_run with code=<the agentPrompt> and allowedTools=[\"write_file\"], purpose=\"fill in the handler for plugin " + spec.name + "\".";
+      }
+      /* Push a WS event so the HUD can show a "new plugin loaded" toast
+       * once the watcher actually loads it. The watcher itself broadcasts
+       * plugins.reloaded — we add a separate built event tagged for the
+       * generator path so UIs can distinguish "scaffolded" from "edited
+       * by operator + reloaded". */
+      broadcastToClients({ type: "plugin.built", data: { slug: result.slug, toolName: result.toolName, mode: result.mode } });
+      return result;
+    }
     case "generate_pptx": {
       const r = await Office.generatePptx(args || {});
       if (r.ok) broadcastToClients({ type: "office.complete", data: { kind: "pptx", title: args.title, path: r.path, sizeKB: r.sizeKB, slides: r.slideCount } });
@@ -1821,14 +2912,23 @@ async function _executeToolInner(name, args) {
       });
       return result;
     }
-    case "get_upcoming_events":                return await getUpcomingEvents({ days: args.days, calendarName: args.calendarName });
+    case "get_upcoming_events": {
+      const r = await getUpcomingEvents({ days: args.days, calendarName: args.calendarName });
+      /* Spoken summary used by the fast-path. Builds "3 events today, next is X at Y"
+       * from the event list so the operator gets the headline before the panel update. */
+      if (r?.ok) r.summary = buildEventsSpokenSummary(r.events, args.days);
+      return r;
+    }
     case "add_calendar_event": {
       /* Broadcast a diary.refresh hint so the HUD's TODAY widget picks up the new event
        * immediately rather than waiting for the next poll tick. The HUD may briefly show
        * the previous state until the post-broadcast pollDiary fetch completes (~250ms),
        * which is still much better than waiting up to a minute. */
       const r = await addCalendarEvent(args);
-      if (r?.ok) broadcastToClients({ type: "diary.refresh" });
+      if (r?.ok) {
+        invalidateCalendar(); /* event added — bust the upcoming-events cache so the next read is fresh */
+        broadcastToClients({ type: "diary.refresh" });
+      }
       return r;
     }
     case "get_mail_summary":                   return await getMailSummary({ unreadOnly: args.unreadOnly, max: args.max });
@@ -1846,6 +2946,82 @@ async function _executeToolInner(name, args) {
     case "describe_image":                     return await Vision.describeImage(args || {});
     case "export_all_aspects":                 return await Vision.exportAllAspects(args || {});
     case "generate_social_captions":           return await Agency.generateSocialCaptions(args || {});
+    /* Sprint 13 — teaser-ad pipeline. Three sequential tools: storyboard
+     * (LLM-only, no API), then image gen (gated, fal nano-banana/pro), then
+     * video gen (gated, fal Hailuo). Defined inline below the imports + helpers. */
+    case "make_teaser_storyboard":             return await makeTeaserStoryboard(args || {});
+    case "generate_teaser_image":              return await generateTeaserImage(args || {});
+    case "animate_teaser_image": {
+      const r = await animateTeaserImage(args || {});
+      /* Broadcast so the asset panel can pop with the new clip. The handler
+       * already returns clip_path / run_id; we just relay them. */
+      if (r?.ok) {
+        broadcastToClients({
+          type: "teaser.video_ready",
+          data: {
+            run_id: r.run_id || args?.run_id || null,
+            clipPath: r.clip_path || r.clipPath || null,
+            motion_prompt: args?.motion_prompt || null,
+            duration_s: args?.duration_s || null,
+            elapsed_ms: r.elapsed_ms || null,
+          },
+        });
+      }
+      return r;
+    }
+    /* Influencer pipeline — see Influencers module + recreateVideoWithInfluencer
+     * helper below. create + recreate are gated (NEEDS_CONFIRMATION); lock is
+     * a local file copy with no spend so it runs immediately. */
+    case "create_influencer":                  return await createInfluencerTool(args || {});
+    case "lock_influencer":                    return await lockInfluencerTool(args || {});
+    case "recreate_video_with_influencer":     return await recreateVideoWithInfluencer(args || {});
+    case "show_asset_panel": {
+      /* Find the most recent teaser run on disk and broadcast its path so the
+       * panel can render. Falls back to an empty payload if no runs exist. */
+      const latest = await _findLatestTeaserRun();
+      broadcastToClients({ type: "asset.panel.show", data: latest || {} });
+      return { ok: true, summary: latest ? `Opening the asset panel.` : `No image generated yet.` };
+    }
+    case "show_weather_panel": {
+      const w = await getWeather();
+      const data = { ...w, location: { name: CONFIG.operator.city, country: CONFIG.operator.country } };
+      broadcastToClients({ type: "weather.show", data });
+      return { ok: true, summary: w?.now ? `It's ${w.now.temp} degrees and ${wmoLabel(w.now.code)} in ${CONFIG.operator.city}.` : "Weather unavailable." };
+    }
+    case "show_influencer_wizard": {
+      broadcastToClients({ type: "influencer.wizard.show" });
+      return { ok: true, summary: "Opening the influencer wizard. Tell me what kind." };
+    }
+    case "start_influencer_pipeline": {
+      const answers = {
+        sex: args.sex,
+        vibe: args.vibe,
+        contentType: args.content_type,
+        sourceUrl: args.source_url || null,
+      };
+      /* Build the deps map from existing bridge handlers. Each fetcher returns
+       * the same shape its corresponding tool case returns. */
+      const deps = {
+        createInfluencer:           (a) => createInfluencerTool(a),
+        lockInfluencer:             (a) => lockInfluencerTool(a),
+        generateTeaserImage:        (a) => generateTeaserImage(a),
+        animateTeaserImage:         (a) => executeTool("animate_teaser_image", a),
+        recreateVideoWithInfluencer:(a) => recreateVideoWithInfluencer(a),
+        generateSocialCaptions:     (a) => Agency.generateSocialCaptions(a),
+      };
+      /* Fire-and-forget: return runId now, broadcast updates as they happen. */
+      const runPromise = InfluencerPipeline.runPipeline(answers, deps, broadcastToClients);
+      runPromise.then((r) => {
+        broadcastToClients({ type: "influencer.pipeline.complete", data: r });
+        _influencerRuns.delete(r.runId);
+      }).catch((e) => {
+        console.warn(`[influencer-pipeline] crashed: ${e.message}`);
+      });
+      const tempId = `inf_pending_${Date.now()}`;
+      _influencerRuns.set(tempId, { startedAt: Date.now() });
+      return { ok: true, pending_run_id: tempId };
+    }
+    case "triage_failed_tool":                 return await triageFailedTool(args || {});
     case "check_brand_tone":                   return await Agency.checkBrandTone(args || {});
     case "hashtag_research":                   return await Agency.hashtagResearch(args || {});
     case "vehicle_spec_lookup":                return await Agency.vehicleSpecLookup(args || {});
@@ -1998,6 +3174,32 @@ async function _executeToolInner(name, args) {
       } catch {}
       const musicMod = await import("./music.mjs");
       const tracks = await musicMod.listTracks();
+      /* Categorised tool summary — five buckets per the white-label sprint
+       * plan. Read from config/actions.meta.json so non-developers can tune
+       * categories without touching code. The summary is a short, human-
+       * readable list per category that the LLM can read aloud when the
+       * operator asks "what can you do?" — matches the help modal layout. */
+      let categorySummary = null;
+      try {
+        const metaPath = new URL("../config/actions.meta.json", import.meta.url);
+        const meta = JSON.parse(await fs.readFile(metaPath, "utf8"));
+        const cats = meta._categories || {};
+        const grouped = {};
+        for (const t of TOOLS) {
+          const fn = t.function || {};
+          const m = meta[fn.name] || {};
+          const cat = m.category || "system";
+          if (!grouped[cat]) grouped[cat] = [];
+          grouped[cat].push(m.label || fn.name);
+        }
+        categorySummary = Object.entries(grouped).map(([cat, items]) => ({
+          key: cat,
+          label: cats[cat]?.label || cat,
+          blurb: cats[cat]?.blurb || "",
+          count: items.length,
+          items,
+        }));
+      } catch {}
       return {
         ok: true,
         hardware: CONFIG.hardware,
@@ -2015,6 +3217,8 @@ async function _executeToolInner(name, args) {
         memoryNote: "Persistent memory across sessions. Use get_contact before draft_email, recall for past discussions, remember for stable preferences, save_conversation at session end.",
         vision: Vision.visionStats(),
         visionNote: "Local Qwen 2.5-VL can caption images and video keyframes. Use describe_image for single files.",
+        categories: categorySummary,
+        categoriesNote: "When the operator asks 'what can you do?', read the category labels and counts (e.g. 'I have 11 communication tools, 15 productivity tools…') rather than listing every tool name. Drill into one category if they ask for more detail.",
       };
     }
     case "undo_last": {
@@ -2025,33 +3229,153 @@ async function _executeToolInner(name, args) {
     case "read_active_window":                 return await Window.readActiveWindow();
     case "dream_cycle":                        return await DreamCycle.runCycle(args || {});
     case "brand_pack_export":                  return await exportBrandPack(args || {});
-    default: return { error: `unknown tool: ${name}` };
+    default:
+      /* Plugin fall-through. If the tool was registered by a plugin via
+       * bridge/plugins/<name>/, route the call to its handler. The plugin
+       * has already passed the confirmation gate + audit-log wrapper above. */
+      if (PluginLoader.ownsTool(name)) {
+        return await PluginLoader.dispatch(name, args || {});
+      }
+      return { error: `unknown tool: ${name}` };
   }
 }
 
-async function askLLM(query, history = [], { sessionId = null } = {}) {
+/* Plugin runtime — wired here, AFTER TOOLS / NEEDS_CONFIRMATION / executeTool
+ * are all in scope. Init registers refs to the host arrays the loader will
+ * mutate; loadAll scans bridge/plugins/ at boot; startWatcher hot-reloads
+ * on file change. Order matters: plugins must register their tools BEFORE
+ * the tool-router builds its embedding index, so plugin tools participate
+ * in the top-K relevance filter just like built-in ones. */
+PluginLoader.init({
+  tools: TOOLS,
+  confirmations: NEEDS_CONFIRMATION,
+  ctx: {
+    log: (...args) => console.log("[plugin]", ...args),
+    broadcastToClients,
+    memory: Memory,
+    executeTool: (name, args) => executeTool(name, args),
+  },
+  broadcaster: broadcastToClients,
+});
+PluginLoader.loadAll().then(() => PluginLoader.startWatcher())
+  .catch((e) => console.warn(`[plugin] init failed: ${e.message}`));
+
+/* ─────────────────────────── AGENT LOOP CONFIG ───────────────────────────
+ * Two lanes for the LLM tool-call loop:
+ *   STANDARD — 3 hops, voice-friendly latency for chat-y queries.
+ *   AGENT    — 12 hops + per-tool retry budget + inter-hop status narration.
+ *              Used for multi-step builds (influencer creation → image gen →
+ *              animation; ad pipelines; recreation flows). Slower but lets
+ *              Qwen actually plan-and-iterate the way a human assistant would
+ *              instead of giving up after one failure.
+ *
+ * Lane is picked at hop 0 from the query content, then upgraded if the LLM
+ * calls a known multi-step tool (so a chat-y query that surprisingly leads
+ * to a teaser pipeline still gets the agent budget).
+ */
+const HOP_CAP_STANDARD = 3;
+const HOP_CAP_AGENT = 12;
+/* Tools that imply multi-step / "you'll need follow-up calls" work. Hitting
+ * any of these flips the loop into agent lane for the rest of the turn. */
+const AGENTIC_TOOL_NAMES = new Set([
+  "make_teaser_storyboard",
+  "generate_teaser_image",
+  "animate_teaser_image",
+  "create_influencer",
+  "lock_influencer",
+  "recreate_video_with_influencer",
+  "triage_failed_tool",
+  "request_browse",
+  "transcribe_video",
+  "video.edit",
+  "build_brand_pack",
+]);
+/* Per-tool call budget within a single agent task. Stops a confused model
+ * from burning 12 hops calling generate_teaser_image six times after every
+ * fal error. After 2 calls, the bridge returns a guard error that tells the
+ * LLM to either change tool or hand off to the operator. */
+const TOOL_CALL_BUDGET_PER_TASK = 2;
+
+/** Decide if a query is multi-step / agentic. Loose heuristics — we'd rather
+ *  give a chat-y query the agent budget by accident (slightly slower) than
+ *  cap a real build at 3 hops. */
+function _isAgenticQuery(query) {
+  const q = String(query || "").toLowerCase();
+  if (q.length > 140) return true;
+  /* Verb + content noun = build request. Catches "create me an influencer",
+   * "make a teaser ad", "recreate this tiktok", "build a brand pack",
+   * "animate the hero", "generate references". */
+  if (/\b(create|make|build|design|compose|generate|recreate|animate|render|produce)\b[\s\S]{0,80}\b(influencer|teaser|advert|ad|video|image|character|recreation|reference|hero|clip|brand pack|motion)\b/.test(q)) return true;
+  /* Chained-step indicators. */
+  if (/\b(then|next|after that|first|finally|step \d)\b[\s\S]{0,80}\b(then|next|after|finally|step \d)\b/.test(q)) return true;
+  return false;
+}
+
+/** Pick the hop cap for a query. Upgradable mid-loop if an agentic tool fires. */
+function _pickHopCap(query) {
+  return _isAgenticQuery(query) ? HOP_CAP_AGENT : HOP_CAP_STANDARD;
+}
+
+async function askLLM(query, history = [], { sessionId = null, workspace = null } = {}) {
+  /* Workspaces v4: when the caller (a specific HUD window) passes a
+   * workspace slug, run the entire call inside withWorkspace() so every
+   * provider that consults getCallWorkspace() — Memory, Audit,
+   * creative-style — sees the calling window's scope, not the global
+   * active. Outside withWorkspace(), the global active still wins. */
+  if (workspace) return withWorkspace(workspace, () => _askLLMInner(query, history, { sessionId, workspace }));
+  return _askLLMInner(query, history, { sessionId, workspace });
+}
+async function _askLLMInner(query, history = [], { sessionId = null, workspace = null } = {}) {
   const _askT0 = Date.now();
+  /* Auto-confirm fast path — if there's a pending gated tool waiting on the
+   * operator's "yes" and the current utterance is a bare affirmative, fire
+   * the tool with confirmed:true and return a short narration. Runs before
+   * fast-path so a bare "yes" doesn't hit the canned "Right." handler. */
+  const autoConfirm = _consumePendingConfirmation(query);
+  if (autoConfirm) {
+    if (sessionId) { try { Memory.appendTurn({ sessionId, role: "user", content: query }); } catch {} }
+    console.log(`[bridge] auto-confirm '${autoConfirm.name}' on operator yes`);
+    let result;
+    try { result = await executeTool(autoConfirm.name, autoConfirm.args); }
+    catch (e) { result = { ok: false, error: String(e.message || e) }; }
+    /* Narration: short spoken acknowledgement. Tools that produce side-effects
+     * (image opens in Preview, video opens in QuickTime) are self-evident, so
+     * keep this line tight — the operator will see/hear the result directly. */
+    const reply = result?.ok === false
+      ? `Couldn't complete that — ${result?.error?.slice(0, 100) || "unknown error"}.`
+      : "Done, sir.";
+    if (sessionId) {
+      try { Memory.appendTurn({ sessionId, role: "assistant", content: reply, tools: [autoConfirm.name] }); } catch {}
+    }
+    return reply;
+  }
   /* Fast-path: pattern-match common queries (time / timer / sleep / open
    * map / greetings) and bypass Ollama entirely. ~500ms total round-trip
    * vs ~2s through the LLM. The handler may also return a tool to dispatch
    * (set_timer for "set a 5 minute timer", enter_sleep_mode for "shut down")
    * which we run after broadcasting the spoken reply. */
-  const fp = FastPath.tryFastPath(query);
-  if (fp?.reply) {
+  const fp = await FastPath.tryFastPath(query);
+  if (fp) {
     if (sessionId) { try { Memory.appendTurn({ sessionId, role: "user", content: query }); } catch {} }
+    /* Tool dispatch + reply resolution. If `reply` is a function, we await
+     * the tool, pass its result to the function, and use the returned string
+     * as the spoken reply. This lets handlers say "<temp> degrees, partly
+     * cloudy" using fresh data from the tool itself instead of hard-coding. */
+    let toolResult = null;
     if (fp.toolCall) {
-      try { await executeTool(fp.toolCall.name, fp.toolCall.args || {}); }
+      try { toolResult = await executeTool(fp.toolCall.name, fp.toolCall.args || {}); }
       catch (e) { console.warn(`[fast-path] tool ${fp.toolCall.name} failed: ${e.message}`); }
     }
+    const reply = typeof fp.reply === "function"
+      ? (() => { try { return fp.reply(toolResult); } catch { return "Done."; } })()
+      : (fp.reply || toolResult?.summary || "Done.");
     if (sessionId) {
-      try { Memory.appendTurn({ sessionId, role: "assistant", content: fp.reply, tools: fp.toolCall ? [fp.toolCall.name] : [] }); }
+      try { Memory.appendTurn({ sessionId, role: "assistant", content: reply, tools: fp.toolCall ? [fp.toolCall.name] : [] }); }
       catch {}
     }
     console.log(`[fast-path] "${query.slice(0, 40)}" → bypassed LLM (${fp.toolCall?.name || "no tool"})`);
-    /* Record the hit for the candidates dashboard (so hit-rate is computable
-     * alongside the fall-through patterns). Fire-and-forget. */
     FastPathCandidates.record({ query, elapsedMs: Date.now() - _askT0, source: "askLLM", hit: true }).catch(() => {});
-    return fp.reply;
+    return reply;
   }
 
   const brand = loadBrand();
@@ -2062,6 +3386,12 @@ async function askLLM(query, history = [], { sessionId = null } = {}) {
    * default to the operator's current scope without re-asking. Empty string when
    * no project is set — costs nothing in tokens. */
   const projectHint = Projects.systemPromptHint();
+  /* Workspace v0 — operator's mental scope. When active, the workspace's
+   * handbook (if any) lands in the system prompt so the LLM follows the
+   * operator's scope-specific rules. Empty string when no workspace is
+   * active — same prefix-cache-friendly contract as projectHint. */
+  /* Per-call workspace scope (multi-window) wins over module-level active. */
+  const workspaceHint = Workspaces.systemPromptHint(getCallWorkspace());
   /* Why: keep dynamic-per-turn data OUT of the system prompt. The local time
    * (HH:MM) used to live here and re-tokenised the entire prefix every minute,
    * killing Ollama's prefix cache. Date strings (today/tomorrow) stay in
@@ -2077,7 +3407,7 @@ async function askLLM(query, history = [], { sessionId = null } = {}) {
   const _todayStr = _now.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const _tomorrow = new Date(_now.getTime() + 86_400_000);
   const _tomorrowStr = _tomorrow.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}${creativeStylePromptBlock()}
+  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}${workspaceHint ? "\n\n" + workspaceHint : ""}${creativeStylePromptBlock()}
 
 SPOKEN OUTPUT RULES (CRITICAL):
   Your reply is read aloud by a TTS voice. Output ONLY plain spoken prose:
@@ -2089,6 +3419,86 @@ SPOKEN OUTPUT RULES (CRITICAL):
   - Numbers and units in spoken form when helpful: "zero to sixty in three seconds", "five hundred horsepower", "sixteen by nine".
 
 YOU HAVE TOOLS — call them whenever appropriate, don't just describe what you would do.
+
+CHARACTER & CONTENT WORK — you have tools for ad scripts, image gen,
+animation, AI-influencer creation, and video recreation. Use them like a
+colleague would: gather what you need conversationally, call the tool when
+you have enough, hand off when the operator changes direction. The tool
+schemas describe what each one needs; you decide HOW to get there. No
+fixed question scripts, no rigid step sequences — be helpful, sound human.
+
+IMPORTANT — channel-character continuity: when the operator names a locked
+influencer in an ad / teaser request ("make me an ad with Marcus", "use
+Lena in this", "build a teaser for the channel"), pass that slug as the
+'influencer' argument to generate_teaser_image. The bridge then conditions
+the hero shot on that influencer's locked face — same person across every
+post on the channel. Without the slug, the model produces a NEW different
+face each call, defeating the whole point of having a locked character.
+Resolve the operator's spoken name to the slug (lowercase first name).
+
+A few things ARE non-negotiable:
+
+  1. IDENTITY — the operator's words are the source of truth for any
+     persona. Match their stated gender, age, ethnicity, vibe, or named
+     real person EXACTLY. Don't substitute a default, don't echo a
+     prompt example as the persona, don't guess gender from a name alone.
+     If a demographic isn't given and you need it for the tool, ask
+     plainly. The examples below show the SHAPE of a persona line, not
+     its content — mix it up so the operator hears you listening.
+       e.g. "30-year-old British female fitness creator"
+       e.g. "Korean-American skater, mid-20s, dry-humour"
+       e.g. "non-binary editorial photographer, 40s"
+       e.g. "Emma Chamberlain, candid handheld"
+
+  2. COST GATES — image / video tools cost real money on fal.ai. They
+     return { requires_confirmation: "..." } on the first call; speak that
+     line aloud, wait for the operator, then re-call with confirmed:true.
+     The bridge also auto-fires on a bare "yes" inside 90s so you don't
+     have to be perfect — but emit the second call when you can.
+
+  3. MODEL CAPS — animate_teaser_image hard-caps at 15s, generate_teaser_image
+     defaults to 9:16 for short-form. Take duration / aspect from the
+     operator's exact words ("5 second" = 5, not 30). Don't propose
+     beyond a tool's stated range.
+
+  4. OPERATOR LANGUAGE — when speaking aloud, NEVER name infrastructure:
+     no "fal.ai", "nano-banana", "happy-horse", "Hailuo", "Kling".
+     Say "writing the script", "generating references", "locking the face",
+     "animating the clip", "recreating the video". No per-second pricing.
+
+  5. ERROR RECOVERY — when a content/image/video tool returns ok:false:
+     - If the error mentions "safety", "did not generate the expected output",
+       "unsafe content", or "trademark/IP/celebrity" — the input named a
+       brand or celebrity the model can't render. Rephrase the prompt
+       avoiding those proper nouns (use silhouette/style/colour descriptors
+       instead) and re-call the SAME tool ONCE more with confirmed:true.
+       Don't ask the operator first; this is a routine recovery.
+     - If the error is a schema problem (missing field, wrong enum, bad
+       format), call triage_failed_tool with { tool_name, args, error }
+       to get a suggested fix, then retry with the fixed args + confirmed:true.
+     - After ONE retry: if it still fails, tell the operator plainly what
+       went wrong and ask how to proceed. Never loop more than twice.
+
+  6. NARRATE WHILE WORKING — for LONG-RUNNING tools only (image gen,
+     animation, recreation, video edit, anything that takes >10 seconds).
+     ONLY when you are emitting a tool_call AND the tool is long-running:
+     also include ONE short status line in your reply content describing
+     what is currently happening, derived from the tool you're about to call.
+     RULES:
+       - DO NOT include this status on turns where you have NO tool_call.
+       - DO NOT add a status to fast tools (recall, get_contact, weather,
+         web_search, lookups, anything <2 seconds).
+       - DO NOT echo example phrasings verbatim — make the status natural
+         to the specific tool + args you're calling, in your own words.
+       - Under 12 words, conversational, no model names, no filler like
+         "now also" or "let me just".
+     If unsure whether to narrate, DON'T — silence is fine for fast tools
+     and final replies. Narration is purely for filling the dead air
+     between tool start and tool finish on slow operations.
+
+Beyond that, trust your judgement. Have the conversation that gets you
+to a good output for the operator, change direction when they do, and
+don't insist on a fixed sequence.
 
 SCOPE — DO NOT REFUSE GENERAL TASKS:
   The agency framing above tells you WHO you serve, NOT what tasks you can do.
@@ -2162,7 +3572,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
    * context for the 14b selector. Pick the top-K most-similar by nomic-embed
    * cosine + always-on core. Resolved once per query, reused across hops so
    * the second hop's filtered set matches the first. */
-  const filtered = await ToolRouter.pickRelevant(query, TOOLS, { topK: 20 });
+  const filtered = await ToolRouter.pickRelevant(query, getEffectiveTools(), { topK: 20 });
   if (!filtered.fallback) {
     console.log(`[tool-router] ${query.slice(0, 40).replace(/\n/g, " ")} → ${filtered.picked.length}/${TOOLS.length} tools (${filtered.elapsedMs}ms)`);
   }
@@ -2188,9 +3598,15 @@ When given [Context], use those facts verbatim. If asked to do something you don
   });
   const toolsForLLM = filtered.tools;
 
-  /* Why: tool-calling loop — model may emit tool_calls, we run them, append results, ask again.
-   * Cap at 3 round trips to prevent infinite loops on a confused tool-happy model. */
-  for (let hop = 0; hop < 3; hop++) {
+  /* Tool-calling loop — model may emit tool_calls, we run them, append
+   * results, ask again. Cap depends on lane: standard (3) for chat-y
+   * queries, agent (12) for multi-step builds. Agent lane is picked from
+   * query content at hop 0, but we ALSO upgrade if the model calls an
+   * agentic tool partway through. Per-tool budget stops a confused model
+   * from looping on the same failing call. */
+  let hopCap = _pickHopCap(query);
+  const toolCallCounts = {};
+  for (let hop = 0; hop < hopCap; hop++) {
     /* First hop: route by query content — short / chat-y queries hit the fast model
      * on capable hardware. Subsequent hops always use main (tool-call accuracy
      * matters more than latency once a tool is already chosen). On lower-tier
@@ -2241,11 +3657,25 @@ When given [Context], use those facts verbatim. If asked to do something you don
       const fname = c.function?.name;
       let args = c.function?.arguments;
       if (typeof args === "string") { try { args = JSON.parse(args); } catch { args = {}; } }
-      console.log(`[bridge] tool call: ${fname}(${JSON.stringify(args).slice(0, 120)})`);
-      toolsThisQuery.push(fname);
+      /* Upgrade to agent lane the first time we see an agentic tool fired. */
+      if (AGENTIC_TOOL_NAMES.has(fname) && hopCap < HOP_CAP_AGENT) {
+        hopCap = HOP_CAP_AGENT;
+        console.log(`[bridge] agent lane engaged via ${fname} — hopCap raised to ${hopCap}`);
+      }
+      /* Per-tool budget. After N calls of the same tool in one task, stop
+       * accepting it — return a guard error so the LLM picks a different
+       * approach or hands off to the operator. */
+      toolCallCounts[fname] = (toolCallCounts[fname] || 0) + 1;
       let result;
-      try { result = await executeTool(fname, args || {}); }
-      catch (e) { result = { error: String(e.message || e) }; }
+      if (toolCallCounts[fname] > TOOL_CALL_BUDGET_PER_TASK) {
+        console.log(`[bridge] tool budget exceeded for ${fname} (${toolCallCounts[fname]} calls) — returning guard error`);
+        result = { ok: false, error: `Tool '${fname}' has been called ${toolCallCounts[fname]} times in this task — that's too many retries on the same call. Either pick a different tool, change the args meaningfully, or tell the operator what's blocking and stop.` };
+      } else {
+        console.log(`[bridge] tool call: ${fname}(${JSON.stringify(args).slice(0, 120)})`);
+        toolsThisQuery.push(fname);
+        try { result = await executeTool(fname, args || {}); }
+        catch (e) { result = { error: String(e.message || e) }; }
+      }
       messages.push({
         role: "tool",
         content: JSON.stringify(result).slice(0, 8000),
@@ -2256,7 +3686,7 @@ When given [Context], use those facts verbatim. If asked to do something you don
   /* Hop loop hit max without a clean answer — still log as fall-through
    * so dashboards see the slow path. */
   FastPathCandidates.record({ query, elapsedMs: Date.now() - _askT0, source: "askLLM", hit: false }).catch(() => {});
-  return "I tried a few searches but couldn't pull a clean answer together — try asking more specifically.";
+  return "I tried a few approaches but couldn't pull a clean result together — could you tell me a bit more about what you're after?";
 }
 
 /**
@@ -2278,28 +3708,58 @@ When given [Context], use those facts verbatim. If asked to do something you don
  *  @returns {Promise<string>} the fully-assembled reply (caller can also persist this
  *  to history without missing anything that was streamed).
  */
-async function askLLMStream({ query, history = [], onSentence, sessionId = null }) {
+async function askLLMStream({ query, history = [], onSentence, sessionId = null, workspace = null }) {
+  if (workspace) {
+    return withWorkspace(workspace, () =>
+      _askLLMStreamInner({ query, history, onSentence, sessionId, workspace }));
+  }
+  return _askLLMStreamInner({ query, history, onSentence, sessionId, workspace });
+}
+async function _askLLMStreamInner({ query, history = [], onSentence, sessionId = null, workspace = null }) {
   const _askStreamT0 = Date.now();
+  /* Auto-confirm fast path — same as askLLM. Runs before fast-path so a
+   * bare "yes" can fire the pending gated tool instead of hitting the
+   * canned "Right." reply. See _executeToolInner for the gate write. */
+  const autoConfirm = _consumePendingConfirmation(query);
+  if (autoConfirm) {
+    if (sessionId) { try { Memory.appendTurn({ sessionId, role: "user", content: query }); } catch {} }
+    console.log(`[bridge stream] auto-confirm '${autoConfirm.name}' on operator yes`);
+    let result;
+    try { result = await executeTool(autoConfirm.name, autoConfirm.args); }
+    catch (e) { result = { ok: false, error: String(e.message || e) }; }
+    const reply = result?.ok === false
+      ? `Couldn't complete that — ${result?.error?.slice(0, 100) || "unknown error"}.`
+      : "Done, sir.";
+    try { onSentence?.(reply); } catch {}
+    if (sessionId) {
+      try { Memory.appendTurn({ sessionId, role: "assistant", content: reply, tools: [autoConfirm.name] }); } catch {}
+    }
+    return reply;
+  }
   /* Fast-path: pattern-match common queries and emit a synthetic single-
    * sentence stream. Same shape as a real LLM stream from the HUD's
    * point of view — onSentence fires once with the canned reply, the
    * function returns the same string. End-to-end latency for these
    * queries: STT + Kokoro only, ~500ms total vs ~2s through the LLM. */
-  const fp = FastPath.tryFastPath(query);
-  if (fp?.reply) {
+  const fp = await FastPath.tryFastPath(query);
+  if (fp) {
     if (sessionId) { try { Memory.appendTurn({ sessionId, role: "user", content: query }); } catch {} }
+    let toolResult = null;
     if (fp.toolCall) {
-      try { await executeTool(fp.toolCall.name, fp.toolCall.args || {}); }
+      try { toolResult = await executeTool(fp.toolCall.name, fp.toolCall.args || {}); }
       catch (e) { console.warn(`[fast-path stream] tool ${fp.toolCall.name} failed: ${e.message}`); }
     }
-    try { onSentence?.(fp.reply); } catch {}
+    const reply = typeof fp.reply === "function"
+      ? (() => { try { return fp.reply(toolResult); } catch { return "Done."; } })()
+      : (fp.reply || toolResult?.summary || "Done.");
+    try { onSentence?.(reply); } catch {}
     if (sessionId) {
-      try { Memory.appendTurn({ sessionId, role: "assistant", content: fp.reply, tools: fp.toolCall ? [fp.toolCall.name] : [] }); }
+      try { Memory.appendTurn({ sessionId, role: "assistant", content: reply, tools: fp.toolCall ? [fp.toolCall.name] : [] }); }
       catch {}
     }
     console.log(`[fast-path stream] "${query.slice(0, 40)}" → bypassed LLM (${fp.toolCall?.name || "no tool"})`);
     FastPathCandidates.record({ query, elapsedMs: Date.now() - _askStreamT0, source: "askLLMStream", hit: true }).catch(() => {});
-    return fp.reply;
+    return reply;
   }
 
   /* Why log: when the kiosk goes silent mid-turn, the bridge log was empty —
@@ -2313,6 +3773,8 @@ async function askLLMStream({ query, history = [], onSentence, sessionId = null 
   const agentName = brand.agent.name || "Jarvis";
   const tagline = brand.agency.tagline ? ` — ${brand.agency.tagline}.` : ".";
   const projectHint = Projects.systemPromptHint();
+  /* Per-call workspace scope (multi-window) wins over module-level active. */
+  const workspaceHint = Workspaces.systemPromptHint(getCallWorkspace());
   /* SYSTEM is shared with askLLM — keep duplicated here so both paths stay in sync.
    * Local time MUST be in the user message, not SYSTEM, or the prefix cache
    * invalidates every minute. See askLLM for the matching comment. */
@@ -2320,11 +3782,48 @@ async function askLLMStream({ query, history = [], onSentence, sessionId = null 
   const _todayStr = _now.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const _tomorrow = new Date(_now.getTime() + 86_400_000);
   const _tomorrowStr = _tomorrow.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}
+  const SYSTEM = `You are ${agentName}, a voice assistant built for ${agencyName}${tagline} The operator is currently in ${CONFIG.operator.city}, ${CONFIG.operator.country}. Today is ${_todayStr}. Tomorrow is ${_tomorrowStr}. Be concise, conversational, and natural. Two sentences max unless asked for detail. Use British English. Address the operator as "sir" sparingly (occasional, not every reply).${projectHint}${workspaceHint ? "\n\n" + workspaceHint : ""}
 
 Output plain spoken prose only — no markdown, no bullet points, no emoji, no special separators. Numbers and units in spoken form when helpful.
 
 YOU HAVE TOOLS — call them whenever appropriate. When given [Context], use those facts verbatim.
+
+CHARACTER & CONTENT WORK — you have tools for ad scripts, image gen,
+animation, AI-influencer creation, and video recreation. Use them like a
+colleague would: gather what you need conversationally, call the tool when
+you have enough. The schemas describe what each tool needs. No fixed
+question scripts. Non-negotiables:
+  - IDENTITY: match the operator's stated gender, age, ethnicity, vibe,
+    or named real person EXACTLY. Don't substitute defaults, don't echo
+    examples as the persona, don't guess gender from a name. Ask if a
+    detail you need is missing.
+  - COST GATES: image / video tools return requires_confirmation on the
+    first call — speak it, wait, re-call with confirmed:true. Bridge auto-
+    fires on a bare "yes" within 90s as a safety net.
+  - MODEL CAPS: animate_teaser_image hard-caps at 15s. Take duration
+    and aspect from the operator's exact words, not a default.
+  - OPERATOR LANGUAGE: aloud, never name infrastructure ("fal.ai",
+    "nano-banana", "happy-horse", "Hailuo", "Kling"). Say "writing the
+    script", "generating references", "locking the face", "animating",
+    "recreating".
+  - ERROR RECOVERY: if a tool returns ok:false with a safety/content
+    rejection, rephrase to drop trademarks/celebrity names and retry
+    ONCE with confirmed:true. For schema/format errors, call
+    triage_failed_tool with { tool_name, args, error } first, then
+    retry with the suggested fix. Never loop more than twice.
+  - NARRATE WHILE WORKING: ONLY when calling a LONG-RUNNING tool
+    (image gen, animation, recreation, video edit — anything >10s).
+    Include ONE short status line in your reply content describing what
+    is happening, in your own words, specific to the tool + args.
+    DO NOT narrate when there is no tool_call this turn. DO NOT narrate
+    on fast tools (lookups, web_search, recall). DO NOT echo phrasings
+    verbatim — write fresh status each time. Under 12 words, no filler.
+For recreation specifically: "recreate this video using <name>" → call
+recreate_video_with_influencer with just { slug }; the bridge opens the
+URL/file modal automatically, don't ask for the URL yourself.
+For ads / teasers featuring a locked influencer: pass their slug as the
+'influencer' arg to generate_teaser_image so the hero shot uses their
+locked face — without it you get a generic face, not the channel's character.
 
 SCOPE — DO NOT REFUSE GENERAL TASKS:
   The agency framing above tells you WHO you serve, NOT what tasks you can do.
@@ -2358,15 +3857,42 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
     catch (e) { console.warn(`[bridge] turn persist (user, stream) failed: ${e.message}`); }
   }
 
-  /* Sentence boundary state — accumulates streamed tokens, flushes on terminal punctuation.
-   * Boundary regex keeps it simple: ".", "?", or "!" followed by whitespace or end-of-string.
-   * Sentences shorter than MIN_LEN merge into the next so "Yes." doesn't synth a 200ms clip. */
+  /* Sentence boundary state — accumulates streamed tokens, flushes on terminal
+   * punctuation. The FIRST emit uses a looser rule than subsequent ones:
+   * waits for a comma or colon after >=12 chars (catches conversational
+   * openers like "Yes, sir," or "On it,") so audio starts as fast as
+   * possible. Subsequent sentences use the standard ".!?" + 8-char rule
+   * so synthesised speech stays well-paced.
+   *
+   * Why two rules: the first audio chunk is the perceived response time;
+   * the rest are pacing. Loosening just the first cuts ~150-300ms off the
+   * wake-to-first-audio span on conversational replies without affecting
+   * cadence on longer answers. */
   const MIN_LEN = 8;
-  const sb = { text: "", emitted: "" };
+  const FIRST_EARLY_MIN = 12;
+  const sb = { text: "", emitted: "", firstEmitted: false };
   function pushToken(token) {
     if (!token) return;
     sb.text += token;
     sb.emitted += token;
+    /* First-chunk fast path: emit on a comma or colon if the buffer has
+     * enough natural language to produce a non-clipped audio chunk. Only
+     * fires once per stream. */
+    if (!sb.firstEmitted && sb.text.length >= FIRST_EARLY_MIN) {
+      const m = sb.text.match(/[,;:](\s|$)/);
+      if (m) {
+        const end = m.index + 1;
+        const sentence = sb.text.slice(0, end).trim();
+        sb.text = sb.text.slice(end).replace(/^\s+/, "");
+        if (sentence.length >= FIRST_EARLY_MIN) {
+          sb.firstEmitted = true;
+          try { onSentence(sentence); } catch (e) { console.warn(`[stream] onSentence threw: ${e.message}`); }
+        } else {
+          /* Restore — too short to be worth the early emit. */
+          sb.text = sentence + " " + sb.text;
+        }
+      }
+    }
     while (true) {
       const m = sb.text.match(/[.!?](\s|$)/);
       if (!m) break;
@@ -2374,6 +3900,7 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
       const sentence = sb.text.slice(0, end).trim();
       sb.text = sb.text.slice(end).replace(/^\s+/, "");
       if (sentence.length >= MIN_LEN) {
+        sb.firstEmitted = true;
         try { onSentence(sentence); } catch (e) { console.warn(`[stream] onSentence threw: ${e.message}`); }
       } else {
         /* Too short — merge back so we don't emit a tiny TTS clip. Prepend with a space
@@ -2392,7 +3919,7 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
   /* Embedding-based tool filter — same as askLLM(). Resolved once before the
    * hop loop so all hops share the same filtered set; otherwise the model
    * could pick tool A on hop 1 then find it absent on hop 2. */
-  const filtered = await ToolRouter.pickRelevant(query, TOOLS, { topK: 20 });
+  const filtered = await ToolRouter.pickRelevant(query, getEffectiveTools(), { topK: 20 });
   if (!filtered.fallback) {
     console.log(`[tool-router] (stream) → ${filtered.picked.length}/${TOOLS.length} tools (${filtered.elapsedMs}ms)`);
   }
@@ -2412,12 +3939,17 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
   });
   const toolsForLLM = filtered.tools;
 
-  /* Up to 3 hops, same cap as askLLM(). Each hop streams; tool_calls in the terminal
-   * frame trigger an extra hop with the tool results appended to messages. Model
-   * routing matches the non-streaming path: first hop picks via query content,
-   * subsequent hops always use main. */
+  /* Hop loop — standard lane (3 hops) for chat-y queries, agent lane (12)
+   * for multi-step builds. Lane is picked from query content at hop 0 and
+   * upgraded if any agentic tool fires partway through. Each hop streams;
+   * tool_calls in the terminal frame trigger an extra hop with the tool
+   * results appended to messages. Model routing matches the non-streaming
+   * path: first hop picks via query content, subsequent hops always use
+   * main (tool-call accuracy beats latency once tools are involved). */
+  let hopCap = _pickHopCap(query);
+  const toolCallCounts = {};
   let firstSentenceLogged = false;
-  for (let hop = 0; hop < 3; hop++) {
+  for (let hop = 0; hop < hopCap; hop++) {
     const modelForHop = hop === 0 ? ModelRouter.pick(query) : ModelRouter.pickForToolHop();
     const hopT0 = Date.now();
     console.log(`[stream] hop ${hop} → ${modelForHop}`);
@@ -2517,17 +4049,33 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
     /* Tool-calling hop: append the assistant message + each tool's result, then loop.
      * We DON'T flush between hops — sometimes the model emits a one-line "Looking that
      * up..." in this hop's content, which we want spoken before the tool result drives
-     * the next hop. The flushFinal() at the very end picks up any tail. */
+     * the next hop. That's the agent-mode "narration" hook: inter-hop content like
+     * "Generating the references now…" / "Uploading the source video…" streams to
+     * Kokoro as it arrives, so the operator hears progress while tools are running. */
     messages.push(finalMsg);
     for (const c of calls) {
       const fname = c.function?.name;
       let args = c.function?.arguments;
       if (typeof args === "string") { try { args = JSON.parse(args); } catch { args = {}; } }
-      console.log(`[bridge] tool call (stream): ${fname}(${JSON.stringify(args).slice(0, 120)})`);
-      toolsThisQuery.push(fname);
+      /* Upgrade to agent lane if a multi-step tool fires. */
+      if (AGENTIC_TOOL_NAMES.has(fname) && hopCap < HOP_CAP_AGENT) {
+        hopCap = HOP_CAP_AGENT;
+        console.log(`[stream] agent lane engaged via ${fname} — hopCap raised to ${hopCap}`);
+      }
+      /* Per-tool budget — return a guard error after N calls of the same tool
+       * so a confused model doesn't burn the whole agent budget on one
+       * failing call. The error message tells the LLM what to do next. */
+      toolCallCounts[fname] = (toolCallCounts[fname] || 0) + 1;
       let result;
-      try { result = await executeTool(fname, args || {}); }
-      catch (e) { result = { error: String(e.message || e) }; }
+      if (toolCallCounts[fname] > TOOL_CALL_BUDGET_PER_TASK) {
+        console.log(`[stream] tool budget exceeded for ${fname} (${toolCallCounts[fname]} calls)`);
+        result = { ok: false, error: `Tool '${fname}' has been called ${toolCallCounts[fname]} times in this task — that's too many retries on the same call. Either pick a different tool, change the args meaningfully, or tell the operator what's blocking and stop.` };
+      } else {
+        console.log(`[bridge] tool call (stream): ${fname}(${JSON.stringify(args).slice(0, 120)})`);
+        toolsThisQuery.push(fname);
+        try { result = await executeTool(fname, args || {}); }
+        catch (e) { result = { error: String(e.message || e) }; }
+      }
       messages.push({
         role: "tool",
         content: JSON.stringify(result).slice(0, 8000),
@@ -2549,23 +4097,790 @@ SCOPE — DO NOT REFUSE GENERAL TASKS:
 }
 
 /* ---------- WEATHER (Open-Meteo, no API key needed) ---------- */
-async function getWeather(lat = CONFIG.operator.latitude, lon = CONFIG.operator.longitude) {
+
+/** Geocode a free-text place name → {name, country, lat, lon, timezone} or null. */
+async function geocodeLocation(name) {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=Europe/London&forecast_days=6`;
-    const res = await fetch(url);
-    const data = await res.json();
+    const r = await fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1`,
+      { signal: AbortSignal.timeout(4000) },
+    );
+    const j = await r.json();
+    const hit = (j.results || [])[0];
+    if (!hit) return null;
     return {
+      name: hit.name,
+      country: hit.country || hit.country_code || "",
+      lat: hit.latitude,
+      lon: hit.longitude,
+      timezone: hit.timezone || "auto",
+    };
+  } catch { return null; }
+}
+
+/**
+ * Fetch current conditions + daily forecast.
+ * Why timezone=auto: Open-Meteo's daily aggregates are bucketed by the LOCATION's local
+ * timezone. Hard-coding Europe/London (the old behaviour) returned UK-day buckets for
+ * Alicante etc., which is meaningless. `auto` lets the API pick the right tz from lat/lon.
+ * @param {number} [lat]
+ * @param {number} [lon]
+ * @param {number} [days] — forecast horizon, clamped 1..14 (Open-Meteo's free-tier ceiling).
+ */
+/* Weather cache. Open-Meteo is fast (~150-400ms) but we still cache by
+ * (lat,lon,days) for 10 minutes — weather doesn't meaningfully change
+ * faster than that, and the prewarm module keeps the operator's home
+ * key warm so the first call after boot is also instant. */
+const _weatherCache = new Map(); /* key → { stamp, value } */
+const WEATHER_TTL_MS = 10 * 60 * 1000;
+
+async function getWeather(lat = CONFIG.operator.latitude, lon = CONFIG.operator.longitude, days = 6, { force = false } = {}) {
+  const d = Math.max(1, Math.min(14, Math.floor(Number(days) || 6)));
+  const key = `${lat}|${lon}|${d}`;
+  if (!force) {
+    const hit = _weatherCache.get(key);
+    if (hit && (Date.now() - hit.stamp) < WEATHER_TTL_MS && !hit.value.error) {
+      return hit.value;
+    }
+  }
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum,wind_speed_10m_max&timezone=auto&forecast_days=${d}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const data = await res.json();
+    /* Skip index 0 (today) — `now` already covers today, forecast is forward-looking. */
+    const value = {
       now: { temp: Math.round(data.current.temperature_2m), code: data.current.weather_code },
-      forecast: data.daily.time.slice(1).map((d, i) => ({
-        date: d,
+      forecast: data.daily.time.slice(1).map((dt, i) => ({
+        date: dt,
         hi: Math.round(data.daily.temperature_2m_max[i + 1]),
         lo: Math.round(data.daily.temperature_2m_min[i + 1]),
         code: data.daily.weather_code[i + 1],
+        rain_mm: data.daily.precipitation_sum?.[i + 1] ?? null,
+        wind_kph: data.daily.wind_speed_10m_max?.[i + 1] ?? null,
       })),
     };
+    _weatherCache.set(key, { stamp: Date.now(), value });
+    return value;
   } catch (e) {
     return { error: e.message };
   }
+}
+
+/* ---------- TEASER PIPELINE (Sprint 13, fal.ai-backed) ---------- *
+ *
+ *  Three tools that compose into a voice-driven advert pipeline:
+ *
+ *    1. make_teaser_storyboard — LLM-only. Produces a 30s social-ad script
+ *       broken into 5s beats + a single hero-image prompt. Free.
+ *    2. generate_teaser_image — fal-ai/nano-banana/pro. Generates the hero
+ *       still from the prompt. Confirmation-gated (~$0.04).
+ *    3. animate_teaser_image — fal-ai/minimax/hailuo-02/standard. Animates
+ *       the still into a 5-10s clip. Confirmation-gated (~$0.30).
+ *
+ *  Output structure: output/teasers/<run_id>/{storyboard.md, hero.png, clip.mp4, meta.json}
+ *  run_id format: ISO timestamp with colons and dots replaced — sortable by date. */
+
+import { execFile as _execFile } from "node:child_process";
+
+/** Tiny wrapper around Ollama /api/chat for the storyboard step.
+ *  Forces JSON output mode so the structured shape is parseable. */
+async function _teaserLLM({ system, user, temperature = 0.5 }) {
+  const r = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: getModel(),
+      stream: false,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      options: { temperature },
+      format: "json",
+      keep_alive: "5m",
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!r.ok) throw new Error(`teaser LLM ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const j = await r.json();
+  return j.message?.content || "";
+}
+
+/** Triage a failing tool call — read the failing tool's schema, ask the
+ *  local LLM what to change, return suggested args. Distinct from the
+ *  safety-rephrase path (which targets a single text prompt field): this
+ *  handles arbitrary schema / format / enum errors across any tool by
+ *  reading the tool's parameter list. ~1-2s on local Ollama, $0 fal cost.
+ *
+ *  Why a tool rather than implicit retry: making this an explicit tool the
+ *  LLM can choose to call keeps the agency in Qwen's hands. It can decide
+ *  to triage AND retry, OR ask the operator first if the cost of being
+ *  wrong is high (e.g. it'd burn fal money on a bad guess). */
+async function triageFailedTool({ tool_name, args, error }) {
+  if (!tool_name) return { ok: false, error: "tool_name is required" };
+  if (!error) return { ok: false, error: "error is required (the message from the failing call)" };
+  const tool = (TOOLS || []).find((t) => t?.function?.name === tool_name);
+  if (!tool) return { ok: false, error: `unknown tool '${tool_name}'` };
+
+  /* Build a focused prompt: tool schema + the bad call + the error. Ask for
+   * a structured JSON response so the LLM's suggestion is directly usable. */
+  const schema = JSON.stringify(tool.function, null, 2);
+  const sys = "You are a tool-call repair assistant. Given a failing tool call (its schema, the args that were sent, and the error message), suggest CORRECTED ARGS that should make the call succeed. Output JSON ONLY with this shape:\n" +
+    "{ \"fixed_args\": { ...args... }, \"reasoning\": \"<one short sentence on what was wrong and how the fix addresses it>\", \"confidence\": \"high\"|\"medium\"|\"low\" }\n" +
+    "Rules:\n" +
+    "- Preserve every arg the LLM intentionally passed unless the error proves it's wrong.\n" +
+    "- For missing-required-field errors, add the field with a sensible default from the schema's description.\n" +
+    "- For wrong-enum-value errors, pick the closest matching enum value.\n" +
+    "- For format errors, fix the format (string→number, etc) keeping the operator's intent.\n" +
+    "- If the error suggests the underlying request will not work no matter what (auth failure, model unavailable, network), set confidence:'low' and reasoning to explain — do NOT invent arg fixes that won't help.\n" +
+    "- Do NOT add `confirmed: true` to fixed_args; the caller adds that on retry.";
+  const userMsg = `TOOL SCHEMA:\n${schema}\n\nORIGINAL ARGS:\n${JSON.stringify(args || {}, null, 2)}\n\nERROR:\n${String(error).slice(0, 600)}\n\nReturn the JSON repair object.`;
+
+  let raw;
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: getModel(),
+        stream: false,
+        messages: [{ role: "system", content: sys }, { role: "user", content: userMsg }],
+        options: { temperature: 0.2 },
+        format: "json",
+        keep_alive: "5m",
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!r.ok) throw new Error(`triage LLM ${r.status}`);
+    const j = await r.json();
+    raw = j.message?.content || "";
+  } catch (e) {
+    return { ok: false, error: `triage LLM call failed: ${e.message}` };
+  }
+
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { return { ok: false, error: `triage LLM returned non-JSON: ${e.message}`, raw: raw.slice(0, 300) }; }
+
+  if (!parsed?.fixed_args || typeof parsed.fixed_args !== "object") {
+    return { ok: false, error: "triage suggestion missing fixed_args object", raw: JSON.stringify(parsed).slice(0, 300) };
+  }
+  return {
+    ok: true,
+    suggestion: {
+      fixed_args: parsed.fixed_args,
+      reasoning: String(parsed.reasoning || "").slice(0, 300),
+      confidence: parsed.confidence === "high" ? "high" : parsed.confidence === "low" ? "low" : "medium",
+    },
+    next_step: "If confidence is 'high' or 'medium', re-call the original tool with these fixed_args plus confirmed:true. If 'low', tell the operator what's wrong and ask how to proceed — don't loop blindly.",
+  };
+}
+
+/** Rephrase an image-gen prompt to drop trademarks / celebrity names that
+ *  tripped fal's safety filter, preserving the visual intent. Used as the
+ *  rephrase callback for Fal.runImageWithSafetyRetry. ~1-2s on local Ollama,
+ *  ~zero direct cost. Plain text out (not JSON) so we don't need format:json. */
+async function _rephrasePromptForSafety(prompt) {
+  const system = "You are a prompt-safety editor. The image-generation model just rejected a prompt because it contains specific trademarks, celebrity names, copyrighted characters, or brand IP that the safety filter blocks. Rewrite the prompt to express the SAME visual intent through silhouette / style / colour / archetype descriptors instead of brand or proper-noun names. Keep ALL non-IP details verbatim (gender, age, ethnicity, pose, lighting, location, aesthetic). Examples of allowed swaps: 'Mickey Mouse' → 'classic vintage anthropomorphic cartoon mouse mascot with large round black ears and a round white face'; 'Nike Air Jordan 1' → 'high-top basketball sneakers in a red, black and white colourway'; 'Chicago Bulls #23 jersey' → 'red sleeveless basketball jersey with the bold white number 23'. Return ONLY the rewritten prompt as plain text — no preamble, no quotes, no code fences.";
+  const r = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: getModel(),
+      stream: false,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+      options: { temperature: 0.3 },
+      keep_alive: "5m",
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!r.ok) throw new Error(`safety-rephrase LLM ${r.status}`);
+  const j = await r.json();
+  return (j.message?.content || "").trim();
+}
+
+/** Build a fresh run_id (URL-safe, sortable, also valid as a filename). */
+function _newRunId() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+/** Resolve the per-run output directory; create on demand. */
+async function _teaserDir(runId) {
+  const fsp = await import("node:fs/promises");
+  const path2 = await import("node:path");
+  const dir = path2.join(Paths.getOutputDir(), "teasers", runId);
+  await fsp.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+/** Validate aspect_ratio string against nano-banana-pro's accepted set.
+ *  Confirmed against production usage in AI-Custom-Cards (the operator's other
+ *  product that uses this model in production). nano-banana-pro takes a literal
+ *  aspect_ratio string ("9:16", "1:1") rather than the named enum that some
+ *  fal models use (portrait_16_9, square_hd, etc). */
+function _aspectRatio(aspect) {
+  const valid = new Set(["9:16", "16:9", "1:1", "4:5", "3:4", "21:9"]);
+  return valid.has(aspect) ? aspect : "9:16";
+}
+
+/** Open a file in macOS's default viewer. Uses execFile (no shell) so the
+ *  path argument can't trigger shell-injection even with special chars. */
+function _openLocal(p) {
+  try { _execFile("open", [p], () => {}); } catch {}
+}
+
+/** Step 1 — storyboard. LLM-only, no fal call. */
+async function makeTeaserStoryboard({ product, influencer, duration_s = 15, platform = "tiktok", tone = "" }) {
+  if (!product) return { ok: false, error: "product is required" };
+  if (!influencer) return { ok: false, error: "influencer is required" };
+  /* Why: previous code floored to 15s (3 beats × 5s) which silently turned
+   * a "make me a 5-second teaser" request into a 15s storyboard. Now we
+   * scale the beat structure to fit the asked duration: ≤5s = 1 beat,
+   * ≤10s = 2 beats, otherwise ~5s per beat with a 3-beat minimum so longer
+   * ads still get proper structure. Cap kept at 120s to stop runaway prompts. */
+  /* Default 15s if upstream didn't pass anything (TikTok's default short-form
+   * length and the cap most image-to-video models honour). Cap at 120s so a
+   * misheard "two minutes" doesn't burn an entire LLM context on a 240s
+   * storyboard. Floor at 3s — anything shorter isn't a coherent ad beat. */
+  const dur = Math.max(3, Math.min(120, Number(duration_s) || 15));
+  let beatCount, beatLen;
+  if (dur <= 5) { beatCount = 1; beatLen = dur; }
+  else if (dur <= 10) { beatCount = 2; beatLen = Math.ceil(dur / 2); }
+  else { beatCount = Math.max(3, Math.round(dur / 5)); beatLen = Math.round(dur / beatCount); }
+  /* Pre-render the example time codes so the LLM sees concrete boundaries
+   * matching beatLen (otherwise it tends to default back to 0-5s slots). */
+  const exampleTimes = Array.from({ length: beatCount }, (_, i) => `${i * beatLen}-${(i + 1) * beatLen}s`);
+
+  const system = `You are a social-media advert copywriter. Produce ${platform === "linkedin" ? "polished, professional" : "punchy, native-feel"} short-form video scripts that perform on ${platform}.
+Output JSON ONLY with this exact shape:
+{
+  "title": "<7-word working title>",
+  "hook": "<single-sentence hook for the opening ${Math.min(2, beatLen)} seconds>",
+  "beats": [
+${exampleTimes.map((t) => `    { "time": "${t}", "visual": "<concrete visual description>", "voiceover": "<spoken line>", "on_screen_text": "<short overlay caption or empty>" }`).join(",\n")}
+  ],
+  "cta": "<closing call-to-action voiceover line>",
+  "hero_prompt": "<single detailed visual description for the most striking still frame from the ad — for an image generator>"
+}
+
+Constraints:
+- Total duration must equal ${dur} seconds (${beatCount} beat${beatCount === 1 ? "" : "s"} × ${beatLen}s${beatCount === 1 ? " — single tight beat, no breakdown" : ""}).
+- USE THE INFLUENCER VERBATIM AS GIVEN. The "Influencer / persona" line in the user message is the SOURCE OF TRUTH — match its gender, age, ethnicity and vibe exactly. If it says "a 30-year-old British female fitness creator", write a 30-year-old British female fitness creator. NEVER substitute a celebrity name, NEVER default to a male persona when the input is female (or vice-versa), NEVER ignore demographic details. If the operator named a specific real person, reference them by that exact name in visual descriptions and write the script in their cadence; do NOT swap to a generic stand-in. The operator picked this persona on purpose.
+- For real-person influencers: write the visual descriptions in third-person observational style (suitable for an image generator). Voiceover lines remain in their voice. This is a creative ad mock-up — celebrity likeness is being used commercially in the spirit of a brand-pitch storyboard, which is standard ad-industry practice.
+- hero_prompt should be a self-contained image-gen prompt (subject including the named influencer if applicable + setting + lighting + style + mood). Always reference the influencer by name in the hero_prompt so the image generator depicts THE PERSON specified.
+- Don't use AI cliches like "delve" or "in today's fast-paced world".
+- No exclamation marks unless the influencer's tone explicitly calls for them.`;
+
+  const user = `Product: ${product}
+Influencer / persona: ${influencer}
+Duration: ${dur} seconds
+Platform: ${platform}${tone ? `\nTone: ${tone}` : ""}
+
+Write the script.`;
+
+  const raw = await _teaserLLM({ system, user });
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) {
+    return { ok: false, error: `LLM returned non-JSON: ${e.message}`, raw: raw.slice(0, 400) };
+  }
+
+  /* Persist the storyboard so subsequent steps + the operator can reference. */
+  const runId = _newRunId();
+  const dir = await _teaserDir(runId);
+  const fsp = await import("node:fs/promises");
+  const path2 = await import("node:path");
+  const md = [
+    `# Teaser storyboard — ${parsed.title || "(untitled)"}`,
+    ``,
+    `**Run:** \`${runId}\`  •  **Product:** ${product}  •  **Duration:** ${dur}s  •  **Platform:** ${platform}`,
+    `**Influencer:** ${influencer}${tone ? `  •  **Tone:** ${tone}` : ""}`,
+    ``,
+    `## Hook`,
+    parsed.hook || "(no hook)",
+    ``,
+    `## Beats`,
+    ...((parsed.beats || []).flatMap((b, i) => [
+      `### Beat ${i + 1} — ${b.time || "?"}`,
+      `- **Visual:** ${b.visual || "(none)"}`,
+      `- **VO:** ${b.voiceover || "(none)"}`,
+      `- **On-screen:** ${b.on_screen_text || "(none)"}`,
+      ``,
+    ])),
+    `## CTA`,
+    parsed.cta || "(no CTA)",
+    ``,
+    `## Hero image prompt`,
+    parsed.hero_prompt || "(no hero prompt)",
+    ``,
+  ].join("\n");
+  await fsp.writeFile(path2.join(dir, "storyboard.md"), md);
+  await fsp.writeFile(path2.join(dir, "meta.json"), JSON.stringify({
+    run_id: runId, product, influencer, duration_s: dur, platform, tone,
+    storyboard: parsed,
+  }, null, 2));
+
+  const spoken = [
+    parsed.hook,
+    ...(parsed.beats || []).map((b) => b.voiceover).filter(Boolean),
+    parsed.cta,
+  ].filter(Boolean).join(" ");
+
+  return {
+    ok: true,
+    run_id: runId,
+    title: parsed.title,
+    duration_s: dur,
+    platform,
+    spoken,
+    storyboard: parsed,
+    hero_prompt: parsed.hero_prompt,
+    folder: dir,
+    next_step: "Ask the operator if they want to generate the hero image. If yes, call generate_teaser_image with the hero_prompt and run_id from this response.",
+  };
+}
+
+/** Step 2 — image gen via fal.ai nano-banana/pro. Confirmation-gated.
+ *  When `influencer` is set, switches to nano-banana-pro/edit and uses
+ *  the locked influencer's canonical.png as a character reference so the
+ *  hero shot features that specific face — same person across every piece
+ *  of content from that channel. Without `influencer`, falls back to
+ *  text-only nano-banana-pro (different face each call). */
+async function generateTeaserImage({ prompt, aspect = "9:16", style = "", influencer = null, run_id = null, confirmed = false }) {
+  if (!Fal.isConfigured()) return { ok: false, error: "FAL_KEY not configured. Add FAL_KEY=<key> to .env and restart the bridge." };
+  if (!prompt) return { ok: false, error: "prompt is required" };
+
+  const finalPrompt = style ? `${prompt}. ${style}` : prompt;
+  const runId = run_id || _newRunId();
+  const dir = await _teaserDir(runId);
+  const path2 = await import("node:path");
+
+  /* Resolve influencer slug → canonical.png URL. If the slug exists but
+   * isn't locked yet (no canonical), fail with an instructive error so
+   * the operator knows to lock first. If it doesn't exist at all, also
+   * fail rather than silently fall back to text-only — operator named
+   * a specific person and getting "generic Marcus" instead of "your Marcus"
+   * is exactly the bug this whole feature exists to fix. */
+  let characterUrl = null;
+  let influencerName = null;
+  if (influencer) {
+    const inf = await Influencers.get(influencer);
+    if (!inf) return { ok: false, error: `No influencer found at slug '${influencer}'. Create one with create_influencer first.`, run_id: runId };
+    if (!inf.canonical) return { ok: false, error: `Influencer '${influencer}' has not been locked yet — call lock_influencer with a ref_idx first so the canonical face is set.`, run_id: runId };
+    influencerName = inf.persona?.name || inf.slug;
+    try {
+      characterUrl = await Fal.upload(inf.canonical, { contentType: "image/png" });
+    } catch (e) {
+      return { ok: false, error: `fal-storage upload of canonical face failed: ${e.message}`, run_id: runId };
+    }
+  }
+
+  const t0 = Date.now();
+  let result;
+  let retried = false;
+  let originalPrompt = null;
+  let saferPrompt = null;
+  try {
+    /* Two endpoints depending on whether we're conditioning on a face:
+     *   - influencer set → fal-ai/nano-banana-pro/edit (image_urls + prompt)
+     *     Same Google Gemini 3 Pro Image backbone, supports character +
+     *     scene composition by passing the canonical face as a reference.
+     *   - influencer not set → fal-ai/nano-banana-pro (text-only)
+     *
+     * Both wrapped with runImageWithSafetyRetry so an IP/celebrity safety
+     * reject triggers an automatic prompt rewrite + one retry. */
+    const baseInput = {
+      prompt: finalPrompt,
+      aspect_ratio: _aspectRatio(aspect),
+      num_images: 1,
+      resolution: "1K",
+      safety_tolerance: "6",
+    };
+    const modelId = characterUrl ? "fal-ai/nano-banana-pro/edit" : "fal-ai/nano-banana-pro";
+    const input = characterUrl
+      ? { ...baseInput, image_urls: [characterUrl] }
+      : { ...baseInput, enable_websearch: true };
+    const wrapped = await Fal.runImageWithSafetyRetry(modelId, input, { timeoutMs: 90_000, rephrase: _rephrasePromptForSafety });
+    result = wrapped.result;
+    retried = wrapped.retried;
+    originalPrompt = wrapped.originalPrompt || null;
+    saferPrompt = wrapped.saferPrompt || null;
+  } catch (e) {
+    const which = characterUrl ? "nano-banana-pro/edit" : "nano-banana-pro";
+    return { ok: false, error: `fal ${which} failed: ${e.message}`, run_id: runId };
+  }
+  const elapsed = Date.now() - t0;
+
+  /* fal returns { images: [{ url, content_type, ... }], ... }; some models
+   * use `image` (singular) — handle both. */
+  const imgUrl = result?.images?.[0]?.url || result?.image?.url || null;
+  if (!imgUrl) {
+    return { ok: false, error: "fal returned no image URL", raw: JSON.stringify(result).slice(0, 400), run_id: runId };
+  }
+
+  const imgPath = path2.join(dir, "hero.png");
+  await Fal.download(imgUrl, imgPath);
+
+  broadcastToClients({
+    type: "teaser.image_ready",
+    data: { run_id: runId, imagePath: imgPath, prompt: finalPrompt, aspect, elapsed_ms: elapsed, influencer: influencer || null },
+  });
+  _openLocal(imgPath);
+
+  /* Compose the next-step hint conditional on what just happened — covers
+   * the safety-rephrase + influencer-conditioned cases without spamming
+   * boilerplate when neither applies. */
+  let nextStep;
+  if (retried) {
+    nextStep = "Image generated with an auto-rephrased prompt (the original tripped the safety filter on a brand or celebrity name). Tell the operator briefly that you adjusted the wording, then ask if they want to animate or regenerate.";
+  } else if (influencerName) {
+    nextStep = `Image generated using ${influencerName}'s locked face — that's their canonical character now in the scene. Ask the operator if they want to animate this clip or regenerate with a different prompt.`;
+  } else {
+    nextStep = "Ask the operator if they want to animate this image into a video, or if they'd like to regenerate with a refined prompt.";
+  }
+
+  return {
+    ok: true,
+    run_id: runId,
+    imagePath: imgPath,
+    prompt: retried ? saferPrompt : finalPrompt,
+    aspect,
+    influencer: influencer || null,
+    influencer_name: influencerName,
+    elapsed_ms: elapsed,
+    fal_request_id: result?.request_id || null,
+    safety_rephrase: retried ? { original: originalPrompt, used: saferPrompt } : null,
+    next_step: nextStep,
+  };
+}
+
+/** Step 3 — image-to-video via fal.ai Hailuo. Confirmation-gated. */
+async function animateTeaserImage({ run_id, motion_prompt, duration_s = 5, confirmed = false }) {
+  if (!Fal.isConfigured()) return { ok: false, error: "FAL_KEY not configured. Add FAL_KEY=<key> to .env and restart the bridge." };
+  if (!run_id) return { ok: false, error: "run_id is required (returned by generate_teaser_image)" };
+  if (!motion_prompt) return { ok: false, error: "motion_prompt is required (e.g. 'camera pushes in slowly')" };
+
+  const path2 = await import("node:path");
+  const dir = path2.join(Paths.getOutputDir(), "teasers", run_id);
+  const imgPath = path2.join(dir, "hero.png");
+  const fsp = await import("node:fs/promises");
+  let imgBytes;
+  try { imgBytes = await fsp.readFile(imgPath); }
+  catch { return { ok: false, error: `hero.png not found in ${dir}. Generate the image first via generate_teaser_image.` }; }
+
+  /* Send image as base64 data URI — happy-horse accepts that as image_url
+   * and we skip the fal-storage upload round-trip. ~1.4MB image → ~1.9MB
+   * request body, well under any sensible request cap. */
+  const dataUri = `data:image/png;base64,${imgBytes.toString("base64")}`;
+  /* happy-horse duration: hard cap 15 seconds (operator-confirmed), floor
+   * 5 seconds. Default 5 because the teaser flow is "show me a snippet"
+   * not "render the whole ad" — operator has to explicitly ask for longer. */
+  const dur = Math.max(5, Math.min(15, Math.round(duration_s)));
+
+  const t0 = Date.now();
+  let result;
+  try {
+    /* Model: https://fal.ai/models/alibaba/happy-horse/image-to-video
+     * Input shape verified against the operator's AI-Custom-Cards
+     * test-video-models.ts production code:
+     *   - duration is numeric (NOT "5s" string)
+     *   - resolution defaults to 1080p ($0.28/s) — pin to 720p ($0.14/s)
+     *     for parity with the Card Genie production cost model unless the
+     *     operator explicitly wants 1080p. */
+    const job = await Fal.submit("alibaba/happy-horse/image-to-video", {
+      prompt: motion_prompt,
+      image_url: dataUri,
+      duration: dur,
+      resolution: "720p",
+    });
+    /* Poll every 3s, max 60 attempts (3 minutes). Hailuo standard typically
+     * finishes within 60-90s; the headroom catches occasional queue spikes. */
+    result = await job.poll(3000, 60);
+  } catch (e) {
+    return { ok: false, error: `fal Hailuo failed: ${e.message}`, run_id };
+  }
+  const elapsed = Date.now() - t0;
+
+  const vidUrl = result?.video?.url || result?.videos?.[0]?.url || null;
+  if (!vidUrl) {
+    return { ok: false, error: "fal returned no video URL", raw: JSON.stringify(result).slice(0, 400), run_id };
+  }
+
+  const vidPath = path2.join(dir, "clip.mp4");
+  await Fal.download(vidUrl, vidPath);
+
+  broadcastToClients({
+    type: "teaser.video_ready",
+    data: { run_id, videoPath: vidPath, motion_prompt, duration_s: dur, elapsed_ms: elapsed },
+  });
+  _openLocal(vidPath);
+
+  return {
+    ok: true,
+    run_id,
+    videoPath: vidPath,
+    motion_prompt,
+    duration_s: dur,
+    elapsed_ms: elapsed,
+    fal_request_id: result?.request_id || null,
+    next_step: "Video saved + opened in Preview/QuickTime. The full teaser is in " + dir,
+  };
+}
+
+/* ─────────────────────────── INFLUENCER PIPELINE ───────────────────────────
+ *
+ *  create_influencer  →  lock_influencer  →  recreate_video_with_influencer
+ *
+ *  These wrap the Influencers module + VideoDownload + a Kling Motion Control
+ *  fal call, plus a HUD-modal coordination protocol for the recreation flow's
+ *  source-video step (URL paste OR local file drop). The modal handshake uses
+ *  WebSocket events on top of the existing broadcastToClients channel, with
+ *  a pending-request map keyed by an opaque request_id so the operator can
+ *  cancel a stuck modal without leaking promises.
+ */
+
+/** Tool wrapper around Influencers.create — adds the broadcast that pops the
+ *  HUD picker modal and the local-Preview opens so the operator can pick a
+ *  reference via either path (per the build decision). */
+async function createInfluencerTool(args) {
+  /* Pass the safety-rephrase callback so an IP/brand-name reject triggers
+   * an auto-rewrite + retry instead of failing the influencer-create flow. */
+  const result = await Influencers.create({ ...(args || {}), rephrase: _rephrasePromptForSafety });
+  if (!result?.ok) return result;
+
+  /* Open every reference in macOS Preview so the operator can click-through
+   * the photos with arrow keys. The HUD modal also gets a copy via the
+   * broadcast below — both surfaces stay in sync because they both read
+   * the same files on disk. */
+  for (const ref of result.refs || []) _openLocal(ref.path);
+
+  /* HUD picker modal payload. file:// URIs let the modal render the PNGs
+   * via standard <img src> without a static-file route. */
+  broadcastToClients({
+    type: "influencer.refs_ready",
+    data: {
+      slug: result.slug,
+      name: result.persona?.name || result.slug,
+      refs: (result.refs || []).map((r) => ({ idx: r.idx, path: r.path, fileUri: `file://${r.path}` })),
+    },
+  });
+
+  return {
+    ok: true,
+    slug: result.slug,
+    refs: (result.refs || []).map((r) => ({ idx: r.idx, path: r.path })),
+    next_step: result.next_step,
+    spoken: `${result.refs?.length || 0} references ready for ${result.persona?.name || result.slug}. Which one shall I lock — one, two${(result.refs?.length || 0) >= 3 ? ", or three" : ""}?`,
+  };
+}
+
+/** Tool wrapper around Influencers.lock — fires a broadcast so the HUD can
+ *  dismiss the picker modal and update any "active influencer" pill. */
+async function lockInfluencerTool(args) {
+  const result = await Influencers.lock(args || {});
+  if (!result?.ok) return result;
+  broadcastToClients({
+    type: "influencer.locked",
+    data: {
+      slug: result.slug,
+      canonical: result.canonical,
+      canonicalFileUri: `file://${result.canonical}`,
+      name: result.persona?.name || result.slug,
+    },
+  });
+  return {
+    ok: true,
+    slug: result.slug,
+    canonical: result.canonical,
+    next_step: `Locked. ${result.persona?.name || result.slug} is ready to use — say 'recreate this <platform> video using ${result.persona?.name || result.slug}' to drive their face with a reference clip.`,
+  };
+}
+
+/* ---------- HUD modal coordination for source-video paste/drop ---------- *
+ * recreate_video_with_influencer can be called without a source. When it is,
+ * the bridge opens a HUD modal asking the operator for a URL or local file,
+ * then waits up to 5 minutes for them to respond. The operator's response
+ * arrives as a WS message ({ type: "influencer.source_provided", data: {…} })
+ * which resolves a pending Promise stored here. */
+const _pendingSourceRequests = new Map(); /* request_id → { resolve, reject, timer } */
+const SOURCE_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Open the HUD modal and wait for the operator to provide a video source.
+ *  Resolves with { source_url? , source_local_path? } or rejects on timeout
+ *  / explicit cancel. */
+function _requestSourceFromHud({ slug, influencerName }) {
+  return new Promise((resolve, reject) => {
+    const requestId = `srcreq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const timer = setTimeout(() => {
+      _pendingSourceRequests.delete(requestId);
+      broadcastToClients({ type: "influencer.source_request_cancelled", data: { request_id: requestId, reason: "timeout" } });
+      reject(new Error(`Operator did not provide a source video within ${SOURCE_REQUEST_TIMEOUT_MS / 60000} minutes.`));
+    }, SOURCE_REQUEST_TIMEOUT_MS);
+    _pendingSourceRequests.set(requestId, { resolve, reject, timer });
+    broadcastToClients({
+      type: "influencer.source_requested",
+      data: { request_id: requestId, slug, influencerName, timeoutMs: SOURCE_REQUEST_TIMEOUT_MS },
+    });
+  });
+}
+
+/** Called by the WebSocket handler when the HUD posts back the source.
+ *  Public so it can be reached from the WS message dispatcher. */
+export function resolvePendingSourceRequest({ request_id, source_url, source_local_path, cancelled }) {
+  const pending = _pendingSourceRequests.get(request_id);
+  if (!pending) return false;
+  _pendingSourceRequests.delete(request_id);
+  clearTimeout(pending.timer);
+  if (cancelled) {
+    pending.reject(new Error("Operator cancelled the source request."));
+    return true;
+  }
+  pending.resolve({ source_url: source_url || null, source_local_path: source_local_path || null });
+  return true;
+}
+
+/** Generate a unique recreation run id (mirrors _newRunId for teasers). */
+function _newRecreationId() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+/** Step 3 of the influencer pipeline — drives the canonical face with a
+ *  reference video via fal.ai's Kling Motion Control v3 Pro. Confirmation-
+ *  gated. Handles the no-source case by opening the HUD modal and waiting
+ *  for the operator to paste a URL or drop a local file. */
+async function recreateVideoWithInfluencer({ slug, source_url = null, source_local_path = null, prompt = "", character_orientation = "video", confirmed = false }) {
+  if (!Fal.isConfigured()) return { ok: false, error: "FAL_KEY not configured. Add FAL_KEY=<key> to .env and restart the bridge." };
+  if (!slug) return { ok: false, error: "slug is required (the locked influencer to use)" };
+
+  const inf = await Influencers.get(slug);
+  if (!inf) return { ok: false, error: `No influencer found for slug '${slug}'. Create one with create_influencer first.` };
+  if (!inf.canonical) return { ok: false, error: `Influencer '${slug}' has not been locked yet. Call lock_influencer with a ref_idx to set their canonical face.` };
+
+  /* If the operator didn't provide a source, ask the HUD for one. We do
+   * this AFTER the confirmation gate (which the framework already handled
+   * before reaching us when confirmed:true) but BEFORE the fal call so we
+   * never spend money on an incomplete request. */
+  if (!source_url && !source_local_path) {
+    try {
+      const provided = await _requestSourceFromHud({ slug: inf.slug, influencerName: inf.persona?.name || inf.slug });
+      source_url = provided.source_url;
+      source_local_path = provided.source_local_path;
+    } catch (e) {
+      return { ok: false, error: e.message, slug };
+    }
+    if (!source_url && !source_local_path) {
+      return { ok: false, error: "No source video provided.", slug };
+    }
+  }
+
+  const runId = _newRecreationId();
+  const path2 = await import("node:path");
+  const fsp = await import("node:fs/promises");
+  const dir = path2.join(Paths.getOutputDir(), "recreations", runId);
+  await fsp.mkdir(dir, { recursive: true });
+
+  /* Resolve the source: if a URL, download via yt-dlp; otherwise copy the
+   * local path into the run dir so the run is self-contained. */
+  let sourcePath;
+  if (source_local_path) {
+    sourcePath = path2.join(dir, "source.mp4");
+    try { await fsp.copyFile(source_local_path, sourcePath); }
+    catch (e) { return { ok: false, error: `Could not read local source: ${e.message}`, slug, run_id: runId }; }
+  } else {
+    if (!VideoDownload.looksDownloadable(source_url)) {
+      return { ok: false, error: `'${source_url}' doesn't look like a downloadable video URL.`, slug, run_id: runId };
+    }
+    sourcePath = path2.join(dir, "source.mp4");
+    try { await VideoDownload.download(source_url, sourcePath); }
+    catch (e) { return { ok: false, error: e.message, slug, run_id: runId }; }
+  }
+
+  /* Upload character image + source video to fal-storage so Kling can fetch
+   * them via hosted URLs. Earlier iterations passed data URIs for both —
+   * worked for the image (small) but Kling Motion Control returned 422 on
+   * the video data URI in practice (despite being documented as accepted).
+   * Hosted URLs are the reliable path. Fal.upload handles initiate + PUT. */
+  let charUrl, srcUrl;
+  try {
+    [charUrl, srcUrl] = await Promise.all([
+      Fal.upload(inf.canonical, { contentType: "image/png" }),
+      Fal.upload(sourcePath,    { contentType: "video/mp4" }),
+    ]);
+  } catch (e) {
+    return { ok: false, error: `fal-storage upload failed: ${e.message}`, slug, run_id: runId };
+  }
+
+  const srcStat = await fsp.stat(sourcePath);
+  broadcastToClients({
+    type: "influencer.recreation_started",
+    data: { run_id: runId, slug: inf.slug, sourcePath, sourceBytes: srcStat.size },
+  });
+
+  const t0 = Date.now();
+  let result;
+  try {
+    /* Model: https://fal.ai/models/fal-ai/kling-video/v3/pro/motion-control
+     * Required inputs: image_url, video_url, character_orientation.
+     *   character_orientation: "image" (max 10s, follows image; camera-move use case)
+     *                       OR "video" (max 30s, follows video; body-motion / dance use case)
+     * Default to "video" because the operator's primary use case is recreating
+     * TikTok dance / motion clips with the influencer's face — body-motion driven,
+     * which the docs explicitly recommend "video" for. Operators who want a
+     * camera-move replication can override via args. Optional: prompt. */
+    const job = await Fal.submit("fal-ai/kling-video/v3/pro/motion-control", {
+      image_url: charUrl,
+      video_url: srcUrl,
+      character_orientation: character_orientation === "image" ? "image" : "video",
+      prompt: prompt || "",
+    });
+    /* Kling typically completes in 60-180s for short clips. 5s poll, 80
+     * attempts = 6m40s ceiling — generous to cover queue spikes without
+     * wedging the bridge thread on a stuck job. */
+    result = await job.poll(5000, 80);
+  } catch (e) {
+    return { ok: false, error: `Kling Motion Control failed: ${e.message}`, slug, run_id: runId };
+  }
+  const elapsed = Date.now() - t0;
+
+  const outUrl = result?.video?.url || result?.videos?.[0]?.url || null;
+  if (!outUrl) {
+    return { ok: false, error: "Kling returned no video URL", raw: JSON.stringify(result).slice(0, 400), slug, run_id: runId };
+  }
+  const outPath = path2.join(dir, "output.mp4");
+  await Fal.download(outUrl, outPath);
+
+  /* Persist a meta record so the operator can find the run later via the
+   * HUD's recreations list (and so we have a paper trail of which source
+   * + which influencer produced which output). */
+  await fsp.writeFile(path2.join(dir, "meta.json"), JSON.stringify({
+    run_id: runId,
+    slug: inf.slug,
+    influencer_name: inf.persona?.name || inf.slug,
+    source_url: source_url || null,
+    source_local_path: source_local_path || null,
+    prompt,
+    elapsed_ms: elapsed,
+    fal_request_id: result?.request_id || null,
+    created_at: new Date().toISOString(),
+  }, null, 2));
+
+  broadcastToClients({
+    type: "influencer.recreation_ready",
+    data: { run_id: runId, slug: inf.slug, outputPath: outPath, elapsed_ms: elapsed },
+  });
+  _openLocal(outPath);
+
+  return {
+    ok: true,
+    slug: inf.slug,
+    run_id: runId,
+    outputPath: outPath,
+    elapsed_ms: elapsed,
+    fal_request_id: result?.request_id || null,
+    next_step: `Recreation done — ${path2.basename(outPath)} is open in QuickTime. Saved to ${dir}.`,
+  };
 }
 
 /* ---------- WEBSOCKET SERVER ---------- */
@@ -2577,6 +4892,28 @@ import path from "node:path";
  * Re-imports from the same module are idempotent, so no second declaration here. */
 
 const httpServer = createServer(async (req, res) => {
+  /* Sprint 12 — access log. Every request emits one line at end-of-response
+   * with: method, URL, status, response time, remote port (differentiates
+   * per-tab connections), and a CACHE tag for /diary + /healthz so we can
+   * see hit/miss/coalesce at a glance. Filter via:
+   *   tail -f /tmp/jarvis-bridge.log | grep "\[http\]"
+   * Skipped: noisy /perf POSTs and /log relay (HUD's own debug channel).
+   *
+   * The remote port is the strongest "which tab" signal we have without
+   * cookies — Chrome opens distinct TCP connections per tab for HTTP/1.1
+   * requests, so two tabs polling the same endpoint show different ports. */
+  const _httpStart = Date.now();
+  const _remotePort = req.socket?.remotePort || 0;
+  const _origUrl = req.url || "";
+  const _logIfNoisy = !["/perf", "/log"].some((p) => _origUrl.startsWith(p));
+  res.on("finish", () => {
+    if (!_logIfNoisy) return;
+    const dur = Date.now() - _httpStart;
+    /* Highlight slow requests (>500ms) so they pop visually when scanning. */
+    const tag = dur > 1000 ? "SLOW " : dur > 500 ? "warn " : "     ";
+    console.log(`[http] ${tag}${req.method} ${_origUrl.padEnd(40)} ${res.statusCode} ${dur}ms  port=${_remotePort}`);
+  });
+
   // CORS for everything — HUD on :8765 talks to bridge on :8766
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -2595,6 +4932,434 @@ const httpServer = createServer(async (req, res) => {
       } catch { console.log(`[hud] raw: ${body}`); }
       res.writeHead(204); res.end();
     });
+    return;
+  }
+
+  /* Voice-pipeline performance marks — voice.js posts a summary after each
+   * cycle. Bridge keeps a rolling 50-entry buffer so /health/timings can
+   * compute median + p95 per stage AND persists each row to a per-day
+   * session log under data/audit/sessions/ for /health/sessions
+   * aggregation + the diagnostic ZIP exporter. */
+  if (req.url === "/perf" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => body += c);
+    req.on("end", () => {
+      try {
+        const j = JSON.parse(body);
+        _perfBuffer.push(j);
+        if (_perfBuffer.length > 50) _perfBuffer.shift();
+        /* Persist a sanitised row to the daily session log. Best-effort —
+         * filesystem errors are swallowed so a write failure can't take
+         * down the voice loop. Privacy: ONLY the spans + truncated heard
+         * text are persisted, never tool args / LLM replies / sensitive
+         * info. The diagnostic exporter is the only path that ever sends
+         * these rows off-device. */
+        Sessions.recordTurn({
+          ts: j.ts,
+          heard: j.heard,
+          voiceToWhisperMs: j.spans?.voice_to_whisper,
+          whisperInferenceMs: j.spans?.whisper_inference,
+          voiceToAudioMs: j.spans?.voice_to_audio,
+        });
+      } catch {}
+      res.writeHead(204); res.end();
+    });
+    return;
+  }
+  /* GET /health/sessions — last 7 days of per-day session aggregates.
+   * Used by the settings panel debug view + diagnostic snapshot. */
+  if (req.url?.startsWith("/health/sessions") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    const days = Math.max(1, Math.min(30, Number(url.searchParams.get("days")) || 7));
+    const summary = await Sessions.getDailySummary({ days });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, days, summary }));
+    return;
+  }
+  /* POST /tool-dispatch — fire a tool by name without going through the LLM.
+   * Used by HUD click handlers (inbox row click → act_on_inbox_item open)
+   * where the operator's intent is already explicit and an LLM round-trip
+   * would just add latency. Allowlisted to NON-DESTRUCTIVE tools so a
+   * stray POST can't draft an email or place a purchase without the voice
+   * confirmation gate. */
+  if (req.url === "/tool-dispatch" && req.method === "POST") {
+    const SAFE_TOOLS = new Set(["act_on_inbox_item", "smart_inbox_briefing", "list_reminders", "workspace_insights"]);
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      const name = String(parsed.name || "");
+      if (!SAFE_TOOLS.has(name)) {
+        res.writeHead(403, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: `tool "${name}" not in HUD-click allowlist` }));
+        return;
+      }
+      const result = await executeTool(name, parsed.args || {});
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (e) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
+    return;
+  }
+  /* GET /inbox — Smart Inbox aggregate for the HUD panel. Returns the
+   * normalised item list + source counts. The HUD polls every ~5min;
+   * the briefing tool fires its own (cached) aggregate when the
+   * operator asks for triage. */
+  if (req.url?.startsWith("/inbox") && req.method === "GET") {
+    /* Sprint 12 — hard timeout + cache + in-flight dedup. Inbox aggregator
+     * fans out to Mail/Calendar/Reminders via AppleScript; one of those
+     * occasionally hangs for 120s when macOS Mail is mid-sync or a privacy
+     * prompt is pending. That used to park a connection slot for the whole
+     * 120s, cascading into other endpoints. Now: 8s hard timeout, fall back
+     * to stale cache body on timeout, 60s TTL on success cache. */
+    const url = new URL(req.url, "http://localhost");
+    const force = url.searchParams.get("force") === "1";
+    const NOW = Date.now();
+    if (!force && _inboxCache && (NOW - _inboxCache.ts) < 60_000) {
+      console.log(`[cache] inbox HIT (age=${NOW - _inboxCache.ts}ms)`);
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(_inboxCache.body);
+      return;
+    }
+    if (!_inboxInFlight) {
+      console.log(`[cache] inbox MISS — starting Inbox.aggregate (8s cap)`);
+      const _t = Date.now();
+      _inboxInFlight = Promise.race([
+        Inbox.aggregate({ days: 1, mailMax: 15, force }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("inbox timeout 8s")), SLOW_TIMEOUT_MS)),
+      ]).finally(() => {
+        console.log(`[cache] inbox fanout finished in ${Date.now() - _t}ms`);
+        _inboxInFlight = null;
+      });
+    } else {
+      console.log(`[cache] inbox COALESCE — joining in-flight`);
+    }
+    try {
+      const result = await _inboxInFlight;
+      const body = JSON.stringify({ ok: true, ...result });
+      _inboxCache = { ts: Date.now(), body };
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(body);
+    } catch (e) {
+      /* Timeout or aggregate threw — serve stale cache if any, else empty. */
+      if (_inboxCache) {
+        console.warn(`[cache] inbox FAIL (${e.message}) — serving stale cache`);
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(_inboxCache.body);
+      } else {
+        console.warn(`[cache] inbox FAIL (${e.message}) — no cache, returning empty`);
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ ok: false, error: String(e.message), items: [], counts: {} }));
+      }
+    }
+    return;
+  }
+  /* GET /workspaces/<slug>/insights — per-workspace stats for the switcher
+   * modal's expand-row affordance. Cheap (six COUNT queries on indexed
+   * workspace_id columns). */
+  {
+    const m = req.url?.match(/^\/workspaces\/([a-z][a-z0-9-]{1,40})\/insights$/);
+    if (m && req.method === "GET") {
+      const insights = Workspaces.insights(m[1]);
+      if (!insights) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: `workspace "${m[1]}" not found` }));
+      } else {
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ ok: true, ...insights }));
+      }
+      return;
+    }
+  }
+  /* PATCH /workspaces/<slug> — update workspace fields in place (handbook,
+   * description, voice, etc). Used by the in-HUD handbook editor + future
+   * settings flows that don't go through the voice layer. Body is the
+   * subset of editable fields; the bridge merges with the existing row. */
+  {
+    const m = req.url?.match(/^\/workspaces\/([a-z][a-z0-9-]{1,40})$/);
+    if (m && req.method === "PATCH") {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      try {
+        const patch = JSON.parse(body || "{}");
+        const updated = Workspaces.update(m[1], patch);
+        broadcastToClients({ type: "workspace.updated", data: updated });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, workspace: updated }));
+      } catch (e) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+      }
+      return;
+    }
+  }
+  /* GET /workspaces — list all workspaces + active slug. Used by the HUD's
+   * workspace switcher in Settings. */
+  if (req.url === "/workspaces" && req.method === "GET") {
+    const workspaces = Workspaces.list();
+    const active = Workspaces.getActive();
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, workspaces, activeSlug: active?.slug || null }));
+    return;
+  }
+  /* POST /workspaces/active — set or clear the active workspace.
+   * Body: { slug: string | null }. Re-asserted by the HUD on every connect
+   * so a bridge restart preserves the operator's chosen scope. */
+  /* GET /api/asset-panel/history — last 3 teaser runs for the history strip.
+   * Lightweight: just disk metadata + the prompt from meta.json. */
+  if (req.url === "/api/asset-panel/history" && req.method === "GET") {
+    const rows = await _listTeaserRuns(3);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, items: rows }));
+    return;
+  }
+  /* POST /api/asset-panel/open — open a generated asset in the OS default app
+   * (Preview / QuickTime). Validates that the path is inside output/. */
+  if (req.url === "/api/asset-panel/open" && req.method === "POST") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      const p = String(parsed.path || "");
+      if (!p.includes("/output/")) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: "path must be under output/" })); return; }
+      await execp(`open ${JSON.stringify(p)}`);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500); res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+  /* POST /api/asset-panel/copy-to-clipboard — uses pbcopy via osascript for
+   * image files. Videos can't be put on the macOS clipboard so we return
+   * an error for those. */
+  if (req.url === "/api/asset-panel/copy-to-clipboard" && req.method === "POST") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      const p = String(parsed.path || "");
+      if (!p.includes("/output/")) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: "path must be under output/" })); return; }
+      const ext = p.split(".").pop()?.toLowerCase();
+      if (["png", "jpg", "jpeg", "webp"].includes(ext)) {
+        /* AppleScript: load file as a picture and put on the clipboard. PNG/JPEG only. */
+        const script = `set the clipboard to (read (POSIX file ${JSON.stringify(p)}) as ${ext === "png" ? "«class PNGf»" : "JPEG picture"})`;
+        await execp(`osascript -e ${JSON.stringify(script)}`);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } else {
+        res.writeHead(400); res.end(JSON.stringify({ ok: false, error: `clipboard copy not supported for .${ext}` }));
+      }
+    } catch (e) {
+      res.writeHead(500); res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+  /* POST /api/asset-panel/animate — fires animate_teaser_image on the supplied
+   * run_id. Returns immediately; the panel updates when the resulting
+   * teaser.video_ready broadcast arrives. */
+  if (req.url === "/api/asset-panel/animate" && req.method === "POST") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      if (!parsed.run_id) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: "run_id required" })); return; }
+      /* Fire-and-forget: don't await — let the broadcast handle the UI update. */
+      animateTeaserImage({ run_id: parsed.run_id, motion_prompt: parsed.motion_prompt || "cinematic motion, confident on-camera energy", duration_s: 5, confirmed: true })
+        .then((r) => { if (r?.ok) broadcastToClients({ type: "teaser.video_ready", data: { run_id: r.run_id, clipPath: r.clip_path } }); })
+        .catch((e) => console.warn(`[asset-panel] animate failed: ${e.message}`));
+      res.writeHead(200); res.end(JSON.stringify({ ok: true, accepted: true }));
+    } catch (e) {
+      res.writeHead(500); res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+  /* POST /api/asset-panel/regenerate — re-fire generate_teaser_image with an
+   * edited prompt, reusing the same run_id (overwrites hero.png in place). */
+  if (req.url === "/api/asset-panel/regenerate" && req.method === "POST") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      if (!parsed.prompt) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: "prompt required" })); return; }
+      generateTeaserImage({ prompt: parsed.prompt, aspect: parsed.aspect || "9:16", influencer: parsed.influencer || null, run_id: parsed.run_id || null, confirmed: true })
+        .catch((e) => console.warn(`[asset-panel] regenerate failed: ${e.message}`));
+      res.writeHead(200); res.end(JSON.stringify({ ok: true, accepted: true }));
+    } catch (e) {
+      res.writeHead(500); res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+  /* POST /api/weather-panel/refresh — force a weather refresh and rebroadcast. */
+  if (req.url === "/api/weather-panel/refresh" && req.method === "POST") {
+    try {
+      const w = await getWeather(undefined, undefined, 6, { force: true });
+      const data = { ...w, location: { name: CONFIG.operator.city, country: CONFIG.operator.country } };
+      broadcastToClients({ type: "weather.update", data });
+      res.writeHead(200); res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500); res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+  /* POST /api/screenshot-panel/open — open in Preview.app. */
+  if (req.url === "/api/screenshot-panel/open" && req.method === "POST") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      const p = String(parsed.path || "");
+      if (!p) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: "path required" })); return; }
+      await execp(`open ${JSON.stringify(p)}`);
+      res.writeHead(200); res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500); res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+  /* POST /api/screenshot-panel/copy-to-clipboard — same AppleScript image-clip
+   * trick as the asset panel. PNG only (screenshots are PNG). */
+  if (req.url === "/api/screenshot-panel/copy-to-clipboard" && req.method === "POST") {
+    let body = ""; for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      const p = String(parsed.path || "");
+      if (!p) { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: "path required" })); return; }
+      const script = `set the clipboard to (read (POSIX file ${JSON.stringify(p)}) as «class PNGf»)`;
+      await execp(`osascript -e ${JSON.stringify(script)}`);
+      res.writeHead(200); res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500); res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+    return;
+  }
+  /* POST /api/influencer/pipeline/start — wizard's GO button calls this.
+   * Returns immediately with the synthetic runId; the orchestrator runs in
+   * the background and emits influencer.pipeline.update events via WS. */
+  if (req.url === "/api/influencer/pipeline/start" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    let parsed;
+    try { parsed = JSON.parse(body || "{}"); }
+    catch { res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ ok: false, error: "invalid JSON body" })); return; }
+    const r = await executeTool("start_influencer_pipeline", {
+      sex: parsed.sex,
+      vibe: parsed.vibe,
+      content_type: parsed.contentType,
+      source_url: parsed.sourceUrl || undefined,
+    });
+    res.writeHead(r?.ok ? 200 : 500, { "content-type": "application/json" });
+    res.end(JSON.stringify(r));
+    return;
+  }
+  /* POST /api/news/refresh — manual refresh of the news cache, triggered by the
+   * panel's refresh button. Re-fetches all four sources and re-broadcasts the
+   * cache so the panel updates without reloading the YouTube iframe. */
+  if (req.url === "/api/news/refresh" && req.method === "POST") {
+    try {
+      const next = await News.refresh();
+      broadcastToClients({ type: "news.update", data: next });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (e) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
+    return;
+  }
+  if (req.url === "/workspaces/active" && req.method === "POST") {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    try {
+      const parsed = JSON.parse(body || "{}");
+      const w = Workspaces.setActive(parsed.slug ?? null);
+      applyWorkspaceOverrides(w);
+      broadcastToClients({ type: "workspace.switched", data: w });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, workspace: w }));
+    } catch (e) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
+    return;
+  }
+  /* GET /health/crashes — recent unhandled-exception rows captured by
+   * crash-reporter.mjs. Sanitised at write time (api keys, $HOME paths,
+   * sk-style tokens redacted). Used by the Settings → Diagnostics panel
+   * + the diagnostic ZIP exporter. */
+  if (req.url?.startsWith("/health/crashes") && req.method === "GET") {
+    const url = new URL(req.url, "http://localhost");
+    const days = Math.max(1, Math.min(30, Number(url.searchParams.get("days")) || 7));
+    const rows = CrashReporter.recent({ days });
+    const summary = CrashReporter.summary({ days });
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, days, summary, rows: rows.slice(0, 20) }));
+    return;
+  }
+  /* GET /health/warnings — current bridge-detected misconfigurations.
+   * Used by the HUD on initial page load (in case it was already up before
+   * the WS connected) and by the diagnostic exporter. */
+  if (req.url === "/health/warnings" && req.method === "GET") {
+    const warnings = SystemWarnings.list();
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, warnings }));
+    return;
+  }
+  /* POST /diagnostics/export — runs tools/diagnose.sh --no-email and
+   * returns the path to the generated tarball. Operator-initiated only;
+   * the bundle drops on the Desktop and is NEVER auto-emailed. */
+  if (req.url === "/diagnostics/export" && req.method === "POST") {
+    try {
+      const scriptPath = path.join(PROJECT_ROOT, "tools", "diagnose.sh");
+      const { stdout, stderr } = await execp(`"${scriptPath}" --no-email`, { maxBuffer: 4 * 1024 * 1024 });
+      /* The script's "→ /Users/.../jarvis-diag-<stamp>.tgz" line is the
+       * artifact path; pull it out of stdout for the response. */
+      const m = String(stdout).match(/→\s*(\S+\.tgz)/);
+      const outPath = m ? m[1] : null;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, path: outPath, stdout: String(stdout).slice(-2000), stderr: String(stderr).slice(-1000) }));
+    } catch (e) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
+    return;
+  }
+  if (req.url === "/health/plugins" && req.method === "GET") {
+    /* Read-only registry view — name + version + tools + required env per
+     * plugin. Used by settings / docs / debug surfaces. */
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, plugins: PluginLoader.status() }));
+    return;
+  }
+  /* GET /weather — same payload as the WebSocket weather request, but
+   * over HTTP so the boot greeting / settings panel / docs can fetch
+   * synchronously without a WS dance. Returns { now, forecast, label }
+   * where label is the human-readable WMO code translation. */
+  if (req.url === "/weather" && req.method === "GET") {
+    const w = await getWeather();
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({
+      ok: !w.error,
+      ...w,
+      label: w.now ? wmoLabel(w.now.code) : null,
+    }));
+    return;
+  }
+  if (req.url === "/health/timings" && req.method === "GET") {
+    /* Compute p50 + p95 per span from the rolling buffer. Skip null spans. */
+    const summarise = (key) => {
+      const vals = _perfBuffer.map(p => p.spans?.[key]).filter((v) => typeof v === "number" && v >= 0).sort((a, b) => a - b);
+      if (!vals.length) return null;
+      const pct = (q) => vals[Math.min(vals.length - 1, Math.floor(vals.length * q))];
+      return { p50: pct(0.5), p95: pct(0.95), n: vals.length };
+    };
+    const KEYS = [
+      "voice_to_recend","voice_to_whisper","whisper_roundtrip","whisper_inference","voice_to_audio",
+      /* Sprint 11 — finer-grained spans that isolate each pipeline stage.
+       * recend_to_audio is the headline "feels-real-time" metric. */
+      "recend_to_audio","recend_to_whisper","whisper_to_llm","llm_thinking","tts_synth",
+    ];
+    const out = {};
+    for (const k of KEYS) out[k] = summarise(k);
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify({ ok: true, samples: _perfBuffer.length, spans: out, recent: _perfBuffer.slice(-10) }));
     return;
   }
 
@@ -2733,13 +5498,27 @@ const httpServer = createServer(async (req, res) => {
       return;
     }
     if (url.pathname === "/history") {
+      /* Workspaces v2: history drawer is workspace-scoped by default. The HUD
+       * passes ?allWorkspaces=1 when the operator clicks the "show all" toggle.
+       * Active workspace returned alongside so the HUD's filter chip knows
+       * what to label. */
+      const allWorkspaces = url.searchParams.get("allWorkspaces") === "1";
       const turns = Memory.recentTurns({
         limit: Number(url.searchParams.get("limit")) || 50,
         beforeTs: url.searchParams.get("beforeTs") ? Number(url.searchParams.get("beforeTs")) : null,
         sessionId: url.searchParams.get("sessionId") || null,
+        allWorkspaces,
       });
+      const active = Workspaces.getActive();
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      res.end(JSON.stringify({ ok: true, turns }));
+      res.end(JSON.stringify({
+        ok: true,
+        turns,
+        scope: {
+          activeWorkspace: active ? { slug: active.slug, label: active.label } : null,
+          showingAll: allWorkspaces,
+        },
+      }));
       return;
     }
   }
@@ -2754,13 +5533,28 @@ const httpServer = createServer(async (req, res) => {
    * a build step. */
   if (req.url === "/actions" && req.method === "GET") {
     const alwaysOnSet = new Set(ToolRouter.indexStatus().alwaysOn);
+    /* Pull operator-tunable metadata (category, label, voice phrasings) from
+     * config/actions.meta.json. Re-read on each request so updates land
+     * without a bridge restart. The file is small (~100 entries × small
+     * objects) so the read is sub-millisecond. */
+    let meta = {};
+    try {
+      const fsAsync = await import("node:fs/promises");
+      const metaPath = new URL("../config/actions.meta.json", import.meta.url);
+      meta = JSON.parse(await fsAsync.readFile(metaPath, "utf8"));
+    } catch { /* meta is optional — bare manifest if missing/malformed */ }
     const manifest = TOOLS.map((t) => {
       const fn = t.function || t;
+      const m = (meta && meta[fn.name]) || {};
       return {
         name: fn.name,
         description: fn.description || "",
         parameters: fn.parameters?.properties || {},
         required: fn.parameters?.required || [],
+        category: m.category || null,
+        label: m.label || null,
+        phrasings: Array.isArray(m.phrasings) ? m.phrasings : [],
+        destructive: typeof NEEDS_CONFIRMATION[fn.name] === "function",
         flags: {
           alwaysOn: alwaysOnSet.has(fn.name),
           planProposed: PLAN_PROPOSED_TOOLS.has(fn.name),
@@ -2780,6 +5574,7 @@ const httpServer = createServer(async (req, res) => {
       ok: true,
       total: manifest.length,
       generatedAt: new Date().toISOString(),
+      categories: meta._categories || null,
       actions: manifest,
     }));
     return;
@@ -2788,6 +5583,8 @@ const httpServer = createServer(async (req, res) => {
   if (req.url?.startsWith("/audit") && req.method === "GET") {
     /* Query the JSONL audit log. URL format:
      *   /audit?operator=marcus&tool=draft_email&fromTs=...&toTs=...&limit=200
+     *   /audit?workspace=consulting     — explicit slug override
+     *   /audit?allWorkspaces=1           — bypass active-workspace filter
      * All filters optional. Returns newest-first within the limit. */
     try {
       const url = new URL(req.url, "http://localhost");
@@ -2797,10 +5594,22 @@ const httpServer = createServer(async (req, res) => {
         fromTs: url.searchParams.get("fromTs") ? Number(url.searchParams.get("fromTs")) : undefined,
         toTs: url.searchParams.get("toTs") ? Number(url.searchParams.get("toTs")) : undefined,
         limit: url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : 200,
+        workspace: url.searchParams.get("workspace") || undefined,
+        allWorkspaces: url.searchParams.get("allWorkspaces") === "1",
       };
       const [entries, summary] = await Promise.all([Audit.query(filter), Audit.summary()]);
+      const active = Workspaces.getActive();
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      res.end(JSON.stringify({ ok: true, entries, summary }));
+      res.end(JSON.stringify({
+        ok: true,
+        entries,
+        summary,
+        scope: {
+          activeWorkspace: active ? { slug: active.slug, label: active.label } : null,
+          showingAll: filter.allWorkspaces,
+          explicitWorkspace: filter.workspace || null,
+        },
+      }));
     } catch (e) {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: e.message }));
@@ -2879,46 +5688,29 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === "/actions" && req.method === "GET") {
-    /* Action manifest — single source of truth for the HUD's command palette,
-     * help cheat-sheet, and audit-log filter UI. Joins each tool's LLM-facing
-     * definition with the destructive-flag derived from NEEDS_CONFIRMATION so
-     * downstream consumers don't have to re-derive it.
-     *
-     * Optional metadata (label / category / phrasings) is loaded from
-     * config/actions.meta.json if present — that file gets filled in as the
-     * palette + help features come online; today the manifest just carries the
-     * bridge's tool definitions. */
-    let meta = {};
-    try {
-      const fs = await import("node:fs/promises");
-      const metaPath = new URL("../config/actions.meta.json", import.meta.url);
-      meta = JSON.parse(await fs.readFile(metaPath, "utf8"));
-    } catch { /* meta file optional */ }
-
-    const actions = TOOLS.map(t => {
-      const fn = t.function || {};
-      const m = meta[fn.name] || {};
-      return {
-        name: fn.name,
-        description: fn.description,
-        parameters: fn.parameters,
-        destructive: NEEDS_CONFIRMATION[fn.name] != null,
-        label: m.label || null,
-        category: m.category || null,
-        phrasings: Array.isArray(m.phrasings) ? m.phrasings : [],
-      };
-    });
-    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify({ ok: true, count: actions.length, actions }));
-    return;
-  }
+  /* (Duplicate /actions handler removed — the upstream handler at line ~2900
+   * now reads actions.meta.json and merges category/label/phrasings/destructive
+   * directly. This second copy was dead code from earlier scaffolding.) */
 
   if (req.url === "/healthz" && req.method === "GET") {
     /* Why: aggregated health for the HUD's status bar. Probes Ollama (text + vision
      * are the same daemon) + Kokoro (TTS) + Whisper (STT) in parallel. Each gets a
      * tight timeout so a single hung daemon doesn't tank the whole readout. The
-     * bridge itself is implicitly "up" if this endpoint responds. */
+     * bridge itself is implicitly "up" if this endpoint responds.
+     *
+     * Sprint 12 cache: with multiple HUD tabs (Jarvis + Friday) the boot burst
+     * was firing 2× concurrent probe fanouts to all three services. A 1s TTL
+     * on the response means a flurry of polls within 1 second shares a single
+     * probe round. Cuts the dual-tab boot load roughly in half without
+     * affecting freshness — operators can't perceive 1-second-stale health. */
+    const NOW = Date.now();
+    if (_healthzCache && (NOW - _healthzCache.ts) < 1000) {
+      console.log(`[cache] healthz HIT (age=${NOW - _healthzCache.ts}ms)`);
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(_healthzCache.body);
+      return;
+    }
+    console.log(`[cache] healthz MISS — running probe fanout`);
     const probe = async (url, ms = 1500) => {
       try {
         const r = await fetch(url, { signal: AbortSignal.timeout(ms) });
@@ -2958,15 +5750,20 @@ const httpServer = createServer(async (req, res) => {
       setupRequired = !fs.existsSync(brandPath);
     } catch { /* assume not required if we can't probe */ }
 
-    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify({
+    const body = JSON.stringify({
       ok: true,
       ts: Date.now(),
       services: { bridge: true, ollama, kokoro, whisper },
       whisperBackend,   // "mlx" | "faster-whisper" | null
       whisperModel,     // e.g. "large-v3-turbo"
       setupRequired,
-    }));
+    });
+    /* Memoize the serialised body so the next caller within 1s gets a copy
+     * without re-running the probe fanout. Cache covers ts staleness up to
+     * 1s — that's a tradeoff we accept for halving boot-burst load. */
+    _healthzCache = { ts: Date.now(), body };
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(body);
     return;
   }
   if (req.url === "/brand" && req.method === "GET") {
@@ -3080,22 +5877,29 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  /* POST /api-keys — write FRAMEIO_TOKEN / SERPAPI_KEY / HUNTER_API_KEY to .env
-   * and update process.env so the value is live without a bridge restart.
-   * Body shape: { frameio?: string, serpapi?: string, hunter?: string }
+  /* POST /api-keys — write the named first-class keys (anthropic / openai)
+   * plus any operator-defined custom NAME=VALUE entries to .env, and update
+   * process.env so values go live without a bridge restart.
+   *
+   * Body shape: { anthropic?: string, openai?: string,
+   *               defaultProvider?, visionProvider?, highstakesProvider?,
+   *               custom?: [{name, value}] }
    *   - empty string  → clear the key (write empty value, kill from env)
    *   - missing field → don't touch
    *   - non-empty     → set it
-   * Allowlist of three keys keeps this from being a generic env-write API. */
+   *
+   * The MAP is restricted to anthropic + openai because those are the only
+   * built-in cloud providers the LLM router consults directly. Anything
+   * else (legacy FRAMEIO_TOKEN / SERPAPI_KEY / HUNTER_API_KEY from the FOM
+   * fork, or new bridges added later) goes through the generic `custom`
+   * array so the surface stays narrow and the legacy keys can still be set
+   * by operators who genuinely want them. */
   if (req.url === "/api-keys" && req.method === "POST") {
     let body = "";
     for await (const chunk of req) body += chunk;
     try {
       const parsed = JSON.parse(body || "{}");
       const MAP = {
-        frameio:   "FRAMEIO_TOKEN",
-        serpapi:   "SERPAPI_KEY",
-        hunter:    "HUNTER_API_KEY",
         anthropic: "ANTHROPIC_API_KEY",
         openai:    "OPENAI_API_KEY",
       };
@@ -3321,57 +6125,100 @@ const httpServer = createServer(async (req, res) => {
     /* Today-only calendar feed for the HUD's clock panel split. Wraps getUpcomingEvents
      * with days=1, then filters to events whose start time is today (calendar.mjs may
      * return tomorrow morning items inside a 24h window). Each item is shaped to the
-     * minimum the HUD needs: time string + title + isImminent (within 30 min). */
-    try {
-      const evRes = await getUpcomingEvents({ days: 1 });
-      const todayStr = new Date().toLocaleDateString("en-GB");
-      const now = Date.now();
-      /* Why field rename: getUpcomingEvents() returns events with `start`, not
-       * `startDate`. The previous code filtered against the wrong key, which meant
-       * every event was dropped and the diary always showed empty. Caught after
-       * the operator reported "stuck on checking calendar…" — the loading state
-       * never advanced because pollDiary's failure branch left the placeholder. */
-      const events = (evRes?.events || [])
-        .filter(e => {
-          if (!e.start) return false;
-          const d = new Date(e.start);
-          return !isNaN(d) && d.toLocaleDateString("en-GB") === todayStr;
-        })
-        .slice(0, 8)
-        .map(e => {
-          const d = new Date(e.start);
-          const isImminent = d.getTime() - now < 30 * 60 * 1000 && d.getTime() > now;
-          return {
-            time: d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
-            title: e.title || "(untitled)",
-            location: e.location || null,
-            isImminent,
-            isPast: d.getTime() < now,
-          };
-        });
+     * minimum the HUD needs: time string + title + isImminent (within 30 min).
+     *
+     * Sprint 12 — server-side cache + in-flight dedup. The HAR from a 2-tab
+     * Chrome session showed /diary taking 8-20s (AppleScript fanout) and
+     * piling up in Chrome's 6-slot per-origin connection pool, blocking
+     * faster requests like /healthz. 12s TTL means the 15s poll interval
+     * gets a cache hit roughly 80% of the time; in-flight Promise dedup
+     * means concurrent callers (2 tabs polling within ms of each other)
+     * share one AppleScript run rather than doubling it. */
+    const NOW = Date.now();
+    /* TTL = 18s so consecutive polls (HUD interval = 15s) stay inside the
+     * cache window. Was 12s — every poll missed the cache and paid 4-5s. */
+    if (_diaryCache && (NOW - _diaryCache.ts) < 18_000) {
+      console.log(`[cache] diary HIT (age=${NOW - _diaryCache.ts}ms)`);
       res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      res.end(JSON.stringify({ ok: true, count: events.length, events, ts: Date.now() }));
-    } catch (e) {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: String(e.message), events: [] }));
+      res.end(_diaryCache.body);
+      return;
     }
+    /* Coalesce concurrent fanouts. If a fetch is already running, await its
+     * result instead of starting a second AppleScript pull. */
+    const buildBody = async () => {
+      try {
+        const evRes = await getUpcomingEvents({ days: 1 });
+        const todayStr = new Date().toLocaleDateString("en-GB");
+        const now = Date.now();
+        const events = (evRes?.events || [])
+          .filter(e => {
+            if (!e.start) return false;
+            const d = new Date(e.start);
+            return !isNaN(d) && d.toLocaleDateString("en-GB") === todayStr;
+          })
+          .slice(0, 8)
+          .map(e => {
+            const d = new Date(e.start);
+            const isImminent = d.getTime() - now < 30 * 60 * 1000 && d.getTime() > now;
+            return {
+              time: d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
+              title: e.title || "(untitled)",
+              location: e.location || null,
+              isImminent,
+              isPast: d.getTime() < now,
+            };
+          });
+        return JSON.stringify({ ok: true, count: events.length, events, ts: Date.now() });
+      } catch (e) {
+        return JSON.stringify({ ok: false, error: String(e.message), events: [] });
+      }
+    };
+    if (!_diaryInFlight) {
+      console.log(`[cache] diary MISS — starting AppleScript fanout`);
+      const _fanoutStart = Date.now();
+      _diaryInFlight = buildBody().finally(() => {
+        console.log(`[cache] diary fanout completed in ${Date.now() - _fanoutStart}ms`);
+        _diaryInFlight = null;
+      });
+    } else {
+      console.log(`[cache] diary COALESCE — joining in-flight fanout`);
+    }
+    const body = await _diaryInFlight;
+    /* Only cache successful responses so transient AppleScript failures
+     * don't pin a bad result for 12s. */
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed.ok) _diaryCache = { ts: Date.now(), body };
+    } catch {}
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(body);
     return;
   }
   if (req.url === "/comms" && req.method === "GET") {
-    /* Dynamic comms feed for the bottom-left panel. Mixes operational status (unread mail,
-     * pending reviews, leads) with browseable content (every shoot folder + every recent
-     * generated output). Each item can carry a `url` so the HUD wires it as clickable.
-     *
-     * Shape:
-     *   { k: "left-side label", v: "right-side detail", url?: "/path/in/output/", kind?: "thumb|video|pdf|folder" }
-     * The HUD renders k // v on its own line, click opens url via /launch (folders) or
-     * window.open (files served by the bridge's /output static handler). */
+    /* Sprint 12 — same hard-timeout + cache pattern as /diary and /inbox.
+     * Bridge log was showing 120-second SLOW lines because getMailSummary
+     * (AppleScript Mail) hung mid-sync. With a 6-slot Chrome pool, three
+     * 120s connections poison everything. 60s cache + 8s timeout + serve
+     * stale-on-timeout. */
+    const NOW_C = Date.now();
+    if (_commsCache && (NOW_C - _commsCache.ts) < 60_000) {
+      console.log(`[cache] comms HIT (age=${NOW_C - _commsCache.ts}ms)`);
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(_commsCache.body);
+      return;
+    }
+
+    const _buildCommsBody = async () => {
     const fs = await import("node:fs");
     const out = [];
 
-    /* --- inbox status --- */
+    /* --- inbox status (Mail unread count, also wrapped in 5s sub-timeout
+     * so a hung Mail doesn't sink the whole comms response) --- */
     try {
-      const summ = await getMailSummary({ unreadOnly: true, max: 5 });
+      const summ = await Promise.race([
+        getMailSummary({ unreadOnly: true, max: 5 }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("mail-summary 5s")), 5000)),
+      ]);
       out.push(summ?.ok && summ.count > 0
         ? { k: `${summ.count} unread`, v: "editorial inbox" }
         : { k: "0 unread", v: "inbox clear" });
@@ -3454,9 +6301,38 @@ const httpServer = createServer(async (req, res) => {
       const { mtimeMs, ...item } = r;
       out.push(item);
     }
+      return JSON.stringify({ ok: true, comms: out, ts: Date.now() });
+    };  /* end _buildCommsBody */
 
-    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify({ ok: true, comms: out, ts: Date.now() }));
+    if (!_commsInFlight) {
+      console.log(`[cache] comms MISS — building (8s cap)`);
+      const _t = Date.now();
+      _commsInFlight = Promise.race([
+        _buildCommsBody(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("comms timeout 8s")), SLOW_TIMEOUT_MS)),
+      ]).finally(() => {
+        console.log(`[cache] comms build finished in ${Date.now() - _t}ms`);
+        _commsInFlight = null;
+      });
+    } else {
+      console.log(`[cache] comms COALESCE — joining in-flight`);
+    }
+    try {
+      const body = await _commsInFlight;
+      _commsCache = { ts: Date.now(), body };
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(body);
+    } catch (e) {
+      if (_commsCache) {
+        console.warn(`[cache] comms FAIL (${e.message}) — serving stale`);
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(_commsCache.body);
+      } else {
+        console.warn(`[cache] comms FAIL (${e.message}) — empty fallback`);
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ ok: false, error: String(e.message), comms: [] }));
+      }
+    }
     return;
   }
   if (req.url.startsWith("/cancel") && req.method === "POST") {
@@ -3988,7 +6864,7 @@ wss.on("connection", (ws) => {
 
     try {
       switch (type) {
-        case "llm.ask":     reply(await askLLM(payload.query, payload.history || [], { sessionId: payload?.sessionId })); break;
+        case "llm.ask":     reply(await askLLM(payload.query, payload.history || [], { sessionId: payload?.sessionId, workspace: payload?.workspace || null })); break;
 
         /* Streaming variant — emits llm.sentence events as the model generates, then
          * resolves the request promise with the full text. The caller can either await
@@ -4007,6 +6883,11 @@ wss.on("connection", (ws) => {
               query: payload.query,
               history: payload.history || [],
               sessionId: payload?.sessionId,
+              /* Workspaces v4: HUD windows pinned to a specific workspace
+               * forward that slug here so the LLM call dispatches in their
+               * scope. Default windows omit the field; the bridge falls back
+               * to the global active. */
+              workspace: payload?.workspace || null,
               onSentence: (s) => send("llm.sentence", { runId, text: s }),
             });
             send("llm.streamDone", { runId, text });
@@ -4018,6 +6899,23 @@ wss.on("connection", (ws) => {
           break;
         }
         case "weather":     reply(await getWeather(payload?.lat, payload?.lon)); break;
+        /* HUD posts the source video the operator pasted/dropped for an
+         * in-flight recreate_video_with_influencer call. The bridge
+         * resolves the matching pending Promise so the tool execution
+         * resumes. cancelled:true means the operator dismissed the modal. */
+        case "influencer.source_provided": {
+          const ok = resolvePendingSourceRequest({
+            request_id: payload?.request_id,
+            source_url: payload?.source_url,
+            source_local_path: payload?.source_local_path,
+            cancelled: !!payload?.cancelled,
+          });
+          reply({ ok });
+          break;
+        }
+        /* HUD requests a list of locked influencers so the modal can
+         * suggest names for autocomplete (e.g. on the recreation modal). */
+        case "influencer.list":     reply(await Influencers.list()); break;
         case "video.edit": {
           // Production mode: cut existing footage from a shoot folder, no Fal cost.
           const send = (stage, info = {}) => ws.send(JSON.stringify({ id, type: "video.edit.progress", stage, ...info }));
@@ -4091,8 +6989,49 @@ async function broadcastStats() {
 setInterval(broadcastStats, 1500);
 /* Spawn macmon (sudoless Apple Silicon temp + power monitor) so the HUD
  * gets real CPU/GPU °C and per-domain wattage. Graceful no-op if the binary
- * isn't installed — bridge keeps working with temps=null. */
-Macmon.start();
+ * isn't installed — bridge keeps working with temps=null but the HUD shows
+ * a one-time toast pointing the operator at `brew install macmon`. */
+const _macmonOk = Macmon.start();
+if (!_macmonOk) {
+  SystemWarnings.register({
+    code: "macmon-missing",
+    title: "Apple Silicon temps unavailable",
+    body: "Install macmon to see real CPU/GPU temperatures: brew install vladkens/tap/macmon",
+    action: { label: "DOCS", href: "https://github.com/vladkens/macmon" },
+  });
+}
+
+/* Workspaces v1: seed a default "personal" workspace on a fresh install
+ * so the HUD chip has something to show. No-op when one already exists.
+ * The seeded workspace becomes the active scope; the operator can rename
+ * it, delete it, or create more via voice / the chip modal. */
+const _seededWorkspace = Workspaces.seedDefaultIfEmpty();
+if (_seededWorkspace) {
+  applyWorkspaceOverrides(_seededWorkspace);
+  console.log(`[workspaces] seeded default "${_seededWorkspace.slug}" workspace`);
+}
+
+/* Smart Inbox aggregator — wire the source-specific tool functions in so
+ * inbox.mjs can pull mail / calendar / reminders without re-implementing
+ * the AppleScript bridges or owning a circular import. */
+Inbox.setSources({
+  getMailSummary: (a) => getMailSummary(a || {}),
+  getUpcomingEvents: (a) => getUpcomingEvents(a || {}),
+  listReminders: (a) => Personal.listReminders(a || {}),
+});
+
+/* Workspaces v2 / v4: wire the active-workspace provider into Memory.
+ * v4 adds per-call workspace scope (multi-window): when an LLM call is
+ * pinned to a specific window's workspace, getCallWorkspace() returns
+ * that slug and overrides the module-level active. Outside any call,
+ * the module-level active wins (e.g. background memory writes from the
+ * code agent or scheduled jobs). */
+const _resolveWorkspace = () => getCallWorkspace() || Workspaces.getActive()?.slug || null;
+Memory.setActiveWorkspaceProvider(_resolveWorkspace);
+/* Workspaces v3 / v4: same provider for the audit log + creative-style.
+ * NULL workspace on legacy rows leaks into every scope so pre-upgrade
+ * history isn't trapped. */
+Audit.setActiveWorkspaceProvider(_resolveWorkspace);
 
 /* Why: schedule cache pruning so frame-cache + weather-cache + trackday sidecars
  * don't grow unbounded over a months-long kiosk uptime. Initial sweep at +5s so
@@ -4137,10 +7076,29 @@ httpServer.listen(PORT, () => {
     skipVL: isLiteTier,
   }).catch(() => { /* warmUpAll already logs internally */ });
 
+  /* Sprint 12 — pre-warm the /diary AppleScript cache at boot. The HAR from
+   * a 2-tab Chrome session showed every other bridge fetch queueing behind a
+   * cold /diary call (5s AppleScript fanout) because Chrome's HTTP/1.1 pool
+   * caps at 6 per origin. Firing one /diary fetch here means by the time the
+   * HUD boots its diary cache is hot — every poll thereafter is a 1ms hit. */
+  setTimeout(async () => {
+    try {
+      const t0 = Date.now();
+      await fetch(`http://localhost:${PORT}/diary`).then((r) => r.json()).catch(() => null);
+      console.log(`[warmup] /diary cache primed in ${Date.now() - t0}ms`);
+    } catch { /* best-effort; if it fails the first HUD poll just pays the cost */ }
+  }, 500);
+
   /* Build the embedding-based tool index. Fire-and-forget — pickRelevant()
    * falls back to the full TOOLS array until this resolves, so no chat call
-   * is blocked. Subsequent boots load from data/tool-index.json instantly. */
-  ToolRouter.buildIndex(TOOLS).catch((e) => console.warn(`[tool-router] index build failed: ${e.message} — chat will use full TOOLS catalogue`));
+   * is blocked. Subsequent boots load from data/tool-index.json instantly.
+   *
+   * Tiny delay so the plugin loader finishes first → plugin-registered tools
+   * appear in the embedding index alongside built-ins. The loader takes
+   * ~100ms in practice; 250ms is generous and still imperceptible. */
+  setTimeout(() => {
+    ToolRouter.buildIndex(TOOLS).catch((e) => console.warn(`[tool-router] index build failed: ${e.message} — chat will use full TOOLS catalogue`));
+  }, 250);
 
   /* Pre-warm the fast model too if hardware tier opted into routing. Most weight
    * is on the main model so this second warm is cheap (small model, small RAM). */
