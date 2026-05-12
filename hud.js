@@ -688,9 +688,7 @@ function connectBridge() {
   Bridge.on("bridge.online", () => {
     if (weatherInitSent) return;
     weatherInitSent = true;
-    Bridge.ask({ type: "weather", payload: {} }, 5000)
-      .then((data) => applyWeather(data))
-      .catch((err) => console.warn(`[Jarvis HUD] weather-init failed: ${err.message}`));
+    initWeather().catch((err) => console.warn(`[Jarvis HUD] weather-init failed: ${err.message}`));
   });
   /* If the WS drops, allow the next reconnect to fire weather-init again. */
   Bridge.on("bridge.offline", () => { weatherInitSent = false; });
@@ -756,11 +754,70 @@ function startStatsFallback() {
   tick();
 }
 
+/** Opportunistically use browser geolocation for the startup weather fetch.
+ *  Only fires when permission is already "granted" — never prompts. The
+ *  explicit "Use Browser Location" button in the settings modal is the place
+ *  that prompts; this just piggy-backs on that grant so the HUD widget tracks
+ *  the user's actual current location across boots without re-prompting.
+ *
+ *  Falls back to a coords-less fetch (bridge uses CONFIG.operator) on any
+ *  failure path: no permissions API, denied, prompt-state, timeout, reverse-
+ *  geocode error. The widget stays useful even when geolocation is unavailable. */
+async function initWeather() {
+  let coords = null;
+  let resolvedLocation = null;
+
+  try {
+    if (navigator.permissions && navigator.geolocation) {
+      const perm = await navigator.permissions.query({ name: "geolocation" });
+      if (perm.state === "granted") {
+        const pos = await new Promise((resolve, reject) => {
+          /* enableHighAccuracy:false keeps it Wi-Fi-fast (sub-second) instead of
+           * waiting for a GPS lock. 10-min cache age covers normal startup churn
+           * without surfacing stale coords after a long flight. */
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: false, timeout: 3000, maximumAge: 600_000,
+          });
+        });
+        coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+
+        /* Reverse-geocode lat/lon → "City, Country" using Open-Meteo's geocoding
+         * endpoint (no API key, same service settings-modal uses). The bridge
+         * weather reply attaches CONFIG.operator's location name; we override
+         * here so the widget shows where the user actually is. */
+        try {
+          const r = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${coords.lat}&longitude=${coords.lon}&count=1&language=en`,
+          );
+          const j = await r.json();
+          const place = (j.results || [])[0];
+          if (place) resolvedLocation = { name: place.name, country: place.country };
+        } catch { /* network blip — fall through to bridge default name */ }
+      }
+    }
+  } catch { /* permissions API rejected — fall through to bridge default */ }
+
+  const data = await Bridge.ask({ type: "weather", payload: coords || {} }, 5000);
+  if (resolvedLocation && data) data.location = resolvedLocation;
+  applyWeather(data);
+}
+
 /** Apply real weather from bridge. WMO weather codes drive both the short label
  *  AND the matching Bybas weather icon. Forecast rows now carry a per-day icon. */
 function applyWeather(w) {
   if (!w || w.error) return;
   const day = isDaytimeNow();
+  /* Why: the HUD widget ships with a hardcoded "MANCHESTER, UK" default in
+   * index.html. Replace it the moment we have a real bridge response so the
+   * label reflects the actual configured operator location (which is also
+   * what drove the weather fetch). */
+  if (w.location) {
+    const locEl = $("weatherLoc");
+    if (locEl) {
+      const { name, country } = w.location;
+      locEl.textContent = name ? (country ? `${name}, ${country}` : name) : "";
+    }
+  }
   if (w.now) {
     $("weatherTemp").textContent = `${w.now.temp}°`;
     $("weatherCond").textContent = wmoCondition(w.now.code);

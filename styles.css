@@ -612,6 +612,13 @@ body.tier-lite .speedo__arc--a, body.tier-lite .speedo__arc--b {
   letter-spacing: 0.35em;
   color: var(--accent);
   text-transform: uppercase;
+  /* Why: center horizontally so the location label doesn't sit under the
+   * top-left corner-accent bracket (which renders at top:5/left:5 with a
+   * 14px L and would clip the leading character of the city name). */
+  text-align: center;
+  /* Horizontal padding keeps the text clear of the corner accents even on
+   * narrow widget widths where centering alone wouldn't be enough margin. */
+  padding: 0 18px;
 }
 /* Why: now-row pivots from "label, label" to "icon | (temp / condition stack)".
  * 56px icon reads from across the room; temp+condition stacked right keeps the

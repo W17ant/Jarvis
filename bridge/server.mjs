@@ -6898,7 +6898,18 @@ wss.on("connection", (ws) => {
           }
           break;
         }
-        case "weather":     reply(await getWeather(payload?.lat, payload?.lon)); break;
+        case "weather": {
+          /* Why: attach the operator's configured location so the HUD widget
+           * can render "city, country" alongside the temperature. Without
+           * this the widget falls back to its hardcoded default. Mirrors
+           * the location-augment done for the show_weather_panel tool. */
+          const w = await getWeather(payload?.lat, payload?.lon);
+          reply({
+            ...w,
+            location: { name: CONFIG.operator.city, country: CONFIG.operator.country },
+          });
+          break;
+        }
         /* HUD posts the source video the operator pasted/dropped for an
          * in-flight recreate_video_with_influencer call. The bridge
          * resolves the matching pending Promise so the tool execution
