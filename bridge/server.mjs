@@ -216,6 +216,11 @@ async function autoDetectLocation({ force = false } = {}) {
     console.log(`[bridge] location locked by config: ${CONFIG.operator.city}`);
     return;
   }
+  /* Remember the country we were in before this detect so we can flag a
+   * travel event when it changes. First-ever detection (no prior country)
+   * never raises a travel warning — that would just be "kiosk booted". */
+  const priorCountry = CONFIG.operator.country || null;
+  const priorCity = CONFIG.operator.city || null;
   for (const p of GEO_PROVIDERS) {
     try {
       const r = await fetch(p.url, { signal: AbortSignal.timeout(5000) });
@@ -232,6 +237,22 @@ async function autoDetectLocation({ force = false } = {}) {
         timezone: picked.timezone || CONFIG.operator.timezone,
       };
       console.log(`[bridge] auto-located via ${p.name}: ${CONFIG.operator.city}, ${CONFIG.operator.country} (${CONFIG.operator.latitude}, ${CONFIG.operator.longitude})  tz=${CONFIG.operator.timezone}`);
+      /* Travel-companion alert: country flipped between detections. Suppressed
+       * on first-ever boot (no prior country). Dedupe by destination so two
+       * /redetect hits in a row don't re-toast. Clears on next country change. */
+      const newCountry = CONFIG.operator.country;
+      if (priorCountry && newCountry && priorCountry !== newCountry) {
+        for (const w of SystemWarnings.list()) {
+          if (w.code?.startsWith("travel.")) SystemWarnings.clear(w.code);
+        }
+        SystemWarnings.register({
+          code: `travel.${newCountry}`,
+          title: `Travel detected: ${priorCountry} → ${newCountry}`,
+          body: `Was in ${priorCity || priorCountry}, now in ${CONFIG.operator.city}, ${newCountry}. Weather, timezone (${CONFIG.operator.timezone}), and clock have switched to local. Voice context (morning brief, smart inbox) will use the new location until you switch back. To pin to your home location open settings and toggle Lock Location.`,
+          action: { label: "Open settings", href: "#settings" },
+        });
+        console.log(`[bridge] travel detected: ${priorCountry} -> ${newCountry}`);
+      }
       return;
     } catch (e) {
       console.warn(`[bridge] geo ${p.name}: ${e.message}`);
