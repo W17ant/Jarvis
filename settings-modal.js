@@ -1093,14 +1093,25 @@ export function wireSettingsModal({ applyAccessibilityPrefs, applyCameraVisibili
     }
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
-    /* Reverse-geocode lat/lon → city name via Open-Meteo. Same service the
-     * forward-typeahead uses; their /v1/reverse endpoint accepts coords and
-     * returns the nearest named place + country + timezone. */
+    /* Reverse-geocode lat/lon → city name via BigDataCloud's no-auth
+     * /reverse-geocode-client endpoint. Replaced Open-Meteo's /v1/reverse
+     * which often returned no result for valid coords, causing this code
+     * to fall back to persisting raw "lat,lon" as the city — the operator
+     * would then see "53.449,-2.121, GB" wherever city was displayed. */
     let geo = null;
     try {
-      const r = await fetch(`https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat}&longitude=${lon}&count=1&language=en`);
+      const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`);
       const j = await r.json();
-      geo = (j.results || [])[0] || null;
+      const name = j.city || j.locality || j.principalSubdivision || j.countryName;
+      if (name) {
+        geo = {
+          name,
+          country: j.countryCode || "",
+          /* BigDataCloud does not return IANA timezone; rely on the
+           * browser's resolved zone below. */
+          timezone: null,
+        };
+      }
     } catch { /* network blip — fall through to lat/lon-only persist */ }
 
     const payload = {

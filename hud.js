@@ -781,17 +781,23 @@ async function initWeather() {
         });
         coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
 
-        /* Reverse-geocode lat/lon → "City, Country" using Open-Meteo's geocoding
-         * endpoint (no API key, same service settings-modal uses). The bridge
+        /* Reverse-geocode lat/lon → "City, Country" using BigDataCloud's
+         * /reverse-geocode-client endpoint (no API key, no auth, no rate cap
+         * for client-side use). Replaced Open-Meteo's /v1/reverse which often
+         * returns no result and leaves us rendering raw lat/lon. The bridge
          * weather reply attaches CONFIG.operator's location name; we override
          * here so the widget shows where the user actually is. */
         try {
           const r = await fetch(
-            `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${coords.lat}&longitude=${coords.lon}&count=1&language=en`,
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${coords.lat}&longitude=${coords.lon}&localityLanguage=en`,
           );
           const j = await r.json();
-          const place = (j.results || [])[0];
-          if (place) resolvedLocation = { name: place.name, country: place.country };
+          /* Prefer the most specific name available; locality is the
+           * neighbourhood-ish field, city the town, then principal sub then
+           * country. countryCode keeps the trailing label short ("GB" not
+           * "United Kingdom") to match the widget letter-spacing. */
+          const name = j.city || j.locality || j.principalSubdivision || j.countryName;
+          if (name) resolvedLocation = { name, country: j.countryCode || "" };
         } catch { /* network blip — fall through to bridge default name */ }
       }
     }
