@@ -754,57 +754,25 @@ function startStatsFallback() {
   tick();
 }
 
-/** Opportunistically use browser geolocation for the startup weather fetch.
- *  Only fires when permission is already "granted" — never prompts. The
- *  explicit "Use Browser Location" button in the settings modal is the place
- *  that prompts; this just piggy-backs on that grant so the HUD widget tracks
- *  the user's actual current location across boots without re-prompting.
+/** Refresh the bridge's IP-based location, then fetch weather for it.
  *
- *  Falls back to a coords-less fetch (bridge uses CONFIG.operator) on any
- *  failure path: no permissions API, denied, prompt-state, timeout, reverse-
- *  geocode error. The widget stays useful even when geolocation is unavailable. */
+ *  Why IP geo, not browser geolocation: browser geo via navigator.geolocation
+ *  uses Apple's BSSID-lookup service on Macs without GPS. The BSSID database
+ *  is stale when the user travels (their home router's MAC is registered to
+ *  their home city, so the laptop reports "home" even on a hotel Wi-Fi 1000km
+ *  away). IP geo correctly reflects the network the machine is currently on
+ *  (modulo VPNs, which are a deliberate user choice). For a travel-aware
+ *  weather widget IP wins; the previous browser-geo path produced the wrong
+ *  city for the operator on holiday with a poisoned BSSID cache.
+ *
+ *  /config/redetect runs autoDetectLocation(force:true), updates CONFIG.operator,
+ *  and persists to config.json. After this returns, a plain weather fetch
+ *  picks up the fresh coords + name. */
 async function initWeather() {
-  let coords = null;
-  let resolvedLocation = null;
-
   try {
-    if (navigator.permissions && navigator.geolocation) {
-      const perm = await navigator.permissions.query({ name: "geolocation" });
-      if (perm.state === "granted") {
-        const pos = await new Promise((resolve, reject) => {
-          /* enableHighAccuracy:false keeps it Wi-Fi-fast (sub-second) instead of
-           * waiting for a GPS lock. 10-min cache age covers normal startup churn
-           * without surfacing stale coords after a long flight. */
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: false, timeout: 3000, maximumAge: 600_000,
-          });
-        });
-        coords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-
-        /* Reverse-geocode lat/lon → "City, Country" using BigDataCloud's
-         * /reverse-geocode-client endpoint (no API key, no auth, no rate cap
-         * for client-side use). Replaced Open-Meteo's /v1/reverse which often
-         * returns no result and leaves us rendering raw lat/lon. The bridge
-         * weather reply attaches CONFIG.operator's location name; we override
-         * here so the widget shows where the user actually is. */
-        try {
-          const r = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${coords.lat}&longitude=${coords.lon}&localityLanguage=en`,
-          );
-          const j = await r.json();
-          /* Prefer the most specific name available; locality is the
-           * neighbourhood-ish field, city the town, then principal sub then
-           * country. countryCode keeps the trailing label short ("GB" not
-           * "United Kingdom") to match the widget letter-spacing. */
-          const name = j.city || j.locality || j.principalSubdivision || j.countryName;
-          if (name) resolvedLocation = { name, country: j.countryCode || "" };
-        } catch { /* network blip — fall through to bridge default name */ }
-      }
-    }
-  } catch { /* permissions API rejected — fall through to bridge default */ }
-
-  const data = await Bridge.ask({ type: "weather", payload: coords || {} }, 5000);
-  if (resolvedLocation && data) data.location = resolvedLocation;
+    await fetch("http://localhost:8766/config/redetect", { method: "POST" });
+  } catch { /* bridge unreachable — fall through to whatever CONFIG.operator already has */ }
+  const data = await Bridge.ask({ type: "weather", payload: {} }, 5000);
   applyWeather(data);
 }
 
