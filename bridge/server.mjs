@@ -2743,11 +2743,13 @@ async function _executeToolInner(name, args) {
             }
             const minutes = Math.max(1, Math.min(60 * 24 * 30, Number(args?.snoozeMinutes) || 60));
             const newDue = new Date(Date.now() + minutes * 60_000).toISOString();
-            /* No native Reminders.app "snooze" — we just update the due date.
-             * The existing addReminder doesn't update; we'd need a new
-             * Personal.updateReminder. Sprint 9 ships the voice surface,
-             * the Personal-side updater is a follow-up. */
-            return { ok: false, error: `Reminder snooze needs Personal.updateReminder() — wired in next patch. For now, edit "${item.what}" in Reminders.app directly (newDue would be ${newDue}).`, newDue };
+            const r = await Personal.updateReminder({
+              title: item.what,
+              due: newDue,
+              listName: item.raw?.listName || null,
+            });
+            if (!r.ok) return r;
+            return { ok: true, snoozed: item.what, newDue, list: r.list };
           }
           case "accept":
           case "decline": {
@@ -2760,7 +2762,12 @@ async function _executeToolInner(name, args) {
             if (item.kind !== "reminder") {
               return { ok: false, error: `Complete only works for reminders.` };
             }
-            return { ok: false, error: `Reminder completion needs Personal.completeReminder() — wired in next patch. For now, tick "${item.what}" off in Reminders.app.` };
+            const r = await Personal.completeReminder({
+              title: item.what,
+              listName: item.raw?.listName || null,
+            });
+            if (!r.ok) return r;
+            return { ok: true, completed: item.what, list: r.list };
           }
           default:
             return { ok: false, error: `Unknown action "${action}".` };

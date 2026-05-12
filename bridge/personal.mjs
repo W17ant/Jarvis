@@ -147,6 +147,84 @@ return "added"`;
   }
 }
 
+/** Mark a reminder complete by title match.
+ *
+ *  Why match by title rather than ID: AppleScript exposes a stable `id`
+ *  property on Reminders but it's opaque (looks like `x-apple-reminderkit://...`)
+ *  and not surfaced by listReminders — so the smart-inbox aggregator we
+ *  carry forward only knows the title. listName narrows scope so two
+ *  reminders with the same title in different lists don't collide. */
+export async function completeReminder({ title, listName = null }) {
+  const t = String(title || "").trim();
+  if (!t) return { ok: false, error: "title required" };
+  const scope = listName
+    ? `tell list ${osaQuote(String(listName))} of application "Reminders"`
+    : `tell application "Reminders"`;
+  const script = `${scope}
+  try
+    set theRem to first reminder whose name is ${osaQuote(t)} and completed is false
+    set completed of theRem to true
+    return "completed"
+  on error errMsg
+    return "error:" & errMsg
+  end try
+end tell`;
+  try {
+    const out = await runOsa(script);
+    if (String(out).startsWith("error:")) {
+      const msg = String(out).slice(6);
+      if (/Can[' ]?t get/i.test(msg)) {
+        return { ok: false, error: `Reminder "${t}" not found (maybe already complete or in a different list).` };
+      }
+      return { ok: false, error: msg };
+    }
+    return { ok: true, title: t, list: listName || "default" };
+  } catch (e) {
+    if (/-1743/.test(String(e.message))) {
+      return { ok: false, error: "Reminders automation not permitted. Approve in System Settings → Privacy & Security → Automation." };
+    }
+    return { ok: false, error: `osascript failed: ${e.message}` };
+  }
+}
+
+/** Update an open reminder's remind-me date (snooze). Title-matched.
+ *  Accepts an ISO timestamp; AppleScript re-parses via JS Date. */
+export async function updateReminder({ title, due, listName = null }) {
+  const t = String(title || "").trim();
+  if (!t) return { ok: false, error: "title required" };
+  const dt = new Date(due);
+  if (!Number.isFinite(dt.getTime())) return { ok: false, error: "invalid due date" };
+  const iso = dt.toISOString();
+  const scope = listName
+    ? `tell list ${osaQuote(String(listName))} of application "Reminders"`
+    : `tell application "Reminders"`;
+  const script = `${scope}
+  try
+    set theRem to first reminder whose name is ${osaQuote(t)} and completed is false
+    set remind me date of theRem to (date ${osaQuote(iso)})
+    return "updated"
+  on error errMsg
+    return "error:" & errMsg
+  end try
+end tell`;
+  try {
+    const out = await runOsa(script);
+    if (String(out).startsWith("error:")) {
+      const msg = String(out).slice(6);
+      if (/Can[' ]?t get/i.test(msg)) {
+        return { ok: false, error: `Reminder "${t}" not found.` };
+      }
+      return { ok: false, error: msg };
+    }
+    return { ok: true, title: t, due: iso, list: listName || "default" };
+  } catch (e) {
+    if (/-1743/.test(String(e.message))) {
+      return { ok: false, error: "Reminders automation not permitted. Approve in System Settings → Privacy & Security → Automation." };
+    }
+    return { ok: false, error: `osascript failed: ${e.message}` };
+  }
+}
+
 /** List open reminders across one list (default) or all lists.
  *
  *  Returns reminders where `completed` is false. Each row carries title +
