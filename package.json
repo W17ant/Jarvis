@@ -2,7 +2,7 @@
   "name": "jarvis-ai",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Jarvis — white-label voice-first AI assistant. Local Qwen + Whisper + Kokoro, MCP server, code agent, mail/calendar/tasks bridges.",
   "author": {
     "name": "Antony O'Neill",
@@ -21,13 +21,19 @@
     "serve": "python3 -m http.server 8765",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit -p jsconfig.json"
+    "test:smoke:plugin": "node test/build_plugin_smoke.mjs",
+    "typecheck": "tsc --noEmit -p jsconfig.json",
+    "docs:tools": "node tools/build-tool-reference.mjs",
+    "docs:build": "cd docs-site && npm run build",
+    "docs:deploy": "cd docs-site && npm run build && rsync -av --delete dist/ ../../aoneill.co.uk-v2/public/arc/ && echo '✓ Synced to aoneill.co.uk-v2/public/arc — commit + push there to deploy'",
+    "benchmark": "node tools/benchmark.mjs"
   },
   "dependencies": {
     "@sparticuz/chromium-min": "^148.0.0",
     "better-sqlite3": "^12.9.0",
     "docx": "^9.6.1",
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.7.3",
     "playwright-core": "^1.59.1",
     "pptxgenjs": "^4.0.1",
     "puppeteer-core": "^24.42.0",

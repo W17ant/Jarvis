@@ -145,3 +145,11 @@ jarvis-instrument*.png
 jarvis-mk7-*.png
 jarvis-online*.png
 jarvis-temps*.png
+
+# But DO ship the curated marketing captures (README + social).
+!marketing/screenshots/*.png
+!marketing/gifs/*.gif
+
+# Local tooling artefacts (operator's planning notes + /graphify skill output)
+.planning/
+graphify-out/
