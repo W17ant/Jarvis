@@ -37,6 +37,7 @@
   "workspace_insights":  { "label": "Workspace insights", "category": "system",       "phrasings": ["what's in this workspace", "workspace stats", "how active is", "show me workspace details"] },
   "smart_inbox_briefing": { "label": "Smart inbox briefing", "category": "communication", "phrasings": ["what's important", "what should I do first", "brief me", "what's on my plate", "ranked priorities"] },
   "morning_brief":        { "label": "Morning brief",        "category": "communication", "phrasings": ["good morning", "morning brief", "brief me on today", "give me the rundown", "what's the day looking like", "morning briefing", "start of day"] },
+  "ask_workspace_docs":   { "label": "Ask my docs",           "category": "memory",        "phrasings": ["what did I write about", "search my notes for", "what do my docs say about", "find my notes on", "remind me what I said about"] },
   "act_on_inbox_item":   { "label": "Act on inbox item",  "category": "communication", "phrasings": ["reply to the first one", "open the second one", "snooze that", "tick off the third reminder", "accept the next meeting"] },
   "list_reminders":      { "label": "List reminders",     "category": "productivity",  "phrasings": ["what reminders do I have", "show my to-dos", "what's pending", "list my reminders"] },
   "export_workspace":    { "label": "Export workspace",   "category": "system",       "phrasings": ["export this workspace", "back up my workspace", "save workspace bundle"] },

@@ -1664,6 +1664,22 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "ask_workspace_docs",
+      description: "Answer a question grounded in the operator's indexed workspace documents (notes, PDFs, markdown, docx, html). Retrieves the most relevant chunks via hybrid vector+FTS search, then composes a cited answer. Use when the operator says 'what did I write about X', 'search my notes for Y', 'what do my docs say about Z', 'find my notes on W', 'remind me what I said about V'. Differs from ask_internal which queries conversation history + facts: this tool queries the indexed document corpus specifically.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "The operator's natural-language question." },
+          topK: { type: "number", description: "OPTIONAL. Default 6. Number of chunks to retrieve. Higher = more context, slower." },
+          allWorkspaces: { type: "boolean", description: "OPTIONAL. Default false (scope to active workspace). Set true to search across every workspace's indexed docs." },
+        },
+        required: ["question"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "morning_brief",
       description: "Proactive 'good morning, here's your day' briefing. Aggregates weather + today's calendar + smart-inbox priorities + top news headlines into a single 60-90 second flowing narrative — not a list. Use when the operator says 'good morning', 'brief me on today', 'morning brief', 'give me the rundown', 'what's the day looking like in full'. For 'what's important right now' use smart_inbox_briefing instead — that returns a ranked list, this returns a spoken-paragraph narrative covering weather + day shape + headlines.",
       parameters: {
@@ -2825,6 +2841,65 @@ Output ONLY the ranked list + the one-sentence take. No headers, no bullet marke
         sources: inbox.sources,
         generatedAt: inbox.generatedAt,
         fromCache: inbox.fromCache,
+      };
+    }
+    case "ask_workspace_docs": {
+      /* Hybrid retrieve + ground. searchKnowledge already does vector + BM25
+       * fusion; we hand the top-K chunks to the LLM as a tight context and
+       * ask for a cited answer. The workspace scope is implicit — defaults
+       * to the active workspace via _getActiveWorkspaceSlug() inside
+       * searchKnowledge unless allWorkspaces:true. */
+      const question = String(args?.question || "").trim();
+      if (!question) return { ok: false, error: "question required" };
+      const topK = Math.max(1, Math.min(12, Number(args?.topK) || 6));
+      const hits = await Memory.searchKnowledge({
+        query: question,
+        topK,
+        allWorkspaces: !!args?.allWorkspaces,
+      });
+      if (!hits.ok) return hits;
+      if (!hits.results || hits.results.length === 0) {
+        return { ok: true, answer: "I couldn't find anything in your indexed docs about that. Either the topic isn't in the workspace knowledge base, or it hasn't been ingested yet. Try refreshing workspace knowledge.", sources: [] };
+      }
+      /* Compose a tight context block. Each chunk is labelled with its
+       * source so the LLM can cite by document title. Cap chunk size to
+       * keep the prompt well under model limits (qwen2.5:7b is 32k tokens
+       * but we stay conservative for speed). */
+      const contextBlock = hits.results.map((r, i) => {
+        const label = r.source?.title || r.source?.relPath || `doc-${r.source?.documentId}`;
+        const snippet = String(r.content || "").slice(0, 800);
+        return `[${i + 1}] ${label}\n${snippet}`;
+      }).join("\n\n---\n\n");
+      const w = Workspaces.getActive();
+      const prompt = `Answer the operator's question using ONLY the document excerpts below. If the excerpts don't contain the answer, say so plainly — do not invent.
+
+Cite the source numbers ([1], [2], etc.) inline where each fact comes from. Keep the answer to 3-5 sentences for spoken delivery.
+
+Question: ${question}
+
+Document excerpts:
+${contextBlock}
+
+Answer:`;
+      let answer;
+      try {
+        answer = await askLLM(prompt, [], { sessionId: null, workspace: w?.slug || null });
+      } catch (e) {
+        return { ok: false, error: `LLM ground failed: ${e.message}`, sources: hits.results.map((r) => r.source) };
+      }
+      /* Distinct sources for citation list — the LLM cites by ordinal,
+       * the operator hears the answer and can ask "open source 2" later
+       * via open_url or a follow-up tool. */
+      const sourceMap = new Map();
+      for (const r of hits.results) {
+        const key = r.source?.documentId;
+        if (key && !sourceMap.has(key)) sourceMap.set(key, r.source);
+      }
+      return {
+        ok: true,
+        answer,
+        sources: [...sourceMap.values()],
+        chunks: hits.results.length,
       };
     }
     case "open_app":          return await MacControl.openApp(args?.name);
