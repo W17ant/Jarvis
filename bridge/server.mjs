@@ -1592,6 +1592,21 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "morning_brief",
+      description: "Proactive 'good morning, here's your day' briefing. Aggregates weather + today's calendar + smart-inbox priorities + top news headlines into a single 60-90 second flowing narrative — not a list. Use when the operator says 'good morning', 'brief me on today', 'morning brief', 'give me the rundown', 'what's the day looking like in full'. For 'what's important right now' use smart_inbox_briefing instead — that returns a ranked list, this returns a spoken-paragraph narrative covering weather + day shape + headlines.",
+      parameters: {
+        type: "object",
+        properties: {
+          force: { type: "boolean", description: "OPTIONAL. Default false. Skip cached weather/inbox/news and refetch every source. Use when the operator says 'fresh morning brief' or it's been hours since the last." },
+          newsCount: { type: "number", description: "OPTIONAL. Default 3. Number of news headlines to mention. Cap 5 — beyond that the brief stops being a brief." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "workspace_insights",
       description: "Summarise what's in a workspace: turn count (all-time + last 7 days), conversation summaries, contacts, projects, facts, indexed documents. Use when the operator says 'how active is the consulting workspace', 'what's in this workspace', 'show me workspace stats'. Defaults to the active workspace.",
       parameters: {
@@ -2726,6 +2741,92 @@ Output ONLY the ranked list + the one-sentence take. No headers, no bullet marke
         sources: inbox.sources,
         generatedAt: inbox.generatedAt,
         fromCache: inbox.fromCache,
+      };
+    }
+    case "morning_brief": {
+      /* Stitch four prewarmed sources into a flowing narrative the LLM can speak.
+       * Each fetch is independent so we run them in parallel; a failure on one
+       * source degrades gracefully (e.g. weather down -> brief still mentions
+       * calendar + inbox + news, just no weather line). */
+      const force = !!args?.force;
+      const newsCount = Math.max(1, Math.min(5, Number(args?.newsCount) || 3));
+      const w = Workspaces.getActive();
+      const [weather, inbox, newsCache] = await Promise.all([
+        getWeather(undefined, undefined, 1, { force }).catch(() => null),
+        Inbox.aggregate({ days: 1, mailMax: 15, force }).catch(() => ({ items: [] })),
+        Promise.resolve(News.getCached()),
+      ]);
+      /* Weather line: short and direct, lets the LLM pick whether to mention
+       * forecast or just current. WMO label keeps phrasing natural. */
+      const weatherLine = weather?.now
+        ? `${weather.now.temp} degrees and ${wmoLabel(weather.now.code)} in ${CONFIG.operator.city}` +
+          (weather.forecast?.[0] ? `, today's high ${weather.forecast[0].hi}` : "")
+        : "weather unavailable";
+      /* Calendar today: filter inbox items to just calendar entries with a
+       * minutes-away hint. Keeps the brief grounded in concrete events. */
+      const calendarToday = (inbox.items || [])
+        .filter((it) => it.kind === "calendar")
+        .slice(0, 5)
+        .map((it) => {
+          const m = it.urgency_hints?.minutesAway;
+          const when = m == null ? "" : m < 60 && m > 0 ? `in ${m} min` : m < 0 ? `${Math.abs(m)} min ago` : `${Math.round(m / 60)}h away`;
+          return `- ${it.who || it.what}${when ? ` (${when})` : ""}`;
+        }).join("\n") || "(nothing scheduled)";
+      /* Inbox priorities: top 3 non-calendar items. The smart_inbox_briefing
+       * tool does its own LLM ranking; here we skip that step and just hand
+       * the LLM the raw signals so the narrative composes cleanly. */
+      const inboxLines = (inbox.items || [])
+        .filter((it) => it.kind !== "calendar")
+        .slice(0, 3)
+        .map((it) => `- ${it.who}: ${it.what}${it.preview ? ` — ${it.preview.slice(0, 60)}` : ""}`)
+        .join("\n") || "(inbox is clear)";
+      /* News: pick top N headlines, prefer mainstream feeds (sky/bbc/guardian)
+       * over HN so the brief stays general-audience. Strip source tags from
+       * the LLM input — the narrative voice shouldn't sound like a feed reader. */
+      const headlines = (newsCache?.topStories || [])
+        .slice(0, newsCount)
+        .map((h) => `- ${h.title}`)
+        .join("\n") || "(news cache empty)";
+      const handbookFragment = w?.handbook
+        ? `\nWorkspace context (operator's prose — set the tone accordingly):\n${w.handbook}\n`
+        : "";
+      const now = new Date();
+      const greeting = now.getHours() < 12 ? "Morning" : now.getHours() < 17 ? "Afternoon" : "Evening";
+      const prompt = `You are composing a spoken morning brief for the operator. Output 60-90 seconds of natural narrative speech — no headers, no bullet points, no markdown, no list-of-lists.
+
+Lead with: "${greeting}, sir." Then weave together the four data sources below into a single flowing paragraph. Mention weather first (one sentence), then the shape of the day from the calendar (one to two sentences), then any inbox priorities worth flagging (one to two sentences), then top news headlines as a brief mention (one sentence summarising the day's themes — do not list every headline). End with a single transition line like "anything else you want to dig into first?" or similar.
+
+Tone: warm but efficient. Like a trusted aide handing over the day, not a robot reading data. ${handbookFragment}
+
+WEATHER:
+${weatherLine}
+
+CALENDAR TODAY:
+${calendarToday}
+
+INBOX PRIORITIES:
+${inboxLines}
+
+TOP HEADLINES:
+${headlines}
+
+Output ONLY the narrative paragraph. No preface, no sign-off beyond the transition question.`;
+      let narrative;
+      try {
+        narrative = await askLLM(prompt, [], { sessionId: null, workspace: w?.slug || null });
+      } catch (e) {
+        return { ok: false, error: `LLM compose failed: ${e.message}` };
+      }
+      return {
+        ok: true,
+        narrative,
+        sources: {
+          weather: !!weather?.now,
+          calendarEvents: calendarToday !== "(nothing scheduled)",
+          inboxItems: inboxLines !== "(inbox is clear)",
+          headlines: headlines !== "(news cache empty)",
+        },
+        generatedAt: new Date().toISOString(),
       };
     }
     case "workspace_insights": {
