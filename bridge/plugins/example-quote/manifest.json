@@ -1,0 +1,24 @@
+{
+  "name": "example-quote",
+  "version": "1.0.0",
+  "description": "Reference plugin — returns a random programming quote. Demonstrates the manifest + handler shape with no external dependencies.",
+  "tools": [
+    {
+      "name": "random_quote",
+      "description": "Return a random programming or engineering quote, attributed. Use when the operator asks for inspiration, a quote, a fortune-cookie line, or 'something witty'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Optional filter — currently informational only; the example plugin ignores this and returns any quote."
+          }
+        },
+        "required": []
+      }
+    }
+  ],
+  "env": [],
+  "handler": "./handler.mjs",
+  "confirmation": {}
+}
