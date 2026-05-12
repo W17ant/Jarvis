@@ -3095,7 +3095,12 @@ async function boot() {
   // buildTicks();
   // buildNumerals();
   renderCalendar();
-  renderWeather();             // initial mocked forecast — replaced when bridge weather arrives
+  /* Why: don't paint a mocked forecast at boot. The mock built 3-child <li>
+   * rows (day/hi/lo) but applyWeather builds 4-child rows (icon/day/hi/lo)
+   * so the CSS grid (22px 1fr auto auto) squashes "TOMORROW" into the 22px
+   * icon column on first paint, visually colliding with the high temp.
+   * Leave the forecast empty — applyWeather populates it sub-second once
+   * the bridge weather reply lands. */
   setMonthRing();
   tickClock();
   setInterval(tickClock, 1000);
