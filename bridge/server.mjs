@@ -5386,6 +5386,50 @@ const httpServer = createServer(async (req, res) => {
     }
     return;
   }
+  /* POST /api/visual/analyse — HUD drag-and-drop endpoint.
+   *
+   * Body: raw image/video bytes. Filename in ?name=<encoded> query param.
+   *
+   * Drag-and-drop is intent enough — we skip the existing inbox-watcher
+   * "want me to look at it?" verbal confirmation and run describe_image
+   * immediately. Folder-watch path in inbox/ stays for Finder-based drops
+   * where the operator may not be looking at the HUD.
+   *
+   * Files land in data/visual-drops/<date>/ rather than inbox/ so the
+   * watcher does not double-fire. resolveSafePath in Vision.describeImage
+   * accepts paths under PROJECT_DIR; data/ is inside that. */
+  if (req.url.startsWith("/api/visual/analyse") && req.method === "POST") {
+    try {
+      const url = new URL(req.url, "http://localhost");
+      const rawName = url.searchParams.get("name") || "drop.bin";
+      /* Sanitise: strip directory traversal, keep alnum + dot + dash + underscore. */
+      const safeName = rawName.replace(/[^\w.\- ]/g, "_").slice(0, 100);
+      const fsp = await import("node:fs/promises");
+      const today = new Date().toISOString().slice(0, 10);
+      /* Saved under output/ rather than data/ so the bridge's existing
+       * /output/* static handler can serve the thumbnail back to the HUD
+       * without a new file-serving endpoint. */
+      const dropDir = path.resolve(PROJECT_ROOT, "output", "visual-drops", today);
+      await fsp.mkdir(dropDir, { recursive: true });
+      const ts = Date.now();
+      const dest = path.join(dropDir, `${ts}-${safeName}`);
+      const chunks = [];
+      for await (const c of req) chunks.push(c);
+      await fsp.writeFile(dest, Buffer.concat(chunks));
+      /* Relative path inside PROJECT_DIR — what Vision.describeImage expects. */
+      const relPath = path.relative(PROJECT_ROOT, dest);
+      const result = await Vision.describeImage({ path: relPath });
+      /* Broadcast so any future visual-result panel can subscribe rather than
+       * the HUD having to round-trip the response. */
+      broadcastToClients({ type: "visual.analysed", data: { path: relPath, ...result } });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (e) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+    }
+    return;
+  }
   if (req.url === "/workspaces/active" && req.method === "POST") {
     let body = "";
     for await (const chunk of req) body += chunk;

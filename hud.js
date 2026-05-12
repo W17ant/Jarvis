@@ -7,6 +7,7 @@ import * as Voice from "./voice.js";
 import * as WorkspaceSwitcher from "./workspace-switcher.js";
 import * as Inbox from "./inbox.js";
 import * as Orb from "./orb.js";
+import * as VisualDrop from "./visual-drop.js";
 /* Sprint 12 — share bridge-client's WS instead of opening hud.js's own.
  * Two WSes per tab × N tabs was overwhelming Chrome's localhost networking
  * stack, causing the cycling-disconnects bug. One WS per tab now. */
@@ -3075,6 +3076,10 @@ async function boot() {
    * fires the briefing tool independently; the panel is the visual
    * always-on reminder that operators can spot at a glance. */
   Inbox.init();
+  /* HUD-wide drag-and-drop for image / video analysis. Independent of the
+   * inbox/ folder-watcher path — drag-drop runs describe_image directly
+   * without the "want me to look at it?" verbal handshake. */
+  VisualDrop.init();
 
   /* Centerpiece picker. Default = "reactor" (existing SVG instrument
    * cluster). Operators who pick "orb" via Settings → Centerpiece get

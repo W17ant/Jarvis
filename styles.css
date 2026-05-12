@@ -6384,3 +6384,62 @@ body.is-typing .speedo {
   font-size: 13px; line-height: 1.5;
   color: #e7e7e7;
 }
+
+/* ---------- VISUAL DROP OVERLAY ----------
+ * Full-screen drag-and-drop target for image / video analysis. Toggled
+ * by visual-drop.js — hidden by default, shown while a drag is in
+ * flight over the document. */
+#visual-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(2, 6, 12, 0.78);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;  /* lets dragenter on document still fire; drop fires on document.body via capture */
+  border: 2px dashed var(--accent, #00d4ff);
+  box-sizing: border-box;
+}
+#visual-drop-overlay[hidden] { display: none; }
+.visual-drop-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 40px 60px;
+  font-family: var(--font-display, "Oswald"), system-ui, sans-serif;
+  color: var(--accent, #00d4ff);
+  text-align: center;
+  max-width: 70vw;
+}
+.visual-drop-icon {
+  font-size: 80px;
+  line-height: 1;
+  opacity: 0.85;
+}
+.visual-drop-title {
+  font-size: 28px;
+  letter-spacing: 0.32em;
+  font-weight: 500;
+}
+.visual-drop-sub {
+  font-size: 13px;
+  letter-spacing: 0.24em;
+  color: var(--text-dim, rgba(232, 244, 255, 0.55));
+  text-transform: uppercase;
+}
+.visual-drop-msg {
+  margin-top: 8px;
+  padding: 14px 22px;
+  border: 1px solid var(--accent, #00d4ff);
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--text, #e8f4ff);
+  font-family: var(--font-body, "Rubik"), system-ui, sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  max-width: 60vw;
+}
+.visual-drop-msg[hidden] { display: none; }
