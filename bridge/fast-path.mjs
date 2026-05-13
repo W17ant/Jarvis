@@ -101,6 +101,120 @@ const HANDLERS = [
     },
   },
 
+  /* ---------- Timer follow-ons ----------
+   *  After "set a timer for X", the operator commonly says "what timers
+   *  are running" / "cancel timer" / "stop the timer" without re-wake.
+   *  Both are deterministic intents — keep them out of the LLM. */
+  {
+    test: /^(?:what\s+timers?(?:\s+(?:are\s+)?(?:running|active|going|set))?|(?:list|show)(?:\s+me)?\s+(?:my\s+|the\s+)?timers?|any\s+(?:active\s+)?timers?(?:\s+running)?)\.?\??$/i,
+    handle: () => ({ match: true, reply: (r) => r?.summary || "Listing timers.", toolCall: { name: "list_timers", args: {} } }),
+  },
+  {
+    test: /^(?:cancel|stop|kill|abort|clear)\s+(?:the\s+|all\s+|my\s+)?timers?\.?$/i,
+    handle: () => ({ match: true, reply: "Timer cancelled.", toolCall: { name: "cancel_timer", args: {} } }),
+  },
+
+  /* ---------- Focus / Do Not Disturb ----------
+   *  macOS Focus modes via voice. "Focus mode on/off" / "DnD on/off" /
+   *  "quiet for an hour". Tight pattern — anything else falls through. */
+  {
+    test: /^(?:(?:turn\s+(?:on\s+)?|enable\s+|start\s+)?(?:do\s*not\s*disturb|dnd|focus\s*(?:mode)?)\s*(?:on|please)?|focus\s+mode)\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Focus on.",
+      toolCall: { name: "set_focus", args: { mode: "do-not-disturb" } },
+    }),
+  },
+  {
+    test: /^(?:(?:turn\s+off|disable|end|stop|cancel)\s+(?:do\s*not\s*disturb|dnd|focus(?:\s+mode)?)|(?:do\s*not\s*disturb|dnd|focus(?:\s+mode)?)\s+off|focus\s+off)\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Focus off.",
+      toolCall: { name: "set_focus", args: { mode: "none" } },
+    }),
+  },
+
+  /* ---------- Play / pause music ----------
+   *  "Play [song/artist/playlist]" with optional content captures what to
+   *  play; the tool defaults to Apple Music. Bare "play" without an object
+   *  doesn't match here — falls through to the LLM (which can disambiguate
+   *  with context if the operator just resumed a recipe video etc).
+   *  Pause is narrower — "pause the music" / "stop the music" — to avoid
+   *  catching "pause that" mid-conversation where the operator means
+   *  pausing Daniel. */
+  {
+    test: /^(?:play|put\s+on|throw\s+on|stick\s+on)\s+(?:some\s+|a\s+bit\s+of\s+|the\s+)?(.{1,80}?)(?:\s+(?:please|now))?\.?$/i,
+    handle: (_clean, match) => {
+      const query = (match?.[1] || "").trim();
+      if (!query || query.length < 2) return { match: false };
+      /* Reject phrasings that mean "play [a tool/action]" not music. */
+      if (/^(?:the\s+)?(?:tool|app|video|clip|movie|trailer|teaser|preview|news|brief)\b/i.test(query)) return { match: false };
+      return {
+        match: true,
+        reply: `Playing ${query}.`,
+        toolCall: { name: "play_music", args: { query, app: "music" } },
+      };
+    },
+  },
+  {
+    test: /^(?:pause|stop)\s+(?:the\s+)?(?:music|song|track|playback|tune)\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Paused.",
+      toolCall: { name: "pause_music", args: { app: "music" } },
+    }),
+  },
+
+  /* ---------- Undo / scratch that ----------
+   *  Short, deterministic, urgent. Operator just made a mistake and wants
+   *  to reverse it. LLM-routed adds 1-2s of dead air for a one-word query. */
+  {
+    test: /^(?:undo(?:\s+that)?|scratch\s+that|go\s+back|cancel\s+that|never\s*mind\s+that|nope\s+undo)\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Undone.",
+      toolCall: { name: "undo_last", args: {} },
+    }),
+  },
+
+  /* ---------- List reminders ----------
+   *  Distinct from "brief me" (which aggregates mail + cal + reminders).
+   *  This is the focused "just my todos" query. */
+  {
+    test: /^(?:what\s+reminders?(?:\s+do\s+i\s+have)?|show\s+(?:me\s+)?(?:my\s+)?(?:reminders?|to-?dos?|todos)|list\s+(?:my\s+)?reminders?|what(?:'s|s| is)?\s+pending|what\s+(?:are\s+)?my\s+to-?dos?)\.?\??$/i,
+    handle: () => ({
+      match: true,
+      reply: (r) => r?.summary || "Pulling up reminders.",
+      toolCall: { name: "list_reminders", args: {} },
+    }),
+  },
+
+  /* ---------- Cancel active jobs / abort ----------
+   *  When an LLM-routed tool is mid-flight (render, fal.ai generation,
+   *  ~30s captioning), the operator needs a hard cancel. Going through
+   *  the LLM to cancel is the worst time to depend on the LLM. */
+  {
+    test: /^(?:stop\s+everything|cancel\s+(?:all\s+)?(?:jobs|tasks|everything)|abort(?:\s+(?:all|everything))?|kill\s+(?:all|everything|the\s+jobs?))\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Cancelling.",
+      toolCall: { name: "cancel_active_jobs", args: {} },
+    }),
+  },
+
+  /* ---------- Workspace navigation ----------
+   *  Workspaces have a separate /workspaces HTTP surface for the switcher
+   *  modal, but voice "what workspaces do I have" / "which workspace am I
+   *  in" should resolve instantly without LLM. */
+  {
+    test: /^(?:what|which|list)\s+workspaces?(?:\s+(?:do\s+i\s+have|are\s+available|exist))?\.?\??$/i,
+    handle: () => ({
+      match: true,
+      reply: (r) => r?.summary || "Listing workspaces.",
+      toolCall: { name: "list_workspaces", args: {} },
+    }),
+  },
+
   /* ---------- Sleep / shutdown ----------
    *  These have to bypass the LLM because the operator's tone is usually
    *  short and abrupt — perfect to mishear. Pattern-match locks them in.
@@ -415,7 +529,7 @@ const HANDLERS = [
    *  Security-conscious "I'm stepping away" verb. Distinct from sleep mode
    *  (the assistant's own sleep) — this locks the Mac itself. */
   {
-    test: /^(?:lock\s+(?:the\s+)?(?:screen|mac|computer|machine)|lock\s+(?:me\s+)?out|i'?m\s+stepping\s+away)\.?$/i,
+    test: /^(?:lock\s+(?:the\s+|my\s+|this\s+)?(?:screen|mac|computer|machine|display)|lock\s+(?:me\s+)?(?:out|down)|i'?m\s+stepping\s+away)\.?$/i,
     handle: () => ({
       match: true,
       reply: "Locking.",
