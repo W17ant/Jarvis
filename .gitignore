@@ -152,4 +152,8 @@ jarvis-temps*.png
 
 # Local tooling artefacts (operator's planning notes + /graphify skill output)
 .planning/
+
+# LoRA training artefacts — large + machine-specific
+training/.venv/
+training/output/
 graphify-out/

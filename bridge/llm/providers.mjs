@@ -23,7 +23,13 @@
  */
 
 const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
-const OPENAI_API = "https://api.openai.com/v1/chat/completions";
+/* OPENAI_API is env-configurable so any OpenAI-compatible server can sub in.
+ * Use case: point at mlx-lm.server (http://localhost:8080/v1/chat/completions
+ * by default) to serve a locally fine-tuned LoRA adapter through the same
+ * code path as the cloud OpenAI provider. Set OPENAI_API_KEY to any
+ * non-empty string (mlx-lm.server doesn't check) and LLM_PROVIDER_DEFAULT
+ * to "openai" — bridge then routes to the local MLX server. */
+const OPENAI_API = process.env.OPENAI_API_BASE || "https://api.openai.com/v1/chat/completions";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 
 /* Lazy import for the system-warnings registry — avoids a top-level circular
