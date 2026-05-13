@@ -334,6 +334,139 @@ const HANDLERS = [
     }),
   },
 
+  /* ---------- Open macOS application ----------
+   *  Beats the URL-whitelist handler below because "open Photoshop" should
+   *  open Photoshop the app, not search for "photoshop" on the web. Curated
+   *  list of common apps a media-agency operator names by voice. Anything
+   *  not in the list falls through to the URL whitelist + ultimately the
+   *  LLM. Each entry maps spoken name → exact .app activation name. Aliases
+   *  on the left, canonical app name on the right. */
+  {
+    test: /^(?:open|launch|start|fire\s+up|switch\s+to|bring\s+up)\s+(?:the\s+|adobe\s+)?(photoshop|premiere(?:\s+pro)?|after\s+effects|illustrator|lightroom(?:\s+classic)?|bridge|indesign|audition|media\s+encoder|final\s+cut(?:\s+pro)?|davinci(?:\s+resolve)?|logic(?:\s+pro)?|garageband|safari|chrome|google\s+chrome|firefox|brave|arc|mail|messages|imessage|calendar|reminders|notes|music|spotify|slack|discord|zoom|teams|microsoft\s+teams|terminal|iterm|iterm2|vs\s*code|visual\s+studio\s+code|xcode|figma|sketch|notion|obsidian|things|fantastical|preview|finder|system\s+settings|system\s+preferences)\b\.?$/i,
+    handle: (_clean, match) => {
+      const spoken = (match?.[1] || "").trim().toLowerCase().replace(/\s+/g, " ");
+      /* Map spoken aliases to the canonical macOS app name. Keep this list
+       * tight — anything missing falls through to LLM which can call
+       * open_app with the operator's literal phrasing. */
+      const APP_MAP = {
+        "photoshop": "Adobe Photoshop 2026",
+        "premiere": "Adobe Premiere Pro 2026", "premiere pro": "Adobe Premiere Pro 2026",
+        "after effects": "Adobe After Effects 2026",
+        "illustrator": "Adobe Illustrator 2026",
+        "lightroom": "Adobe Lightroom Classic", "lightroom classic": "Adobe Lightroom Classic",
+        "bridge": "Adobe Bridge 2026",
+        "indesign": "Adobe InDesign 2026",
+        "audition": "Adobe Audition 2026",
+        "media encoder": "Adobe Media Encoder 2026",
+        "final cut": "Final Cut Pro", "final cut pro": "Final Cut Pro",
+        "davinci": "DaVinci Resolve", "davinci resolve": "DaVinci Resolve",
+        "logic": "Logic Pro", "logic pro": "Logic Pro",
+        "garageband": "GarageBand",
+        "safari": "Safari", "chrome": "Google Chrome", "google chrome": "Google Chrome",
+        "firefox": "Firefox", "brave": "Brave Browser", "arc": "Arc",
+        "mail": "Mail", "messages": "Messages", "imessage": "Messages",
+        "calendar": "Calendar", "reminders": "Reminders", "notes": "Notes",
+        "music": "Music", "spotify": "Spotify",
+        "slack": "Slack", "discord": "Discord", "zoom": "zoom.us",
+        "teams": "Microsoft Teams", "microsoft teams": "Microsoft Teams",
+        "terminal": "Terminal", "iterm": "iTerm", "iterm2": "iTerm",
+        "vscode": "Visual Studio Code", "vs code": "Visual Studio Code", "visual studio code": "Visual Studio Code",
+        "xcode": "Xcode", "figma": "Figma", "sketch": "Sketch",
+        "notion": "Notion", "obsidian": "Obsidian", "things": "Things3", "fantastical": "Fantastical",
+        "preview": "Preview", "finder": "Finder",
+        "system settings": "System Settings", "system preferences": "System Settings",
+      };
+      const canonical = APP_MAP[spoken];
+      if (!canonical) return { match: false };
+      return {
+        match: true,
+        reply: `Opening ${canonical.replace(/\s+\d{4}$/, "")}.`,
+        toolCall: { name: "open_app", args: { name: canonical } },
+      };
+    },
+  },
+
+  /* ---------- System volume ----------
+   *  "Volume X" / "set volume to X" / "turn it up/down" / "mute". The LLM
+   *  routes these inconsistently; fast-path is sharper. Numeric absolutes
+   *  pass through directly; relative phrases ("a bit", "a lot") map to
+   *  conservative deltas via a sane default. */
+  {
+    test: /^(?:(?:set\s+(?:the\s+)?)?volume\s+(?:to\s+|at\s+)?(\d{1,3})|set\s+(?:the\s+)?volume\s+(?:to\s+|at\s+)?(\d{1,3})\s*(?:percent)?)\.?$/i,
+    handle: (_clean, match) => {
+      const level = Math.max(0, Math.min(100, Number(match?.[1] || match?.[2])));
+      return {
+        match: true,
+        reply: level === 0 ? "Muted." : `Volume ${level}.`,
+        toolCall: { name: "set_system_volume", args: { level } },
+      };
+    },
+  },
+  {
+    test: /^(?:mute(?:\s+(?:the\s+)?(?:sound|volume|audio))?|silence(?:\s+the\s+(?:sound|volume))?|turn\s+(?:the\s+)?(?:sound|volume|audio)\s+off|sound\s+off)\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Muting.",
+      toolCall: { name: "set_system_volume", args: { level: 0 } },
+    }),
+  },
+
+  /* ---------- Lock screen ----------
+   *  Security-conscious "I'm stepping away" verb. Distinct from sleep mode
+   *  (the assistant's own sleep) — this locks the Mac itself. */
+  {
+    test: /^(?:lock\s+(?:the\s+)?(?:screen|mac|computer|machine)|lock\s+(?:me\s+)?out|i'?m\s+stepping\s+away)\.?$/i,
+    handle: () => ({
+      match: true,
+      reply: "Locking.",
+      toolCall: { name: "lock_screen", args: {} },
+    }),
+  },
+
+  /* ---------- "Find me X near Y" / search queries ----------
+   *  Routes the most common 7b failure mode (operator asks for a real-world
+   *  place and the model recites training data instead of calling a tool)
+   *  to a Google Maps search opened in the browser. Distinct from the
+   *  "show me a map of X" branch in the show-me handler below — this one
+   *  catches the natural "find me a cafe near the beach" / "any pubs
+   *  near here" phrasings the LLM keeps missing. */
+  {
+    test: /^(?:find\s+(?:me\s+)?(?:a\s+|an\s+|some\s+)?|are\s+there\s+any\s+|is\s+there\s+(?:a\s+|an\s+|any\s+)?|any\s+)([a-z][a-z\s'.-]{2,60}?)(?:\s+(?:near|in|around|by|close\s+to)\s+(.{2,80}?))?\.?\??$/i,
+    handle: (clean, match) => {
+      const what = (match?.[1] || "").trim();
+      const where = (match?.[2] || "").trim();
+      if (!what) return { match: false };
+      /* Skip phrasings that are conversational rather than location queries
+       * — "find me the time" / "is there any news" / "any reminders" should
+       * route to their existing handlers above, not Google Maps. */
+      if (/^(?:the\s+)?(?:time|news|reminders?|emails?|messages?|weather|forecast|date|day)\b/i.test(what)) return { match: false };
+      const query = where ? `${what} near ${where}` : what;
+      const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+      return {
+        match: true,
+        reply: `Pulling up ${query}.`,
+        toolCall: { name: "open_url", args: { url, reason: `find: ${query}`, confirmed: true } },
+      };
+    },
+  },
+
+  /* ---------- "Search for X" / "look up X" ----------
+   *  Google search via open_url. Catches the second-most-common LLM-fails-
+   *  to-tool-call pattern: operator wants real-world info, model recites. */
+  {
+    test: /^(?:(?:google|search\s+(?:the\s+web\s+)?for|look\s+up|do\s+a\s+search\s+for|web\s+search\s+for)|what(?:'?s| is)\s+the\s+(?:price|cost|current\s+price)\s+of)\s+(.+?)\.?\??$/i,
+    handle: (_clean, match) => {
+      const query = (match?.[1] || "").trim();
+      if (!query) return { match: false };
+      const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+      return {
+        match: true,
+        reply: `Searching for ${query}.`,
+        toolCall: { name: "open_url", args: { url, reason: `search: ${query}`, confirmed: true } },
+      };
+    },
+  },
+
   /* ---------- Open well-known sites ----------
    *  Local qwen2.5:7b narrates "Opening the BBC News homepage" without ever
    *  firing open_url — same hallucination pattern we hit on news / brief.
