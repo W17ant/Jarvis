@@ -545,7 +545,7 @@ const HANDLERS = [
    *  catches the natural "find me a cafe near the beach" / "any pubs
    *  near here" phrasings the LLM keeps missing. */
   {
-    test: /^(?:find\s+(?:me\s+)?(?:a\s+|an\s+|some\s+)?|are\s+there\s+any\s+|is\s+there\s+(?:a\s+|an\s+|any\s+)?|any\s+)([a-z][a-z\s'.-]{2,60}?)(?:\s+(?:near|in|around|by|close\s+to)\s+(.{2,80}?))?\.?\??$/i,
+    test: /^(?:find\s+(?:me\s+)?(?:a\s+|an\s+|some\s+)?|are\s+there\s+any\s+|is\s+there\s+(?:a\s+|an\s+|any\s+)?|any\s+|where(?:'?s|\s+is)\s+(?:the\s+)?(?:nearest\s+|closest\s+|best\s+|a\s+|an\s+|some\s+|any\s+)?|where\s+can\s+i\s+(?:find|get|buy)\s+(?:a\s+|an\s+|some\s+)?|where\s+do\s+i\s+(?:find|get|buy)\s+(?:a\s+|an\s+|some\s+)?|show\s+me\s+(?:a\s+|the\s+nearest\s+|the\s+closest\s+|some\s+)?)([a-z][a-z\s'.-]{2,60}?)(?:\s+(?:near|in|around|by|close\s+to)\s+(.{2,80}?))?\.?\??$/i,
     handle: (clean, match) => {
       const what = (match?.[1] || "").trim();
       const where = (match?.[2] || "").trim();
