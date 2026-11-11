@@ -90,7 +90,8 @@ function _onOver(ev) {
   if (found.el === _currentTarget) return;
   _currentTarget = found.el;
   if (_showTimer) clearTimeout(_showTimer);
-  _showTimer = setTimeout(() => _showFor(found.el, found.text), APPEAR_DELAY_MS);
+  // Why window.: with @types/node in the program, bare setTimeout types as Node's Timeout, not the browser's number
+  _showTimer = window.setTimeout(() => _showFor(found.el, found.text), APPEAR_DELAY_MS);
 }
 
 function _onOut(ev) {

@@ -10,6 +10,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+// Why: memory.mjs owns the schema (facts, conversation_turns, ...) and creates it
+// on import; on a fresh checkout (CI) data/memory.db has no tables until it runs
+import "../bridge/memory.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
