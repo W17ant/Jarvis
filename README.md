@@ -18,7 +18,7 @@
               ╩  ╩ ╩ ╩╚═  ╚╝  ╩ ╚═╝
 ```
 
-[**Quickstart →**](https://aoneill.co.uk/arc/quickstart/) · [**White-label install →**](docs/install-for-clients.md) · [**Privacy →**](docs/privacy.md) · [**60+ tools →**](docs/tool-reference.md) · [**Plugin authoring →**](docs/plugin-authoring.md) · [**Vision & roadmap →**](docs/vision-and-roadmap.md)
+[**Quickstart →**](https://aoneill.co.uk/arc/quickstart/) · [**White-label install →**](docs/install-for-clients.md) · [**Privacy →**](docs/privacy.md) · [**76+ tools →**](docs/tool-reference.md) · [**Plugin authoring →**](docs/plugin-authoring.md) · [**Vision & roadmap →**](docs/vision-and-roadmap.md)
 
 **Built by [Antony O'Neill](https://www.linkedin.com/in/antonyoneilladl/) · [aoneill.co.uk](https://aoneill.co.uk) · MIT licensed**
 
@@ -28,7 +28,7 @@
 
 A complete on-prem voice-first AI workstation for Apple Silicon. Wake it with your custom phrase. It listens, thinks, talks back, and runs tools — all without a cloud round-trip by default. The HUD looks like an arc-reactor instrument cluster on a 27"+ display: real CPU/GPU temps via [macmon](https://github.com/vladkens/macmon), live mic waveform centerpiece, paired core-telemetry dials, and a transcript drawer that surfaces every tool the agent ran.
 
-White-label by design — every brand string, colour, and wake phrase lives in `config/brand.json`. Hot-load plugins drop into `bridge/plugins/<name>/`. 60+ voice-callable tools categorised across communication / productivity / creative / system / memory.
+White-label by design — every brand string, colour, and wake phrase lives in `config/brand.json`. Hot-load plugins drop into `bridge/plugins/<name>/`. 76+ voice-callable tools categorised across communication / productivity / creative / system / memory.
 
 Whisper STT → Ollama LLM → Kokoro TTS pipeline. Default config: nothing leaves your Mac.
 
@@ -195,7 +195,7 @@ Common gotchas (full FAQ in `docs/install-guide.html` pages 11–13):
               ┌────────────────────┴────────────────────┐
               │            Bridge (Node 22)             │
               │ ─────────────────────────────────────── │
-              │  60+ tool dispatch · MCP server        │
+              │  76+ tool dispatch · MCP server        │
               │  Sentence-level LLM streaming · Audit   │
               │  Tasks · Undo · Memory · Notifications  │
               └─┬──────┬──────┬──────┬──────────┘
