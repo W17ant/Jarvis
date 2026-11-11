@@ -76,6 +76,7 @@ if [[ -d "$HERE/data/audit/sessions" ]]; then
   mkdir -p "$META_DIR/sessions"
   # Find the 7 most recent JSONL files. macOS find lacks -printf so we use
   # a portable sort-by-name (filenames are YYYY-MM-DD so lexical sort works).
+  # shellcheck disable=SC2012  # Why: these are our own timestamped file names (no spaces); ls | sort -r gives newest first
   for f in $(ls -1 "$HERE/data/audit/sessions"/*.jsonl 2>/dev/null | sort -r | head -7); do
     cp "$f" "$META_DIR/sessions/$(basename "$f")"
   done
@@ -86,6 +87,7 @@ fi
 # bug report; the bundle without crashes is missing the most important context.
 if [[ -d "$HERE/data/audit/crashes" ]]; then
   mkdir -p "$META_DIR/crashes"
+  # shellcheck disable=SC2012  # Why: as above, our own timestamped file names
   for f in $(ls -1 "$HERE/data/audit/crashes"/*.jsonl 2>/dev/null | sort -r | head -7); do
     cp "$f" "$META_DIR/crashes/$(basename "$f")"
   done

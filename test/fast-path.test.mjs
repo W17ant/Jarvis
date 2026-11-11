@@ -8,6 +8,9 @@
  *  for everyone. These tests pin every phrasing we've validated by hand so
  *  future regex tweaks don't regress.
  *
+ *  tryFastPath is async (a handler may look something up), so every case
+ *  awaits it; called without await each one saw a Promise and failed.
+ *
  *  Each block targets one handler. Inputs are real operator phrasings, plus
  *  a handful of false-positive probes that MUST fall through to the LLM.
  */
@@ -16,7 +19,7 @@ import { describe, expect, it } from "vitest";
 import { tryFastPath, listHandlers } from "../bridge/fast-path.mjs";
 
 describe("fast-path: handlers registry", () => {
-  it("exposes a non-empty handler list", () => {
+  it("exposes a non-empty handler list", async () => {
     const handlers = listHandlers();
     expect(handlers.length).toBeGreaterThanOrEqual(5);
     /* Each entry is { pattern, flags } — enough to surface in /health
@@ -45,8 +48,8 @@ describe("fast-path: map of <place>", () => {
   ];
 
   for (const [query, expectPlace] of positives) {
-    it(`matches "${query}" → maps search for "${expectPlace}"`, () => {
-      const r = tryFastPath(query);
+    it(`matches "${query}" → maps search for "${expectPlace}"`, async () => {
+      const r = await tryFastPath(query);
       expect(r).not.toBeNull();
       expect(r.toolCall?.name).toBe("open_url");
       expect(r.toolCall.args.url).toContain(encodeURIComponent(expectPlace));
@@ -64,8 +67,8 @@ describe("fast-path: map of <place>", () => {
   ];
 
   for (const query of negatives) {
-    it(`falls through "${query}" to the LLM`, () => {
-      const r = tryFastPath(query);
+    it(`falls through "${query}" to the LLM`, async () => {
+      const r = await tryFastPath(query);
       /* Either null (no handler claimed it) OR a non-map handler claimed
        * it — both are correct. The wrong outcome is a map open_url with
        * a bogus place. */
@@ -95,8 +98,8 @@ describe("fast-path: time / date queries", () => {
     "what time is it now",
   ];
   for (const q of positives) {
-    it(`answers "${q}" without a tool call`, () => {
-      const r = tryFastPath(q);
+    it(`answers "${q}" without a tool call`, async () => {
+      const r = await tryFastPath(q);
       expect(r).not.toBeNull();
       expect(r.reply).toBeTruthy();
       /* No tool call expected — fast-path generates the time string locally. */
@@ -110,42 +113,42 @@ describe("fast-path: time / date queries", () => {
     "what's the time in tokyo",        // foreign tz reasoning
   ];
   for (const q of negatives) {
-    it(`falls through "${q}" to the LLM`, () => {
-      expect(tryFastPath(q)).toBeNull();
+    it(`falls through "${q}" to the LLM`, async () => {
+      expect(await tryFastPath(q)).toBeNull();
     });
   }
 });
 
 describe("fast-path: timer commands", () => {
   /* Pattern requires NUMBER + UNIT before the optional "timer" word. */
-  it("matches \"set a 5 minute timer\"", () => {
-    const r = tryFastPath("set a 5 minute timer");
+  it("matches \"set a 5 minute timer\"", async () => {
+    const r = await tryFastPath("set a 5 minute timer");
     expect(r).not.toBeNull();
     expect(r.toolCall?.name).toBe("set_timer");
     expect(r.toolCall.args).toMatchObject({ minutes: 5 });
   });
-  it("matches \"set 10 minutes for the chicken\"", () => {
-    const r = tryFastPath("set 10 minutes for the chicken");
+  it("matches \"set 10 minutes for the chicken\"", async () => {
+    const r = await tryFastPath("set 10 minutes for the chicken");
     expect(r).not.toBeNull();
     expect(r.toolCall?.name).toBe("set_timer");
     expect(r.toolCall.args.minutes).toBe(10);
     expect(r.toolCall.args.label).toContain("chicken");
   });
-  it("converts hours to minutes", () => {
-    const r = tryFastPath("set a 1 hour timer");
+  it("converts hours to minutes", async () => {
+    const r = await tryFastPath("set a 1 hour timer");
     expect(r).not.toBeNull();
     expect(r.toolCall.args.minutes).toBe(60);
   });
 
   /* Second timer shape: "timer" word BEFORE the number. */
-  it('matches "set timer for 10 minutes"', () => {
-    const r = tryFastPath("set timer for 10 minutes");
+  it('matches "set timer for 10 minutes"', async () => {
+    const r = await tryFastPath("set timer for 10 minutes");
     expect(r).not.toBeNull();
     expect(r.toolCall?.name).toBe("set_timer");
     expect(r.toolCall.args.minutes).toBe(10);
   });
-  it('matches "set a timer for 5 minutes for the rice"', () => {
-    const r = tryFastPath("set a timer for 5 minutes for the rice");
+  it('matches "set a timer for 5 minutes for the rice"', async () => {
+    const r = await tryFastPath("set a timer for 5 minutes for the rice");
     expect(r).not.toBeNull();
     expect(r.toolCall?.name).toBe("set_timer");
     expect(r.toolCall.args.minutes).toBe(5);
@@ -174,8 +177,8 @@ describe("fast-path: sleep / wake-down", () => {
     "that is all",
   ];
   for (const q of positives) {
-    it(`matches "${q}" → enter_sleep_mode`, () => {
-      const r = tryFastPath(q);
+    it(`matches "${q}" → enter_sleep_mode`, async () => {
+      const r = await tryFastPath(q);
       expect(r).not.toBeNull();
       expect(r.toolCall?.name).toBe("enter_sleep_mode");
     });
@@ -202,8 +205,8 @@ describe("fast-path: 'what can you do' capability tour", () => {
     "so what can you do",
   ];
   for (const q of positives) {
-    it(`hits the capability tour for "${q}"`, () => {
-      const r = tryFastPath(q);
+    it(`hits the capability tour for "${q}"`, async () => {
+      const r = await tryFastPath(q);
       expect(r).not.toBeNull();
       expect(r.reply).toBeTruthy();
       expect(r.toolCall).toBeFalsy();
@@ -222,8 +225,8 @@ describe("fast-path: 'what can you do' capability tour", () => {
     "tell me what you can do to help me edit",
   ];
   for (const q of negatives) {
-    it(`falls through "${q}" to the LLM`, () => {
-      expect(tryFastPath(q)).toBeNull();
+    it(`falls through "${q}" to the LLM`, async () => {
+      expect(await tryFastPath(q)).toBeNull();
     });
   }
 });
@@ -231,8 +234,8 @@ describe("fast-path: 'what can you do' capability tour", () => {
 describe("fast-path: greetings + acknowledgements", () => {
   const greetings = ["hi", "hello", "hey", "good morning", "morning"];
   for (const q of greetings) {
-    it(`acknowledges "${q}"`, () => {
-      const r = tryFastPath(q);
+    it(`acknowledges "${q}"`, async () => {
+      const r = await tryFastPath(q);
       expect(r).not.toBeNull();
       expect(r.reply).toBeTruthy();
       expect(r.toolCall).toBeFalsy();
@@ -241,8 +244,8 @@ describe("fast-path: greetings + acknowledgements", () => {
 
   /* Bare yes / no in isolation = no-op acknowledgement, not an inbox follow-up
    * (those go through a different path inside voice.js). */
-  it("answers bare \"yes\" with a brief acknowledgement", () => {
-    const r = tryFastPath("yes");
+  it("answers bare \"yes\" with a brief acknowledgement", async () => {
+    const r = await tryFastPath("yes");
     expect(r).not.toBeNull();
     expect(r.reply).toBeTruthy();
     expect(r.toolCall).toBeFalsy();
@@ -250,16 +253,16 @@ describe("fast-path: greetings + acknowledgements", () => {
 });
 
 describe("fast-path: empty + nonsense input", () => {
-  it("returns null for empty string", () => {
-    expect(tryFastPath("")).toBeNull();
+  it("returns null for empty string", async () => {
+    expect(await tryFastPath("")).toBeNull();
   });
-  it("returns null for whitespace", () => {
-    expect(tryFastPath("   ")).toBeNull();
+  it("returns null for whitespace", async () => {
+    expect(await tryFastPath("   ")).toBeNull();
   });
-  it("strips leading filler 'um/uh/hey,' and re-tries the patterns", () => {
+  it("strips leading filler 'um/uh/hey,' and re-tries the patterns", async () => {
     /* "um, what time is it" should still match the time pattern after
      * the leading-filler strip. */
-    const r = tryFastPath("um, what time is it");
+    const r = await tryFastPath("um, what time is it");
     expect(r).not.toBeNull();
     expect(r.reply).toBeTruthy();
   });

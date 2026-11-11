@@ -52,6 +52,7 @@ stop_services() {
     pids=$(lsof -ti ":$port" 2>/dev/null || true)
     if [[ -n "$pids" ]]; then
       echo "[Jarvis] killing :${port} (pid=${pids})"
+      # shellcheck disable=SC2086  # Why: lsof/pgrep print one pid per line; each must be its own argument
       kill -TERM $pids 2>/dev/null || true
       killed_any=1
     fi
@@ -60,6 +61,7 @@ stop_services() {
   sleep 1
   for port in 8765 8766 8767 8768; do
     pids=$(lsof -ti ":$port" 2>/dev/null || true)
+    # shellcheck disable=SC2086  # Why: lsof/pgrep print one pid per line; each must be its own argument
     [[ -n "$pids" ]] && kill -KILL $pids 2>/dev/null || true
   done
 
@@ -71,6 +73,7 @@ stop_services() {
   hud_pids=$(pgrep -f -- "--app=${URL}" 2>/dev/null || true)
   if [[ -n "$hud_pids" ]]; then
     echo "[Jarvis] closing HUD Chrome window (pid=${hud_pids})"
+    # shellcheck disable=SC2086  # Why: lsof/pgrep print one pid per line; each must be its own argument
     kill -TERM $hud_pids 2>/dev/null || true
     killed_any=1
   fi
@@ -101,7 +104,7 @@ start_if_free() {
   if lsof -i ":${port}" >/dev/null 2>&1; then
     echo "[Jarvis] ${name} already running on :${port}"
   else
-    "$@" >/tmp/jarvis-${name}.log 2>&1 &
+    "$@" >"/tmp/jarvis-${name}.log" 2>&1 &
     echo "[Jarvis] ${name} started on :${port} (pid=$!)"
   fi
 }
@@ -114,14 +117,13 @@ start_if_free() {
 # silently, then retry. Only triggers when the binding is actually broken.
 heal_bridge_if_native_binding_mismatched() {
   # Wait briefly for the bridge to either bind :8766 or crash.
-  for i in {1..6}; do
+  for _ in {1..6}; do
     sleep 1
     lsof -i ":8766" >/dev/null 2>&1 && return 0
   done
   if grep -q "NODE_MODULE_VERSION\|ERR_DLOPEN_FAILED\|better-sqlite3" /tmp/jarvis-bridge.log 2>/dev/null; then
     echo "[Jarvis] native binding ABI mismatch detected — auto-rebuilding (one-time, ~30s) ..."
-    (cd "$HERE" && npm rebuild better-sqlite3 --silent) >/tmp/jarvis-rebuild.log 2>&1
-    if [[ $? -eq 0 ]]; then
+    if (cd "$HERE" && npm rebuild better-sqlite3 --silent) >/tmp/jarvis-rebuild.log 2>&1; then
       echo "[Jarvis] rebuild ok — retrying bridge"
       bash -c "cd '$HERE' && node bridge/server.mjs" >/tmp/jarvis-bridge.log 2>&1 &
       echo "[Jarvis] bridge retry pid=$!"
@@ -168,6 +170,7 @@ MIC_FLAGS="--auto-accept-camera-and-microphone-capture --enable-features=Autopla
 MODE="${1:-app}"
 # Why: use the main Chrome profile so mic permission + saved iPhone mic + localStorage carry over.
 # A dedicated --user-data-dir was creating a fresh profile each time and losing the device choice.
+# shellcheck disable=SC2086  # Why: MIC_FLAGS is two Chrome flags and must split into two arguments
 case "$MODE" in
   kiosk) "$CHROME" --kiosk "$URL" $MIC_FLAGS >/dev/null 2>&1 & ;;
   app|*) "$CHROME" --app="$URL" --window-size=1600,1000 $MIC_FLAGS >/dev/null 2>&1 & ;;
