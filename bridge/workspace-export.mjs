@@ -56,9 +56,12 @@ function _toJsonl(rows) {
  *  + supports xattr stripping, so the bundle stays portable. */
 async function _tarDirectoryGzip(srcDir, outPath) {
   return new Promise((resolve, reject) => {
+    // Why only on macOS: --no-mac-metadata is a BSD tar flag (keeps xattrs and
+    // ._ files out of the bundle); GNU tar on Linux (Docker, CI) rejects it,
+    // and has no mac metadata to strip anyway
     const args = [
       "-czf", outPath,
-      "--no-mac-metadata",
+      ...(process.platform === "darwin" ? ["--no-mac-metadata"] : []),
       "-C", srcDir,
       ".",
     ];

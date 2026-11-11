@@ -12,6 +12,9 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+// Why: memory.mjs owns the schema (facts, conversation_turns, ...) and creates it
+// on import; on a fresh checkout (CI) data/memory.db has no tables until it runs
+import "../bridge/memory.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(HERE, "..", "data", "memory.db");

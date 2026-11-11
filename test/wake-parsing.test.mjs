@@ -102,7 +102,8 @@ describe("WakeParse.extractQuery", () => {
     expect(WakeParse.extractQuery("jarvis can you check the weather")).toBe("check the weather");
   });
   it("handles trailing punctuation in wake variants", () => {
-    expect(WakeParse.extractQuery("hey jarvis, what's the weather")).toBe(", what's the weather");
+    // Why: extractQuery now strips the comma a wake word leaves behind (its "defence-in-depth" step)
+    expect(WakeParse.extractQuery("hey jarvis, what's the weather")).toBe("what's the weather");
   });
   it("returns empty when input is just the wake word", () => {
     expect(WakeParse.extractQuery("jarvis")).toBe("");

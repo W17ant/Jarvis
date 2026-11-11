@@ -19,7 +19,7 @@
 
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$HERE"
+cd "$HERE" || exit 1
 
 # Source Homebrew's shellenv so brew-installed tools (node/npm/ollama/ffmpeg)
 # are reliably on PATH. When this script runs from a non-login shell or via
@@ -90,7 +90,7 @@ if [[ -f "$LOCK_FILE" ]]; then
   fi
   # Peek at the upstream brand without merging — refuses if it differs.
   git fetch --quiet 2>/dev/null || true
-  UPSTREAM_REF="$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo '')"
+  UPSTREAM_REF="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo '')"
   if [[ -n "$UPSTREAM_REF" ]]; then
     UPSTREAM_BRAND=$(git show "$UPSTREAM_REF:config/brand.json" 2>/dev/null \
       | node -e "let s=''; process.stdin.on('data',d=>s+=d); process.stdin.on('end',()=>{ try{ console.log(JSON.parse(s).agent.name||''); }catch{} });" 2>/dev/null || echo '')
@@ -137,11 +137,11 @@ step "git pull"
 BEFORE=$(git rev-parse HEAD)
 if [[ $CHECK_ONLY -eq 1 ]]; then
   git fetch --quiet
-  AFTER=$(git rev-parse @{u} 2>/dev/null || echo "$BEFORE")
+  AFTER=$(git rev-parse '@{u}' 2>/dev/null || echo "$BEFORE")
   if [[ "$BEFORE" == "$AFTER" ]]; then
     ok "already up to date"
   else
-    warn "$(git log --oneline ${BEFORE}..${AFTER} | wc -l | tr -d ' ') commits available"
+    warn "$(git log --oneline "${BEFORE}..${AFTER}" | wc -l | tr -d ' ') commits available"
     git log --oneline "${BEFORE}..${AFTER}" | head -10
   fi
 else
@@ -239,7 +239,7 @@ if [[ -d "/Applications/Ollama.app" ]]; then
       # Wait for the daemon to actually exit before relaunching — otherwise the
       # new instance crashes on a still-bound :11434 and the operator sees a
       # silently dead Ollama.
-      for i in {1..10}; do
+      for _ in {1..10}; do
         sleep 0.5
         pgrep -fq "Ollama Helper\|Ollama\.app/Contents/MacOS/Ollama" || break
       done
@@ -250,7 +250,7 @@ if [[ -d "/Applications/Ollama.app" ]]; then
     open -a Ollama
     # Wait for :11434 to come back so the next step (services restart) doesn't
     # race against an empty Ollama state.
-    for i in {1..20}; do
+    for _ in {1..20}; do
       sleep 0.5
       curl -fsS -m 1 http://localhost:11434/api/tags >/dev/null 2>&1 && break
     done
